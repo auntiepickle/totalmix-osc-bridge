@@ -3,8 +3,9 @@ import socket
 import struct
 import time
 from dotenv import load_dotenv
+import paho.mqtt.client as mqtt   # ← This line was missing
 
-# Load .env file if it exists
+# Load .env file
 load_dotenv()
 
 # ================== CONFIGURATION ==================
@@ -70,7 +71,6 @@ client.loop_start()
 
 print("TotalMix OSC Bridge started successfully")
 print(f"OSC Target → {OSC_IP}:{OSC_PORT}")
-print(f"MQTT Topics → Workspace: {MQTT_TOPIC_WORKSPACE} | Snapshot: {MQTT_TOPIC_SNAPSHOT}")
 
 while True:
     time.sleep(60)
