@@ -4,7 +4,8 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir \
     paho-mqtt==2.1.0 \
-    python-osc==1.8.1
+    python-osc==1.8.1 \
+    python-dotenv==1.0.1
 
 COPY bridge.py .
 
