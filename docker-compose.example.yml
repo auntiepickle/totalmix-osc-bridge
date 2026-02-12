@@ -1,0 +1,41 @@
+# ================================================
+# TotalMix OSC Bridge - Example docker-compose
+# Copy & paste the "totalmix-osc-bridge" service into your main compose file
+# ================================================
+
+version: '3.9'
+
+services:
+  totalmix-osc-bridge:
+    build:
+      context: https://github.com/auntiepickle/totalmix-osc-bridge.git
+      # You can pin to a specific commit/tag for stability:
+      # context: https://github.com/auntiepickle/totalmix-osc-bridge.git#v1.0.0
+
+    container_name: totalmix-osc-bridge
+    restart: unless-stopped
+
+    # Best practice: Use .env file (recommended)
+    env_file:
+      - /path/to/your/totalmix-osc-bridge/.env     # ← Change this path
+
+    # Alternative: Inline environment (less secure)
+    # environment:
+    #   - OSC_IP=192.168.1.50
+    #   - MQTT_USER=your_mqtt_user
+    #   - MQTT_PASS=your_mqtt_password
+
+    depends_on:
+      - mosquitto
+
+    # If your mosquitto is on a different network, add:
+    # networks:
+    #   - mqtt_net
+
+# ================================================
+# Example of your existing mosquitto for reference
+# ================================================
+#   mosquitto:
+#     image: eclipse-mosquitto
+#     container_name: mosquitto
+#     ...
