@@ -3,7 +3,7 @@ import socket
 import struct
 import time
 from dotenv import load_dotenv
-import paho.mqtt.client as mqtt   # ← This line was missing
+import paho.mqtt.client as mqtt
 
 # Load .env file
 load_dotenv()
@@ -38,10 +38,13 @@ def send_osc(address: str, value: float = 1.0):
     except Exception as e:
         print(f"OSC send error: {e}")
 
-def on_connect(client, userdata, flags, rc):
-    print(f"Connected to MQTT broker: {MQTT_BROKER}")
-    client.subscribe(MQTT_TOPIC_WORKSPACE)
-    client.subscribe(MQTT_TOPIC_SNAPSHOT)
+def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code == 0:
+        print(f"Connected to MQTT broker: {MQTT_BROKER}")
+        client.subscribe(MQTT_TOPIC_WORKSPACE)
+        client.subscribe(MQTT_TOPIC_SNAPSHOT)
+    else:
+        print(f"Failed to connect to MQTT, reason code: {reason_code}")
 
 def on_message(client, userdata, msg):
     try:
@@ -59,8 +62,8 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print(f"Message handling error: {e}")
 
-# Start MQTT client
-client = mqtt.Client()
+# Start MQTT client (new callback API)
+client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 if MQTT_USER and MQTT_PASS:
     client.username_pw_set(MQTT_USER, MQTT_PASS)
 
