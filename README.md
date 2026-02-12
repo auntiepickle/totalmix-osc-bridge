@@ -15,3 +15,9 @@ Allows Home Assistant (or any MQTT client) to control TotalMix workspaces, snaps
 
 ## Environment Variables
 See `.env.example`
+
+## Docker Compose Integration
+
+Copy the `totalmix-osc-bridge` service from `docker-compose.example.yml` into your main compose file.
+
+**Recommended:** Use a `.env` file (see `.env.example`) and reference it with `env_file:`.
