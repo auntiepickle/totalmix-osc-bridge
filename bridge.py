@@ -7,6 +7,7 @@ import paho.mqtt.client as mqtt
 
 load_dotenv()
 
+# ====================== CONFIG ======================
 OSC_IP = os.getenv('OSC_IP')
 OSC_PORT = int(os.getenv('OSC_PORT', 7001))
 MQTT_BROKER = os.getenv('MQTT_BROKER', 'mosquitto')
@@ -14,11 +15,11 @@ MQTT_PORT = int(os.getenv('MQTT_PORT', 1883))
 MQTT_USER = os.getenv('MQTT_USER')
 MQTT_PASS = os.getenv('MQTT_PASS')
 
-print("=== BRIDGE STARTED ===")
-print(f"OSC Target: {OSC_IP}:{OSC_PORT}")
-print(f"MQTT Broker: {MQTT_BROKER}:{MQTT_PORT}")
-print(f"MQTT User: {MQTT_USER}")
+print("=== TOTALMIX OSC BRIDGE STARTED ===")
+print(f"OSC Target → {OSC_IP}:{OSC_PORT}")
+print(f"MQTT Broker → {MQTT_BROKER}:{MQTT_PORT} | User: {MQTT_USER}")
 
+# ====================== OSC SENDER ======================
 def send_osc(address, value=1.0):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -32,32 +33,33 @@ def send_osc(address, value=1.0):
     except Exception as e:
         print(f"OSC ERROR: {e}")
 
+# ====================== MQTT HANDLER ======================
 def on_connect(client, userdata, flags, reason_code, properties):
-    print(f"MQTT CONNECT RESULT: {reason_code} (0 = success)")
-    if reason_code == 0:
-        client.subscribe("totalmix/#")
-        print("SUBSCRIBED to totalmix/#")
+    print(f"MQTT Connected (code {reason_code})")
+    client.subscribe("totalmix/#")
+    print("Subscribed to totalmix/#")
 
 def on_message(client, userdata, msg):
     payload = msg.payload.decode().strip()
-    print(f"RECEIVED MQTT → {msg.topic} | {payload}")
+    print(f"MQTT RECEIVED → {msg.topic} | {payload}")
 
     try:
         if msg.topic == "totalmix/workspace":
             ws = int(payload)
             if 1 <= ws <= 30:
                 send_osc("/loadQuickWorkspace", ws)
-                print(f"→ Triggered Workspace {ws}")
+                print(f"→ LOADED WORKSPACE {ws}")
+        
         elif msg.topic == "totalmix/snapshot":
             snap = int(payload)
             if 1 <= snap <= 8:
                 slot = 9 - snap
                 send_osc(f"/3/snapshots/{slot}/1")
-                print(f"→ Triggered Snapshot {snap}")
+                print(f"→ LOADED SNAPSHOT {snap}")
     except Exception as e:
-        print(f"Message handling error: {e}")
+        print(f"Error processing message: {e}")
 
-# MQTT setup
+# ====================== START MQTT ======================
 client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
 client.on_connect = on_connect
@@ -65,6 +67,6 @@ client.on_message = on_message
 client.connect(MQTT_BROKER, MQTT_PORT, 60)
 client.loop_start()
 
-print("Bridge is now listening...")
+print("Bridge is running and listening...")
 while True:
     time.sleep(60)
