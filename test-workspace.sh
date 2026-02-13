@@ -9,7 +9,7 @@ set +a
 
 # Redact password automatically
 if [ -n "$MQTT_PASS" ]; then
-  REDACTED_PASS="${MQTT_PASS:0:4}****"
+  REDACTED_PASS="${MQTT_PASS:0:2}****"
 else
   REDACTED_PASS="EMPTY"
 fi
