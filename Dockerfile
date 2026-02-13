@@ -1,12 +1,10 @@
 FROM python:3.12-slim
 
+RUN apt-get update && apt-get install -y libasound2-dev && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir paho-mqtt
+
 WORKDIR /app
-
-RUN pip install --no-cache-dir \
-    paho-mqtt==2.1.0 \
-    python-osc==1.8.1 \
-    python-dotenv==1.0.1
-
 COPY bridge.py .
 
-CMD ["python", "bridge.py"]
+# ← THIS IS THE IMPORTANT LINE
+CMD ["python3", "-u", "bridge.py"]

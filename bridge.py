@@ -4,7 +4,8 @@ import struct
 import time
 import paho.mqtt.client as mqtt
 
-# ====================== CONFIG FROM DOCKER ENV ======================
+print("=== BRIDGE STARTING ===")
+
 OSC_IP = os.getenv('OSC_IP')
 OSC_PORT = int(os.getenv('OSC_PORT', 7001))
 MQTT_BROKER = os.getenv('MQTT_BROKER', 'mosquitto')
@@ -12,61 +13,53 @@ MQTT_PORT = int(os.getenv('MQTT_PORT', 1883))
 MQTT_USER = os.getenv('MQTT_USER')
 MQTT_PASS = os.getenv('MQTT_PASS')
 
-print("=== TOTALMIX OSC BRIDGE STARTED ===")
-print(f"OSC Target → {OSC_IP}:{OSC_PORT}")
-print(f"MQTT Broker → {MQTT_BROKER}:{MQTT_PORT} | User: {MQTT_USER}")
+print(f"OSC → {OSC_IP}:{OSC_PORT}")
+print(f"MQTT → {MQTT_BROKER}:{MQTT_PORT} (user: {MQTT_USER})")
 
-if not all([OSC_IP, MQTT_USER, MQTT_PASS]):
-    print("ERROR: Missing required env vars (OSC_IP, MQTT_USER, MQTT_PASS)")
+if not OSC_IP or not MQTT_USER or not MQTT_PASS:
+    print("ERROR: Missing env vars!")
     exit(1)
 
-# ====================== OSC SENDER ======================
 def send_osc(address, value=1.0):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         addr_padded = address + '\0' * ((4 - len(address) % 4) % 4)
-        type_tag = ' ,f\0\0'
-        value_bytes = struct.pack('>f', float(value))
-        message = addr_padded.encode() + type_tag.encode() + value_bytes
-        sock.sendto(message, (OSC_IP, OSC_PORT))
+        msg = addr_padded.encode() + b',f\0\0' + struct.pack('>f', float(value))
+        sock.sendto(msg, (OSC_IP, OSC_PORT))
         print(f"OSC SENT → {address} = {value}")
-        sock.close()
     except Exception as e:
-        print(f"OSC ERROR: {e}")
+        print(f"OSC FAIL: {e}")
 
-# ====================== MQTT ======================
-def on_connect(client, userdata, flags, reason_code, properties):
-    print(f"MQTT Connected (code {reason_code})")
+def on_connect(client, userdata, flags, rc, properties=None):
+    print(f"MQTT CONNECTED (code {rc})")
     client.subscribe("totalmix/#")
     print("Subscribed to totalmix/#")
 
 def on_message(client, userdata, msg):
     payload = msg.payload.decode().strip()
-    print(f"MQTT RECEIVED → {msg.topic} | {payload}")
-
+    print(f"MQTT IN → {msg.topic} | {payload}")
     try:
         if msg.topic == "totalmix/workspace":
             ws = int(payload)
-            if 1 <= ws <= 30:
-                send_osc("/loadQuickWorkspace", ws)
-                print(f"→ LOADED WORKSPACE {ws}")
+            send_osc("/loadQuickWorkspace", ws)
+            print(f"→ WORKSPACE {ws} TRIGGERED")
         elif msg.topic == "totalmix/snapshot":
             snap = int(payload)
-            if 1 <= snap <= 8:
-                slot = 9 - snap
-                send_osc(f"/3/snapshots/{slot}/1")
-                print(f"→ LOADED SNAPSHOT {snap}")
+            slot = 9 - snap
+            send_osc(f"/3/snapshots/{slot}/1")
+            print(f"→ SNAPSHOT {snap} TRIGGERED")
     except Exception as e:
-        print(f"Message error: {e}")
+        print(f"Handler error: {e}")
 
-# Start MQTT
 client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
 client.on_connect = on_connect
 client.on_message = on_message
+
+print("Connecting to MQTT...")
 client.connect(MQTT_BROKER, MQTT_PORT, 60)
 client.loop_start()
 
-print("Bridge is running and listening...")
+print("Bridge is now running...")
 while True:
-    time.sleep(60)
+    time.sleep(30)
