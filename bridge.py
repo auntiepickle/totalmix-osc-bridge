@@ -7,40 +7,21 @@ import paho.mqtt.client as mqtt
 
 load_dotenv()
 
-# ================== CONFIG ==================
 OSC_IP = os.getenv('OSC_IP')
 OSC_PORT = int(os.getenv('OSC_PORT', 7001))
 
 MQTT_BROKER = os.getenv('MQTT_BROKER', 'mosquitto')
 MQTT_PORT = int(os.getenv('MQTT_PORT', 1883))
-MQTT_USER = os.getenv('MQTT_USER', 'mosquitto')
-
-# Read password from mosquitto's pwfile
-PWFILE = "/mosquitto/config/pwfile"
-
-def get_password(username):
-    try:
-        with open(PWFILE, 'r') as f:
-            for line in f:
-                if line.startswith(username + ':'):
-                    return line.split(':', 1)[1].strip()
-        raise ValueError(f"User '{username}' not found in {PWFILE}")
-    except Exception as e:
-        print(f"Failed to read password from {PWFILE}: {e}")
-        return None
-
-MQTT_PASS = get_password(MQTT_USER)
-
-if not MQTT_PASS:
-    raise ValueError("Could not load MQTT password from pwfile")
+MQTT_USER = os.getenv('MQTT_USER')
+MQTT_PASS = os.getenv('MQTT_PASS')
 
 MQTT_TOPIC_WORKSPACE = os.getenv('MQTT_TOPIC_WORKSPACE', 'totalmix/workspace')
 MQTT_TOPIC_SNAPSHOT  = os.getenv('MQTT_TOPIC_SNAPSHOT',  'totalmix/snapshot')
 
 SNAPSHOT_SLOTS = {1:8, 2:7, 3:6, 4:5, 5:4, 6:3, 7:2, 8:1}
 
-print(f"Loaded MQTT user: {MQTT_USER}")
 print(f"OSC Target: {OSC_IP}:{OSC_PORT}")
+print(f"MQTT User: {MQTT_USER}")
 
 def send_osc(address: str, value: float = 1.0):
     try:
