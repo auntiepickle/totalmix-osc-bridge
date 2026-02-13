@@ -16,7 +16,7 @@ MQTT_PASS = os.getenv('MQTT_PASS')
 
 print("=== BRIDGE STARTED ===")
 print(f"OSC Target: {OSC_IP}:{OSC_PORT}")
-print(f"MQTT Broker: {MQTT_BROKER}")
+print(f"MQTT Broker: {MQTT_BROKER}:{MQTT_PORT}")
 print(f"MQTT User: {MQTT_USER}")
 
 def send_osc(address, value=1.0):
@@ -27,20 +27,37 @@ def send_osc(address, value=1.0):
         value_bytes = struct.pack('>f', float(value))
         message = addr_padded.encode() + type_tag.encode() + value_bytes
         sock.sendto(message, (OSC_IP, OSC_PORT))
-        print(f"OSC SENT: {address} = {value}")
+        print(f"OSC SENT → {address} = {value}")
         sock.close()
     except Exception as e:
         print(f"OSC ERROR: {e}")
 
 def on_connect(client, userdata, flags, reason_code, properties):
-    print(f"CONNECT RESULT: {reason_code} (0 = success)")
+    print(f"MQTT CONNECT RESULT: {reason_code} (0 = success)")
     if reason_code == 0:
         client.subscribe("totalmix/#")
-        print("SUBSCRIBED to totalmix/# (all topics)")
+        print("SUBSCRIBED to totalmix/#")
 
 def on_message(client, userdata, msg):
-    print(f"RECEIVED MQTT → Topic: {msg.topic} | Payload: {msg.payload.decode()}")
+    payload = msg.payload.decode().strip()
+    print(f"RECEIVED MQTT → {msg.topic} | {payload}")
 
+    try:
+        if msg.topic == "totalmix/workspace":
+            ws = int(payload)
+            if 1 <= ws <= 30:
+                send_osc("/loadQuickWorkspace", ws)
+                print(f"→ Triggered Workspace {ws}")
+        elif msg.topic == "totalmix/snapshot":
+            snap = int(payload)
+            if 1 <= snap <= 8:
+                slot = 9 - snap
+                send_osc(f"/3/snapshots/{slot}/1")
+                print(f"→ Triggered Snapshot {snap}")
+    except Exception as e:
+        print(f"Message handling error: {e}")
+
+# MQTT setup
 client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
 client.on_connect = on_connect
