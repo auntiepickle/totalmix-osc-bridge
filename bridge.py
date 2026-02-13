@@ -16,9 +16,8 @@ print("=== TOTALMIX OSC BRIDGE STARTED ===")
 print(f"OSC Target → {OSC_IP}:{OSC_PORT}")
 print(f"MQTT Broker → {MQTT_BROKER}:{MQTT_PORT} | User: {MQTT_USER}")
 
-if not OSC_IP or not MQTT_USER or not MQTT_PASS:
-    print("ERROR: Missing required environment variables!")
-    print("Check your .env file and docker-compose.yml")
+if not all([OSC_IP, MQTT_USER, MQTT_PASS]):
+    print("ERROR: Missing required env vars (OSC_IP, MQTT_USER, MQTT_PASS)")
     exit(1)
 
 # ====================== OSC SENDER ======================
