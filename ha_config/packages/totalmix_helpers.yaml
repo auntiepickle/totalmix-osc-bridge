@@ -1,0 +1,17 @@
+totalmix:
+  input_select:
+    totalmix_workspace:
+      name: "TotalMix Workspace"
+      icon: mdi:view-grid
+      options:
+        - "Loading workspaces..."
+
+  input_button:
+    refresh_totalmix_workspaces:
+      name: "Refresh TotalMix Workspaces"
+      icon: mdi:refresh
+
+  input_text:
+    totalmix_workspace_map:
+      name: "TotalMix Workspace Map (internal)"
+      mode: text

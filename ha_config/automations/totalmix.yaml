@@ -1,0 +1,50 @@
+- id: update_totalmix_workspaces
+  alias: "Update TotalMix Workspace List from Bridge"
+  trigger:
+    - platform: mqtt
+      topic: "totalmix/workspaces"
+      encoding: ''
+  action:
+    - variables:
+        full_list: "{{ trigger.payload_json }}"
+        clean_options: "{{ full_list | reject('eq', '<Empty>') | reject('eq', '') | list }}"
+        workspace_map: >
+          {% set ns = namespace(map={}) %}
+          {% for i in range(full_list | length) %}
+            {% set name = full_list[i] %}
+            {% if name and name != '<Empty>' %}
+              {% set ns.map = ns.map | combine({name: i + 1}) %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.map | tojson }}
+    - service: input_select.set_options
+      target:
+        entity_id: input_select.totalmix_workspace
+      data:
+        options: "{{ clean_options }}"
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.totalmix_workspace_map
+      data:
+        value: "{{ workspace_map }}"
+
+- id: load_totalmix_workspace
+  alias: "Load Selected TotalMix Workspace"
+  trigger:
+    - platform: state
+      entity_id: input_select.totalmix_workspace
+  action:
+    - variables:
+        selected: "{{ trigger.to_state.state }}"
+        workspace_map: >
+          {% set s = states('input_text.totalmix_workspace_map') %}
+          {% if s in ['unknown', '', None] %}
+            {}
+          {% else %}
+            {{ s | from_json }}
+          {% endif %}
+        index: "{{ workspace_map.get(selected, 1) }}"
+    - service: mqtt.publish
+      data:
+        topic: "totalmix/workspace"
+        payload: "{{ index }}"
