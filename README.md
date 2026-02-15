@@ -127,4 +127,3 @@ totalmix:
 
 **Subscribed by bridge:**
 - `totalmix/workspace` → slot number (1–30)
-```
