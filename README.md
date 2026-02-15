@@ -1,4 +1,3 @@
-```markdown
 # TotalMix OSC Bridge
 
 MQTT ↔ OSC bridge for **RME TotalMix FX**.
