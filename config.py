@@ -40,3 +40,6 @@ WORKSPACE_NAMES = [
     "<Empty>",         # 29
     "<Empty>"          # 30
 ]
+# === OSC MONITOR SETTINGS (for learning addresses) ===
+ENABLE_OSC_MONITOR = os.getenv('ENABLE_OSC_MONITOR', 'False').lower() == 'true'
+OSC_MONITOR_PORT = int(os.getenv('OSC_MONITOR_PORT', '9001'))
