@@ -43,3 +43,9 @@ WORKSPACE_NAMES = [
 # === OSC MONITOR SETTINGS (for learning addresses) ===
 ENABLE_OSC_MONITOR = os.getenv('ENABLE_OSC_MONITOR', 'False').lower() == 'true'
 OSC_MONITOR_PORT = int(os.getenv('OSC_MONITOR_PORT', '9001'))
+# === LOGGING SETTINGS (100 KB limit per file) ===
+BRIDGE_LOG_FILE = os.getenv('BRIDGE_LOG_FILE', 'bridge.log')
+OSC_MONITOR_LOG_FILE = os.getenv('OSC_MONITOR_LOG_FILE', 'osc_monitor.log')
+LOG_MAX_BYTES = 100 * 1024          # 100 KB
+LOG_BACKUP_COUNT = 1                # Keep 1 old file
+OSC_MONITOR_VERBOSE = os.getenv('OSC_MONITOR_VERBOSE', 'True').lower() == 'true'
