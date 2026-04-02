@@ -1,14 +1,12 @@
 import json
-import os
-from config import WORKSPACE_NAMES
+
+# ========================================================
+# LEGACY / FALLBACK ONLY — fully dynamic workspaces now live in mqtt_handler.py
+# ========================================================
 
 def publish_workspaces(client):
-    """Publish full list (for correct indexing) + clean list (for nice dropdown)."""
-    # Full list with <Empty> slots — used for slot numbers
-    client.publish("totalmix/workspaces", json.dumps(WORKSPACE_NAMES), retain=True, qos=1)
-    
-    # Clean list without <Empty> — used for the HA dropdown
-    clean_names = [n for n in WORKSPACE_NAMES if n and n != "<Empty>"]
-    client.publish("totalmix/workspaces_named", json.dumps(clean_names), retain=True, qos=1)
-    
-    print(f"✅ Published {len(WORKSPACE_NAMES)} full slots + {len(clean_names)} named workspaces")
+    """DEPRECATED static publisher — kept only as a safe fallback on first connect.
+    Real workspace list is now published dynamically from ufx2_snapshot_map.json"""
+    print("ℹ️  publish_workspaces called (static fallback) — dynamic publishing is active in mqtt_handler")
+    # No-op because we now use publish_dynamic_workspaces instead
+    # (this prevents the ImportError and keeps old code happy)

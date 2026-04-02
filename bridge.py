@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 logger.info("=== TOTALMIX OSC BRIDGE STARTED ===")
 logger.info(f"OSC → {OSC_IP}:{OSC_PORT}")
-logger.info(f"Loaded {len(WORKSPACE_NAMES)} workspaces")
+logger.info("✅ Workspaces are now FULLY DYNAMIC from ufx2_snapshot_map.json (no static list)")
 logger.info(f"Logs → {BRIDGE_LOG_FILE} (max 100 KB) | OSC: {OSC_MONITOR_LOG_FILE} (max 100 KB)")
 
 # Create MQTT client

@@ -37,6 +37,19 @@ def publish_snapshot_map(client):
         except Exception as e:
             print(f"Error publishing snapshot map: {e}")
 
+def publish_dynamic_workspaces(client):
+    """Publish workspace list dynamically from SNAPSHOT_MAP keys (preserves JSON key order = slot order)"""
+    if not SNAPSHOT_MAP:
+        print("⚠️ No snapshot map loaded yet — skipping dynamic workspaces")
+        return
+    workspace_names = list(SNAPSHOT_MAP.keys())
+    try:
+        client.publish("totalmix/workspaces", json.dumps(workspace_names), retain=True, qos=1)
+        clean_names = [name for name in workspace_names if name and name != "<Empty>"]
+        print(f"✅ Published DYNAMIC workspaces: {len(workspace_names)} total slots, {len(clean_names)} named")
+    except Exception as e:
+        print(f"Error publishing dynamic workspaces: {e}")
+
 def map_watcher(client):
     """Background thread that watches the SMB file and republishes on change"""
     global LAST_MTIME
@@ -45,15 +58,18 @@ def map_watcher(client):
         time.sleep(5)
         if load_snapshot_map():
             publish_snapshot_map(client)
+            publish_dynamic_workspaces(client)   # ← this is what updates the dropdown live
 
 def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc_port):
     def on_connect(client, userdata, flags, rc, properties=None):
         print(f"MQTT CONNECTED (code {rc})")
         client.subscribe("totalmix/#")
         print("Subscribed to totalmix/#")
-        publish_workspaces(client)
-        load_snapshot_map()               # initial load
-        publish_snapshot_map(client)      # initial publish
+        
+        publish_workspaces(client)           # legacy fallback (now safe)
+        load_snapshot_map()                  # initial load
+        publish_snapshot_map(client)         # initial publish
+        publish_dynamic_workspaces(client)   # ← initial dynamic workspaces
 
     def on_message(client, userdata, msg):
         payload = msg.payload.decode().strip()
@@ -80,6 +96,8 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                 global SNAPSHOT_MAP
                 SNAPSHOT_MAP = json.loads(payload)
                 print(f"✅ Snapshot map updated from scraper ({len(SNAPSHOT_MAP)} workspaces)")
+                publish_snapshot_map(client)
+                publish_dynamic_workspaces(client)
 
         except Exception as e:
             print(f"Handler error: {e}")
