@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "note": "Edit the indices after running learn_submixes.py. Indices change based on stereo/mono pairing.",
+  "submixes": {
+    "AES": 0,
+    "AN 7/8": 1,
+    "AN 1/2": 2
+  },
+  "learning_mode": true
+}
