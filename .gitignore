@@ -1,5 +1,6 @@
 *.log
-*.log.1
+*.log.*
 __pycache__/
 *.pyc
 .DS_Store
+*.swp
