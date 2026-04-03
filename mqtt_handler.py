@@ -38,8 +38,8 @@ def publish_snapshot_map(client):
             print(f"Error publishing snapshot map: {e}")
 
 def publish_dynamic_workspaces(client):
-    """Publish workspace list + REAL physical slot indices from the new JSON structure.
-    This kills the off-by-1 bug forever (Empty slots no longer shift positions)."""
+    """Publish workspace list + REAL physical slot indices.
+    NOW SORTED BY SLOT INDEX so HA dropdown always matches TotalMix Quick Select order."""
     if not SNAPSHOT_MAP:
         print("No snapshot map loaded yet — skipping dynamic workspaces")
         return
@@ -55,17 +55,20 @@ def publish_dynamic_workspaces(client):
         if name and name.strip() and name != "<Empty>":
             workspace_list.append({
                 "name": name,
-                "index": int(slot)          # ← this is what TotalMix actually expects
+                "index": int(slot)          # ← authoritative TotalMix slot
             })
+
+    # 🔥 THIS IS THE FIX: sort by real slot number (ascending)
+    workspace_list.sort(key=lambda x: x["index"])
 
     try:
         payload = json.dumps(workspace_list)
         client.publish("totalmix/workspaces", payload, retain=True, qos=1)
-        print(f"✅ Published DYNAMIC workspaces with real slots: {len(workspace_list)} named slots")
-        print(f"   First few: {workspace_list[:3]}")  # helpful debug
+        print(f"✅ Published DYNAMIC workspaces (SORTED by slot): {len(workspace_list)} named slots")
+        print(f"   Order: {[item['name'] for item in workspace_list[:8]]} ...")  # debug
     except Exception as e:
         print(f"Error publishing dynamic workspaces: {e}")
-
+        
 def map_watcher(client):
     """Background thread that watches the SMB file and republishes on change"""
     global LAST_MTIME
