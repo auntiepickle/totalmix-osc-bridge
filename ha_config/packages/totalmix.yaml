@@ -45,22 +45,15 @@ totalmix:
   automation:
 
     - alias: Update TotalMix Workspace List from Bridge
+      description: "NEW: receives list of dicts with real slot indices (fixes off-by-1 forever)"
       trigger:
         - platform: mqtt
           topic: totalmix/workspaces
       action:
         - variables:
-            full_list: "{{ trigger.payload_json }}"
-            clean_options: "{{ full_list | reject('eq', '<Empty>') | reject('eq', '') | list }}"
-            # FIXED: range() loop counts empty slots correctly (HA-compatible)
-            workspace_map: >
-              {% set ns = namespace(map={}) %}
-              {% for i in range(full_list | length) %}
-                {% set name = full_list[i] %}
-                {% if name is string and name and name != '<Empty>' %}
-                  {% set ns.map = ns.map | combine({name: i + 1}) %}
-                {% endif %}
-              {% endfor %} {{ ns.map | tojson }}
+            workspace_list: "{{ trigger.payload_json | default([]) }}"
+            clean_options: "{{ workspace_list | map(attribute='name') | list }}"
+            workspace_map: "{{ dict((item.name, item.index) for item in workspace_list) | to_json }}"
         - target:
             entity_id: input_select.totalmix_workspace
           data:
@@ -74,13 +67,14 @@ totalmix:
         - data:
             title: TotalMix Workspace Debug - FULL INFO
             message: |
-              Raw full_list ({{ full_list | length }} entries): {{ full_list }}
+              Raw workspace_list ({{ workspace_list | length }} entries): {{ workspace_list }}
               Computed workspace_map: {{ workspace_map }}
               Clean options: {{ clean_options }}
           action: persistent_notification.create
       mode: single
 
     - alias: Load Selected TotalMix Workspace
+      description: "NEW: uses real index from map (no more off-by-1)"
       trigger:
         - platform: state
           entity_id: input_select.totalmix_workspace
@@ -103,7 +97,7 @@ totalmix:
           action: mqtt.publish
       mode: single
 
-    # SNAPSHOT DROPDOWN — unchanged (already working perfectly)
+    # SNAPSHOT DROPDOWN — updated for new nested structure
     - alias: Update Snapshot Dropdown Options
       trigger:
         - platform: state
@@ -117,7 +111,7 @@ totalmix:
             current_ws: "{{ states('input_select.totalmix_workspace') | default('') }}"
             full_map: "{{ state_attr('sensor.totalmix_snapshot_map', 'snapshot_map') | default({}) }}"
             snapshot_options: >
-              {% set d = full_map.get(current_ws, {}) %}
+              {% set d = full_map.get(current_ws, {}).get('snapshots', {}) %}
               {% set ns = namespace(opts=[]) %}
               {% for item in d | dictsort %}
                 {% set ns.opts = ns.opts + [item[1]] %}
@@ -144,7 +138,7 @@ totalmix:
             full_map: "{{ state_attr('sensor.totalmix_snapshot_map', 'snapshot_map') | default({}) }}"
             current_workspace: "{{ states('input_select.totalmix_workspace') }}"
             snapshot_number: >
-              {% set d = full_map.get(current_workspace, {}) %}
+              {% set d = full_map.get(current_workspace, {}).get('snapshots', {}) %}
               {% set ns = namespace(num=1) %}
               {% for k, v in d.items() %}
                 {% if v == selected_snapshot %}
