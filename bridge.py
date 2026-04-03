@@ -26,18 +26,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load your updated channel map (we'll use it more in future steps)
+# Load channel map (non-fatal if missing)
 try:
     with open("ufx2_channel_map.json", "r", encoding="utf-8") as f:
         CHANNEL_MAP = json.load(f)
-    logger.info("✅ Loaded ufx2_channel_map.json (AES + AN 1/2 now available)")
+    logger.info("✅ Loaded ufx2_channel_map.json (AES + AN 1/2 ready)")
+except FileNotFoundError:
+    logger.error("❌ ufx2_channel_map.json not found in project root! (you may have named it channel_map.json)")
+    CHANNEL_MAP = {}
 except Exception as e:
     logger.error(f"Failed to load ufx2_channel_map.json: {e}")
     CHANNEL_MAP = {}
 
-# OSC client pointed at BONE
-osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT)
-logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
+# OSC client (with safety check)
+if OSC_IP and OSC_PORT:
+    osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT)
+    logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
+else:
+    logger.warning("⚠️  OSC_IP is None — check your .env or config.py (should be 192.168.1.61)")
+    osc_client = None
 
 class TotalMixOSCBridge:
     def __init__(self, client, channel_map):
@@ -46,43 +53,48 @@ class TotalMixOSCBridge:
 
     def set_an12_to_aes_send(self, value: float = 0.5):
         """AN 1/2 Hardware Input → AES Hardware Output send (0.0–1.0)
-        This is the exact command pair we just tested live."""
+        Exact commands we proved work in the live test."""
+        if not self.osc_client:
+            logger.error("No OSC client — check OSC_IP in config")
+            return
         try:
             value = max(0.0, min(1.0, float(value)))
-            self.osc_client.send_message("/setSubmix", 1.0)   # select AES submix
-            self.osc_client.send_message("/1/volume1", value) # AN 1/2 send fader
+            self.osc_client.send_message("/setSubmix", 1.0)   # select AES
+            self.osc_client.send_message("/1/volume1", value) # move AN 1/2 send
             logger.info(f"✅ AN 1/2 → AES send set to {value:.4f}")
         except Exception as e:
             logger.error(f"OSC send failed: {e}")
 
-# Instantiate the bridge (ready for use)
+# Instantiate bridge (safe to import now)
 bridge = TotalMixOSCBridge(osc_client, CHANNEL_MAP)
 
-logger.info("=== TOTALMIX OSC BRIDGE STARTED ===")
-logger.info(f"OSC → {OSC_IP}:{OSC_PORT}")
-logger.info("✅ AN 1/2 → AES send control is now LIVE in bridge.set_an12_to_aes_send()")
+logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
+logger.info("✅ bridge.set_an12_to_aes_send(value) is ready (MQTT only starts when you run the full bridge)")
 
-# Create MQTT client
-client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+# === FULL BRIDGE STARTUP ONLY WHEN RUN DIRECTLY ===
+if __name__ == "__main__":
+    logger.info("Starting full bridge with MQTT...")
+    # Create MQTT client
+    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 
-# Setup MQTT (unchanged for this step — we'll wire the new command next)
-setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT)
+    # Setup MQTT
+    setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT)
 
-# Start OSC Monitor if enabled
-if ENABLE_OSC_MONITOR:
-    osc_monitor.start()
-
-# Start MQTT loop
-client.loop_start()
-
-logger.info("Bridge is running... (Ctrl+C or docker compose down to stop)")
-
-try:
-    while True:
-        time.sleep(30)
-except KeyboardInterrupt:
-    logger.info("\nShutting down...")
+    # Start OSC Monitor if enabled
     if ENABLE_OSC_MONITOR:
-        osc_monitor.stop()
-    client.loop_stop()
-    logger.info("Bridge stopped.")
+        osc_monitor.start()
+
+    # Start MQTT loop
+    client.loop_start()
+
+    logger.info("Bridge is running... (Ctrl+C or docker compose down to stop)")
+
+    try:
+        while True:
+            time.sleep(30)
+    except KeyboardInterrupt:
+        logger.info("\nShutting down...")
+        if ENABLE_OSC_MONITOR:
+            osc_monitor.stop()
+        client.loop_stop()
+        logger.info("Bridge stopped.")
