@@ -53,7 +53,12 @@ totalmix:
         - variables:
             workspace_list: "{{ trigger.payload_json | default([]) }}"
             clean_options: "{{ workspace_list | map(attribute='name') | list }}"
-            workspace_map: "{{ dict((item.name, item.index) for item in workspace_list) | to_json }}"
+            workspace_map: >
+              {% set ns = namespace(map={}) %}
+              {% for item in workspace_list %}
+                {% set ns.map = ns.map | combine({item.name: item.index}) %}
+              {% endfor %}
+              {{ ns.map | to_json }}
         - target:
             entity_id: input_select.totalmix_workspace
           data:
