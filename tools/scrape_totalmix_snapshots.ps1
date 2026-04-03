@@ -17,7 +17,7 @@ if ($env:SERVER_SHARE) {
 # END OF CONFIGURATION
 # ========================================================
 
-Write-Host "TotalMix Snapshot Scraper (Grok Home Studio Project - public edition)" -ForegroundColor Cyan
+Write-Host "TotalMix Snapshot Scraper (Grok Home Studio Project - public edition) - WITH SLOT FIX" -ForegroundColor Cyan
 
 # 1. Workspace names — collected in PresetName order (1,2,3...) to match TotalMix UI
 $prefFile = Join-Path $TOTALMIX_FOLDER "rme.totalmix.preferences.xml"
@@ -37,7 +37,7 @@ if (Test-Path $prefFile) {
     Write-Host "Found $($workspaceList.Count) workspaces in UI order: $($workspaceList -join ', ')" -ForegroundColor Green
 }
 
-# 2. Snapshot names per workspace
+# 2. Snapshot names per workspace + real physical slot number (the fix)
 $snapshotMap = @{}
 foreach ($wsName in $workspaceList) {
     $wsNum = $workspaceMap[$wsName]
@@ -55,8 +55,14 @@ foreach ($wsName in $workspaceList) {
     1..8 | ForEach-Object {
         if (-not $snaps.ContainsKey("$_")) { $snaps["$_"] = "Empty" }
     }
-    $snapshotMap[$wsName] = $snaps
-    Write-Host "OK $wsName -> $($snaps.Values -join ', ')" -ForegroundColor Green
+
+    # NEW STRUCTURE: real TotalMix slot + nested snapshots
+    $snapshotMap[$wsName] = @{
+        slot      = $wsNum
+        snapshots = $snaps
+    }
+
+    Write-Host "OK $wsName (slot $wsNum) -> $($snaps.Values -join ', ')" -ForegroundColor Green
 }
 
 # 3. Output JSON + backup + copy to server
@@ -70,7 +76,7 @@ if ($snapshotMap.Count -gt 0) {
 
     try {
         $jsonOutput | Out-File -FilePath $SERVER_SHARE -Encoding utf8 -Force
-        Write-Host "✅ COPIED map to server: $SERVER_SHARE" -ForegroundColor Green
+        Write-Host "✅ COPIED map to server: $SERVER_SHARE (now with real slot numbers!)" -ForegroundColor Green
     } catch {
         Write-Host "❌ COPY FAILED: $($_.Exception.Message)" -ForegroundColor Red
     }
