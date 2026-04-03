@@ -53,14 +53,14 @@ class TotalMixOSCBridge:
 
     def set_an12_to_aes_send(self, value: float = 0.5):
         """AN 1/2 Hardware Input → AES Hardware Output send (0.0–1.0)
-        Exact commands we proved work in the live test."""
+        Now using correct submix index 12."""
         if not self.osc_client:
-            logger.error("No OSC client — check OSC_IP in config")
+            logger.error("No OSC client — check OSC_IP")
             return
         try:
             value = max(0.0, min(1.0, float(value)))
-            self.osc_client.send_message("/setSubmix", 1.0)   # select AES
-            self.osc_client.send_message("/1/volume1", value) # move AN 1/2 send
+            self.osc_client.send_message("/setSubmix", 12.0)   # ← corrected index
+            self.osc_client.send_message("/1/volume1", value)
             logger.info(f"✅ AN 1/2 → AES send set to {value:.4f}")
         except Exception as e:
             logger.error(f"OSC send failed: {e}")
