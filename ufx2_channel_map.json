@@ -1,0 +1,16 @@
+{
+  "submixes": {
+    "AES": {
+      "index": 1,
+      "name": "AES",
+      "sends": {
+        "AN 1/2": {
+          "row": 1,
+          "channel": 1,
+          "osc_address": "/1/volume1",
+          "description": "AN 1/2 send to AES output"
+        }
+      }
+    }
+  }
+}
