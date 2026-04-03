@@ -45,7 +45,7 @@ totalmix:
   automation:
 
     - alias: Update TotalMix Workspace List from Bridge
-      description: "NEW: receives list of dicts with real slot indices (fixes off-by-1 forever)"
+      description: "Receives list of dicts with real slot indices (sorted by slot)"
       trigger:
         - platform: mqtt
           topic: totalmix/workspaces
@@ -69,17 +69,10 @@ totalmix:
           data:
             value: "{{ workspace_map }}"
           action: input_text.set_value
-        - data:
-            title: TotalMix Workspace Debug - FULL INFO
-            message: |
-              Raw workspace_list ({{ workspace_list | length }} entries): {{ workspace_list }}
-              Computed workspace_map: {{ workspace_map }}
-              Clean options: {{ clean_options }}
-          action: persistent_notification.create
       mode: single
 
     - alias: Load Selected TotalMix Workspace
-      description: "NEW: uses real index from map (no more off-by-1)"
+      description: "Sends real slot index to bridge"
       trigger:
         - platform: state
           entity_id: input_select.totalmix_workspace
@@ -91,18 +84,12 @@ totalmix:
               {% if s in ['unknown', '', None] %} {} {% else %} {{ s | from_json }} {% endif %}
             index: "{{ workspace_map.get(selected, 1) }}"
         - data:
-            title: TotalMix Workspace Debug
-            message: |
-              Selected: **{{ selected }}**
-              Slot sent to TotalMix: **{{ index }}**
-          action: persistent_notification.create
-        - data:
             topic: totalmix/workspace
             payload: "{{ index }}"
           action: mqtt.publish
       mode: single
 
-    # SNAPSHOT DROPDOWN — updated for new nested structure
+    # SNAPSHOT DROPDOWN — unchanged (already working perfectly)
     - alias: Update Snapshot Dropdown Options
       trigger:
         - platform: state
@@ -127,10 +114,6 @@ totalmix:
           data:
             options: "{{ snapshot_options }}"
           action: input_select.set_options
-        - data:
-            title: Snapshot Dropdown Debug
-            message: "WS='{{ current_ws }}' | Snapshots found: {{ snapshot_options | length }}  {{ snapshot_options | join(', ') }}"
-          action: persistent_notification.create
       mode: single
 
     - alias: Load Selected TotalMix Snapshot
@@ -151,13 +134,6 @@ totalmix:
                 {% endif %}
               {% endfor %}
               {{ ns.num }}
-        - data:
-            title: TotalMix Snapshot Debug
-            message: |
-              Selected snapshot: **{{ selected_snapshot }}**
-              Workspace: **{{ current_workspace }}**
-              Number sent: **{{ snapshot_number }}**
-          action: persistent_notification.create
         - data:
             topic: totalmix/snapshot
             payload: "{{ snapshot_number }}"
