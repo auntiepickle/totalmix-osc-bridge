@@ -38,15 +38,31 @@ def publish_snapshot_map(client):
             print(f"Error publishing snapshot map: {e}")
 
 def publish_dynamic_workspaces(client):
-    """Publish workspace list dynamically from SNAPSHOT_MAP keys (preserves JSON key order = slot order)"""
+    """Publish workspace list + REAL physical slot indices from the new JSON structure.
+    This kills the off-by-1 bug forever (Empty slots no longer shift positions)."""
     if not SNAPSHOT_MAP:
-        print("⚠️ No snapshot map loaded yet — skipping dynamic workspaces")
+        print("No snapshot map loaded yet — skipping dynamic workspaces")
         return
-    workspace_names = list(SNAPSHOT_MAP.keys())
+
+    workspace_list = []
+    for name, data in SNAPSHOT_MAP.items():
+        if not isinstance(data, dict):
+            continue
+        slot = data.get("slot")
+        if slot is None:
+            print(f"⚠️  Workspace '{name}' missing 'slot' — falling back to list order (temporary)")
+            slot = len(workspace_list) + 1
+        if name and name.strip() and name != "<Empty>":
+            workspace_list.append({
+                "name": name,
+                "index": int(slot)          # ← this is what TotalMix actually expects
+            })
+
     try:
-        client.publish("totalmix/workspaces", json.dumps(workspace_names), retain=True, qos=1)
-        clean_names = [name for name in workspace_names if name and name != "<Empty>"]
-        print(f"✅ Published DYNAMIC workspaces: {len(workspace_names)} total slots, {len(clean_names)} named")
+        payload = json.dumps(workspace_list)
+        client.publish("totalmix/workspaces", payload, retain=True, qos=1)
+        print(f"✅ Published DYNAMIC workspaces with real slots: {len(workspace_list)} named slots")
+        print(f"   First few: {workspace_list[:3]}")  # helpful debug
     except Exception as e:
         print(f"Error publishing dynamic workspaces: {e}")
 
