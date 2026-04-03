@@ -76,9 +76,9 @@ if ($snapshotMap.Count -gt 0) {
 
     try {
         $jsonOutput | Out-File -FilePath $SERVER_SHARE -Encoding utf8 -Force
-        Write-Host "✅ COPIED map to server: $SERVER_SHARE (now with real slot numbers!)" -ForegroundColor Green
+        Write-Host "COPIED map to server: $SERVER_SHARE (now with real slot numbers!)" -ForegroundColor Green
     } catch {
-        Write-Host "❌ COPY FAILED: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "COPY FAILED: $($_.Exception.Message)" -ForegroundColor Red
     }
 } else {
     Write-Output "{}"
