@@ -43,7 +43,6 @@ totalmix:
   # AUTOMATIONS
   # ======================
   automation:
-
     - alias: Update TotalMix Workspace List from Bridge
       description: "Receives list of dicts with real slot indices (sorted by slot)"
       trigger:
@@ -89,8 +88,8 @@ totalmix:
           action: mqtt.publish
       mode: single
 
-    # SNAPSHOT DROPDOWN — unchanged (already working perfectly)
     - alias: Update Snapshot Dropdown Options
+      description: "Rebuilds snapshot dropdown with 'N - Name' format so duplicates are impossible"
       trigger:
         - platform: state
           entity_id: input_select.totalmix_workspace
@@ -105,8 +104,8 @@ totalmix:
             snapshot_options: >
               {% set d = full_map.get(current_ws, {}).get('snapshots', {}) %}
               {% set ns = namespace(opts=[]) %}
-              {% for item in d | dictsort %}
-                {% set ns.opts = ns.opts + [item[1]] %}
+              {% for k, name in d | dictsort %}
+                {% set ns.opts = ns.opts + [(k|string) + ' - ' + name] %}
               {% endfor %}
               {{ ns.opts }}
         - target:
@@ -125,15 +124,7 @@ totalmix:
             selected_snapshot: "{{ trigger.to_state.state }}"
             full_map: "{{ state_attr('sensor.totalmix_snapshot_map', 'snapshot_map') | default({}) }}"
             current_workspace: "{{ states('input_select.totalmix_workspace') }}"
-            snapshot_number: >
-              {% set d = full_map.get(current_workspace, {}).get('snapshots', {}) %}
-              {% set ns = namespace(num=1) %}
-              {% for k, v in d.items() %}
-                {% if v == selected_snapshot %}
-                  {% set ns.num = k | int %}
-                {% endif %}
-              {% endfor %}
-              {{ ns.num }}
+            snapshot_number: "{{ selected_snapshot.split(' - ')[0] | int(default=1) }}"
         - data:
             topic: totalmix/snapshot
             payload: "{{ snapshot_number }}"
