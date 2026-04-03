@@ -1,0 +1,166 @@
+totalmix:
+  # ======================
+  # INPUT HELPERS
+  # ======================
+  input_select:
+    totalmix_workspace:
+      name: "TotalMix Workspace"
+      icon: mdi:view-grid
+      options:
+        - "Loading workspaces..."
+
+    totalmix_snapshot:
+      name: "TotalMix Snapshot"
+      icon: mdi:bookmark
+      options:
+        - "Loading snapshots..."
+
+  input_text:
+    totalmix_workspace_map:   # only used for workspace slot lookup
+      name: "TotalMix Workspace Map"
+      mode: text
+
+  input_button:
+    refresh_totalmix_workspaces:
+      name: "Refresh TotalMix Workspaces"
+      icon: mdi:refresh
+    refresh_totalmix_snapshots:
+      name: "Refresh TotalMix Snapshots"
+      icon: mdi:refresh
+
+  # ======================
+  # MQTT SENSOR — MINIMAL & RELIABLE
+  # ======================
+  mqtt:
+    sensor:
+      - name: "TotalMix Snapshot Map"
+        state_topic: "totalmix/snapshot_map"
+        value_template: "updated"
+        json_attributes_topic: "totalmix/snapshot_map"
+        json_attributes_template: "{{ {'snapshot_map': value_json} | tojson }}"
+
+  # ======================
+  # AUTOMATIONS
+  # ======================
+  automation:
+
+    - alias: Update TotalMix Workspace List from Bridge
+      trigger:
+        - platform: mqtt
+          topic: totalmix/workspaces
+      action:
+        - variables:
+            full_list: "{{ trigger.payload_json }}"
+            clean_options: "{{ full_list | reject('eq', '<Empty>') | reject('eq', '') | list }}"
+            # FIXED: range() loop counts empty slots correctly (HA-compatible)
+            workspace_map: >
+              {% set ns = namespace(map={}) %}
+              {% for i in range(full_list | length) %}
+                {% set name = full_list[i] %}
+                {% if name is string and name and name != '<Empty>' %}
+                  {% set ns.map = ns.map | combine({name: i + 1}) %}
+                {% endif %}
+              {% endfor %} {{ ns.map | tojson }}
+        - target:
+            entity_id: input_select.totalmix_workspace
+          data:
+            options: "{{ clean_options }}"
+          action: input_select.set_options
+        - target:
+            entity_id: input_text.totalmix_workspace_map
+          data:
+            value: "{{ workspace_map }}"
+          action: input_text.set_value
+        - data:
+            title: TotalMix Workspace Debug - FULL INFO
+            message: |
+              Raw full_list ({{ full_list | length }} entries): {{ full_list }}
+              Computed workspace_map: {{ workspace_map }}
+              Clean options: {{ clean_options }}
+          action: persistent_notification.create
+      mode: single
+
+    - alias: Load Selected TotalMix Workspace
+      trigger:
+        - platform: state
+          entity_id: input_select.totalmix_workspace
+      action:
+        - variables:
+            selected: "{{ trigger.to_state.state }}"
+            workspace_map: >
+              {% set s = states('input_text.totalmix_workspace_map') %}
+              {% if s in ['unknown', '', None] %} {} {% else %} {{ s | from_json }} {% endif %}
+            index: "{{ workspace_map.get(selected, 1) }}"
+        - data:
+            title: TotalMix Workspace Debug
+            message: |
+              Selected: **{{ selected }}**
+              Slot sent to TotalMix: **{{ index }}**
+          action: persistent_notification.create
+        - data:
+            topic: totalmix/workspace
+            payload: "{{ index }}"
+          action: mqtt.publish
+      mode: single
+
+    # SNAPSHOT DROPDOWN — unchanged (already working perfectly)
+    - alias: Update Snapshot Dropdown Options
+      trigger:
+        - platform: state
+          entity_id: input_select.totalmix_workspace
+        - platform: state
+          entity_id: input_button.refresh_totalmix_snapshots
+        - platform: state
+          entity_id: sensor.totalmix_snapshot_map
+      action:
+        - variables:
+            current_ws: "{{ states('input_select.totalmix_workspace') | default('') }}"
+            full_map: "{{ state_attr('sensor.totalmix_snapshot_map', 'snapshot_map') | default({}) }}"
+            snapshot_options: >
+              {% set d = full_map.get(current_ws, {}) %}
+              {% set ns = namespace(opts=[]) %}
+              {% for item in d | dictsort %}
+                {% set ns.opts = ns.opts + [item[1]] %}
+              {% endfor %}
+              {{ ns.opts }}
+        - target:
+            entity_id: input_select.totalmix_snapshot
+          data:
+            options: "{{ snapshot_options }}"
+          action: input_select.set_options
+        - data:
+            title: Snapshot Dropdown Debug
+            message: "WS='{{ current_ws }}' | Snapshots found: {{ snapshot_options | length }}  {{ snapshot_options | join(', ') }}"
+          action: persistent_notification.create
+      mode: single
+
+    - alias: Load Selected TotalMix Snapshot
+      trigger:
+        - platform: state
+          entity_id: input_select.totalmix_snapshot
+      action:
+        - variables:
+            selected_snapshot: "{{ trigger.to_state.state }}"
+            full_map: "{{ state_attr('sensor.totalmix_snapshot_map', 'snapshot_map') | default({}) }}"
+            current_workspace: "{{ states('input_select.totalmix_workspace') }}"
+            snapshot_number: >
+              {% set d = full_map.get(current_workspace, {}) %}
+              {% set ns = namespace(num=1) %}
+              {% for k, v in d.items() %}
+                {% if v == selected_snapshot %}
+                  {% set ns.num = k | int %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.num }}
+        - data:
+            title: TotalMix Snapshot Debug
+            message: |
+              Selected snapshot: **{{ selected_snapshot }}**
+              Workspace: **{{ current_workspace }}**
+              Number sent: **{{ snapshot_number }}**
+          action: persistent_notification.create
+        - data:
+            topic: totalmix/snapshot
+            payload: "{{ snapshot_number }}"
+          action: mqtt.publish
+      mode: single
