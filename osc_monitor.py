@@ -77,3 +77,13 @@ class OSCMonitor:
         logger.info("OSC Monitor stopped")
 
 osc_monitor = OSCMonitor()
+
+if __name__ == "__main__":
+    osc_monitor.start()
+    try:
+        print("OSC Monitor is now LIVE — click outputs in TotalMix FX")
+        while True:
+            time.sleep(1)          # keep the script running
+    except KeyboardInterrupt:
+        osc_monitor.stop()
+        print("\nOSC Monitor stopped cleanly.")
