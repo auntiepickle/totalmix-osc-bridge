@@ -15,7 +15,7 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(message)s',
     datefmt='%H:%M:%S',
     handlers=[
-        logging.StreamHandler(),  # console (clean)
+        logging.StreamHandler(),
         logging.handlers.RotatingFileHandler(
             BRIDGE_LOG_FILE,
             maxBytes=LOG_MAX_BYTES,
@@ -26,65 +26,75 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load channel map (non-fatal if missing)
+# Load channel map
 try:
     with open("ufx2_channel_map.json", "r", encoding="utf-8") as f:
         CHANNEL_MAP = json.load(f)
-    logger.info("✅ Loaded ufx2_channel_map.json (AES + AN 1/2 ready)")
-except FileNotFoundError:
-    logger.error("❌ ufx2_channel_map.json not found in project root! (you may have named it channel_map.json)")
-    CHANNEL_MAP = {}
+    logger.info("✅ Loaded ufx2_channel_map.json")
 except Exception as e:
     logger.error(f"Failed to load ufx2_channel_map.json: {e}")
     CHANNEL_MAP = {}
 
-# OSC client (with safety check)
+# Load mappings (NEW macro system — fully configurable)
+try:
+    with open("mappings.json", "r", encoding="utf-8") as f:
+        MAPPINGS = json.load(f)
+    logger.info("✅ Loaded mappings.json — macros are now fully data-driven")
+except Exception as e:
+    logger.error(f"Failed to load mappings.json: {e}")
+    MAPPINGS = {"macros": {}}
+
+# OSC client
 if OSC_IP and OSC_PORT:
     osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT)
     logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 else:
-    logger.warning("⚠️  OSC_IP is None — check your .env or config.py (should be 192.168.1.61)")
     osc_client = None
+    logger.warning("⚠️ OSC_IP not set")
 
 class TotalMixOSCBridge:
-    def __init__(self, client, channel_map):
+    def __init__(self, client, mappings):
         self.osc_client = client
-        self.channel_map = channel_map
+        self.mappings = mappings
 
-    def set_an12_to_aes_send(self, value: float = 0.5):
-        """AN 1/2 Hardware Input → AES Hardware Output send (0.0–1.0)
-        Now using correct submix index 12."""
-        if not self.osc_client:
-            logger.error("No OSC client — check OSC_IP")
+    def run_macro(self, macro_name: str, param: float = 0.5):
+        """Generic runner — reads the entire macro from mappings.json (no constants in code)"""
+        if macro_name not in self.mappings.get("macros", {}):
+            logger.error(f"Macro '{macro_name}' not found in mappings.json")
             return
-        try:
-            value = max(0.0, min(1.0, float(value)))
-            self.osc_client.send_message("/setSubmix", 12.0)   # ← corrected index
-            self.osc_client.send_message("/1/volume1", value)
-            logger.info(f"✅ AN 1/2 → AES send set to {value:.4f}")
-        except Exception as e:
-            logger.error(f"OSC send failed: {e}")
 
-# Instantiate bridge (safe to import now)
-bridge = TotalMixOSCBridge(osc_client, CHANNEL_MAP)
+        macro = self.mappings["macros"][macro_name]
+        value = max(macro.get("param_range", [0.0, 1.0])[0],
+                    min(macro.get("param_range", [0.0, 1.0])[1], float(param)))
+
+        logger.info(f"🚀 Running macro '{macro_name}' (workspace: {macro.get('workspace')}, snapshot: {macro.get('snapshot')}) param={value:.4f}")
+
+        for step in macro.get("steps", []):
+            osc_addr = step["osc"]
+            step_val = value if step.get("value") == "{{param}}" else step["value"]
+            try:
+                self.osc_client.send_message(osc_addr, float(step_val))
+                logger.info(f"   → {osc_addr} = {step_val}")
+            except Exception as e:
+                logger.error(f"OSC send failed for {osc_addr}: {e}")
+
+        logger.info(f"✅ Macro '{macro_name}' complete")
+
+# Instantiate bridge
+bridge = TotalMixOSCBridge(osc_client, MAPPINGS)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("✅ bridge.set_an12_to_aes_send(value) is ready (MQTT only starts when you run the full bridge)")
+logger.info("✅ New macro system active → bridge.run_macro('an12_to_aes_send', value)")
 
 # === FULL BRIDGE STARTUP ONLY WHEN RUN DIRECTLY ===
 if __name__ == "__main__":
     logger.info("Starting full bridge with MQTT...")
-    # Create MQTT client
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-
-    # Setup MQTT
     setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT)
 
-    # Start OSC Monitor if enabled
     if ENABLE_OSC_MONITOR:
         osc_monitor.start()
 
-    # Start MQTT loop
     client.loop_start()
 
     logger.info("Bridge is running... (Ctrl+C or docker compose down to stop)")
