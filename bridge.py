@@ -26,16 +26,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load snapshot map (for auto workspace + snapshot switching)
+# Load snapshot map (for auto workspace/snapshot switching)
 try:
     with open("ufx2_snapshot_map.json", "r", encoding="utf-8") as f:
         SNAPSHOT_MAP = json.load(f)
-    logger.info("✅ Loaded ufx2_snapshot_map.json for auto workspace/snapshot switching")
+    logger.info(f"✅ Loaded ufx2_snapshot_map.json — workspaces: {list(SNAPSHOT_MAP.keys())}")
 except Exception as e:
     logger.error(f"Failed to load ufx2_snapshot_map.json: {e}")
     SNAPSHOT_MAP = {}
 
-# Load mappings (macros fully data-driven)
+# Load mappings
 try:
     with open("mappings.json", "r", encoding="utf-8") as f:
         MAPPINGS = json.load(f)
@@ -44,7 +44,7 @@ except Exception as e:
     logger.error(f"Failed to load mappings.json: {e}")
     MAPPINGS = {"macros": {}}
 
-# OSC client to TotalMix
+# OSC client
 osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) if OSC_IP and OSC_PORT else None
 logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 
@@ -55,7 +55,6 @@ class TotalMixOSCBridge:
         self.snapshot_map = snapshot_map
 
     def run_macro(self, macro_name: str, param: float = 0.5):
-        """Generic runner — now auto-switches workspace + snapshot first"""
         if macro_name not in self.mappings.get("macros", {}):
             logger.error(f"Macro '{macro_name}' not found")
             return
@@ -69,15 +68,15 @@ class TotalMixOSCBridge:
 
         logger.info(f"🚀 Running macro '{macro_name}' → switching to {ws_name} / {snap_name} (param={value:.4f})")
 
-        # === AUTO WORKSPACE SWITCH ===
+        # AUTO WORKSPACE SWITCH
         if ws_name and ws_name in self.snapshot_map:
             ws_slot = self.snapshot_map[ws_name].get("slot")
             if ws_slot is not None:
                 self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
                 logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
-                time.sleep(0.3)  # small settle time
+                time.sleep(0.3)
 
-        # === AUTO SNAPSHOT SWITCH ===
+        # AUTO SNAPSHOT SWITCH
         if snap_name and ws_name and ws_name in self.snapshot_map:
             snapshots = self.snapshot_map[ws_name].get("snapshots", {})
             if snap_name in snapshots:
@@ -87,7 +86,7 @@ class TotalMixOSCBridge:
                 logger.info(f"   → Switched snapshot to '{snap_name}'")
                 time.sleep(0.3)
 
-        # === ORIGINAL MACRO STEPS ===
+        # ORIGINAL STEPS
         for step in macro.get("steps", []):
             osc_addr = step["osc"]
             step_val = value if step.get("value") == "{{param}}" else step["value"]
@@ -99,13 +98,11 @@ class TotalMixOSCBridge:
 
         logger.info(f"✅ Macro '{macro_name}' complete")
 
-# Instantiate bridge
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("✅ Macros now auto-switch workspace + snapshot")
+logger.info("✅ Macros now auto-switch workspace + snapshot (debug logging enabled)")
 
-# === FULL BRIDGE STARTUP ===
 if __name__ == "__main__":
     logger.info("Starting full bridge...")
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
