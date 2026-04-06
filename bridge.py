@@ -140,26 +140,3 @@ def midi_listener():
 
     except Exception as e:
         logger.error(f"MIDI listener failed: {e}")
-
-# Start MIDI listener in background
-threading.Thread(target=midi_listener, daemon=True).start()
-
-if __name__ == "__main__":
-    logger.info("Starting full bridge...")
-    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-    setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT)
-
-    if ENABLE_OSC_MONITOR:
-        osc_monitor.start()
-
-    client.loop_start()
-
-    try:
-        while True:
-            time.sleep(30)
-    except KeyboardInterrupt:
-        logger.info("\nShutting down...")
-        if ENABLE_OSC_MONITOR:
-            osc_monitor.stop()
-        client.loop_stop()
-        logger.info("Bridge stopped.")

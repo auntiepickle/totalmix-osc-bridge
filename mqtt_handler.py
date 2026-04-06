@@ -79,22 +79,24 @@ def map_watcher(client):
             publish_snapshot_map(client)
             publish_dynamic_workspaces(client)   # ← this is what updates the dropdown live
 
-def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc_port):
+def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc_port, bridge):  # ← bridge param
     def on_connect(client, userdata, flags, rc, properties=None):
         print(f"MQTT CONNECTED (code {rc})")
         client.subscribe("totalmix/#")
-        print("Subscribed to totalmix/#")
-        
-        publish_workspaces(client)           # legacy fallback (now safe)
-        load_snapshot_map()                  # initial load
-        publish_snapshot_map(client)         # initial publish
-        publish_dynamic_workspaces(client)   # ← initial dynamic workspaces
+        client.subscribe("totalmix/macro/#")   # ← general macro namespace
+        print("Subscribed to totalmix/# and totalmix/macro/#")
+
+        publish_workspaces(client)
+        load_snapshot_map()
+        publish_snapshot_map(client)
+        publish_dynamic_workspaces(client)
 
     def on_message(client, userdata, msg):
         payload = msg.payload.decode().strip()
         print(f"MQTT IN → {msg.topic} | {payload}")
 
         try:
+            # === EXISTING HA WORKSPACE/SNAPSHOT (unchanged) ===
             if msg.topic == "totalmix/workspace":
                 ws = int(payload)
                 send_osc("/loadQuickWorkspace", ws, osc_ip, osc_port)
@@ -106,17 +108,25 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     index = 9 - snap_num
                     address = f"/3/snapshots/{index}/1"
                     send_osc(address, 1.0, osc_ip, osc_port)
-                    print(f"→ SNAPSHOT #{snap_num} RECALLED (OSC: {address})")
+                    print(f"→ SNAPSHOT #{snap_num} RECALLED")
                     client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
-                else:
-                    print(f"⚠️ Invalid snapshot number: {payload}")
 
             elif msg.topic == "totalmix/config/snapshot_map":
                 global SNAPSHOT_MAP
                 SNAPSHOT_MAP = json.loads(payload)
-                print(f"✅ Snapshot map updated from scraper ({len(SNAPSHOT_MAP)} workspaces)")
                 publish_snapshot_map(client)
                 publish_dynamic_workspaces(client)
+
+            # === NEW: Centralized macro trigger from ANY client ===
+            elif msg.topic.startswith("totalmix/macro/"):
+                macro_name = msg.topic.split("/")[-1]
+                if macro_name in bridge.mappings.get("macros", {}):
+                    try:
+                        param = float(payload)
+                        print(f"→ Client triggered macro '{macro_name}' param={param:.3f}")
+                        bridge.run_macro(macro_name, param)
+                    except ValueError:
+                        print(f"Invalid param for macro {macro_name}: {payload}")
 
         except Exception as e:
             print(f"Handler error: {e}")
@@ -126,6 +136,5 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
     client.username_pw_set(mqtt_user, mqtt_pass)
     client.connect(mqtt_broker, mqtt_port, 60)
 
-    # Start background watcher thread
     watcher_thread = threading.Thread(target=map_watcher, args=(client,), daemon=True)
     watcher_thread.start()
