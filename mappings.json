@@ -17,7 +17,6 @@
           "use_value_as_param": true
         }
       ],
-      "mqtt_topic": "studio/totalmix/an12_aes_send",
       "param_range": [0.0, 1.0]
     }
   }

@@ -3,6 +3,8 @@ import time
 import logging
 import logging.handlers
 import json
+import mido
+import threading
 import paho.mqtt.client as mqtt
 from pythonosc import udp_client
 from config import *
@@ -109,24 +111,38 @@ logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
 logger.info("✅ State-aware workspace/snapshot switching (no repeated switches)")
 
 # === MIDI INPUT LISTENER (Cirklon → macro) ===
-import mido
-import threading
+
 
 def midi_listener():
     try:
-        inport = mido.open_input("IAC Driver Bus 1")   # ← change to your actual MIDI port name if different
-        logger.info("🎹 MIDI listener started — listening for CC 42 on IAC Driver Bus 1")
+        inport = mido.open_input("IAC Driver Bus 1")   # ← change port name if your IAC bus is different
+        logger.info("MIDI listener started — listening on IAC Driver Bus 1 (all macros in mappings.json)")
+        
         for msg in inport:
-            if msg.type == "control_change" and msg.control == 42 and msg.channel == 0:   # channel 1 = 0 in mido
-                param = msg.value / 127.0
-                logger.info(f"🎹 MIDI CC 42 received → param {param:.3f}")
-                bridge.run_macro("an12_to_aes_send", param)
+            if msg.type != "control_change":
+                continue
+            
+            # Scan every macro’s midi_triggers array
+            for macro_name, macro in bridge.mappings.get("macros", {}).items():
+                for trigger in macro.get("midi_triggers", []):
+                    if (trigger.get("type") == "control_change" and
+                        trigger.get("number") == msg.control and
+                        trigger.get("channel") == msg.channel + 1):   # mido channel 0 = MIDI ch 1
+                    
+                        param = msg.value / 127.0
+                        if trigger.get("use_value_as_param", False):
+                            logger.info(f"MIDI CC {msg.control} ch {msg.channel+1} → macro '{macro_name}' param={param:.3f}")
+                            bridge.run_macro(macro_name, param)
+                        else:
+                            logger.info(f"MIDI trigger '{macro_name}' (no param)")
+                            bridge.run_macro(macro_name)
+                        break  # one trigger per message is enough
+
     except Exception as e:
         logger.error(f"MIDI listener failed: {e}")
 
 # Start MIDI listener in background
 threading.Thread(target=midi_listener, daemon=True).start()
-
 
 if __name__ == "__main__":
     logger.info("Starting full bridge...")
