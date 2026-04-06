@@ -109,47 +109,15 @@ bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
 logger.info("✅ State-aware workspace/snapshot switching (no repeated switches)")
-
-# === MIDI INPUT LISTENER (Cirklon → macro) ===
-
-
-def midi_listener():
-    try:
-        inport = mido.open_input("IAC Driver Bus 1")   # ← change port name if your IAC bus is different
-        logger.info("MIDI listener started — listening on IAC Driver Bus 1 (all macros in mappings.json)")
-        
-        for msg in inport:
-            if msg.type != "control_change":
-                continue
-            
-            # Scan every macro’s midi_triggers array
-            for macro_name, macro in bridge.mappings.get("macros", {}).items():
-                for trigger in macro.get("midi_triggers", []):
-                    if (trigger.get("type") == "control_change" and
-                        trigger.get("number") == msg.control and
-                        trigger.get("channel") == msg.channel + 1):   # mido channel 0 = MIDI ch 1
-                    
-                        param = msg.value / 127.0
-                        if trigger.get("use_value_as_param", False):
-                            logger.info(f"MIDI CC {msg.control} ch {msg.channel+1} → macro '{macro_name}' param={param:.3f}")
-                            bridge.run_macro(macro_name, param)
-                        else:
-                            logger.info(f"MIDI trigger '{macro_name}' (no param)")
-                            bridge.run_macro(macro_name)
-                        break  # one trigger per message is enough
-
-    except Exception as e:
-        logger.error(f"MIDI listener failed: {e}")
-
-# === BRIDGE STARTUP (centralized server — no local MIDI) ===
+# === BRIDGE STARTUP — CENTRALIZED SERVER MODE (no local MIDI) ===
 if __name__ == "__main__":
     logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
-    logger.info(f"OSC target: {OSC_IP}:{OSC_PORT}")
-    logger.info("MQTT macro namespace: totalmix/macro/<name>  (clients publish here)")
+    logger.info(f"OSC target → {OSC_IP}:{OSC_PORT}")
+    logger.info("MQTT macro namespace → totalmix/macro/<name>  (remote clients publish here)")
 
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     
-    # Pass the bridge instance so mqtt_handler can call run_macro
+    # Pass bridge so mqtt_handler can call run_macro
     setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, bridge)
 
     if ENABLE_OSC_MONITOR:
