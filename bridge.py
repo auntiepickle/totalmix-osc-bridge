@@ -140,3 +140,29 @@ def midi_listener():
 
     except Exception as e:
         logger.error(f"MIDI listener failed: {e}")
+
+# === BRIDGE STARTUP (centralized server — no local MIDI) ===
+if __name__ == "__main__":
+    logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
+    logger.info(f"OSC target: {OSC_IP}:{OSC_PORT}")
+    logger.info("MQTT macro namespace: totalmix/macro/<name>  (clients publish here)")
+
+    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    
+    # Pass the bridge instance so mqtt_handler can call run_macro
+    setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, bridge)
+
+    if ENABLE_OSC_MONITOR:
+        osc_monitor.start()
+
+    client.loop_start()
+
+    try:
+        while True:
+            time.sleep(30)
+    except KeyboardInterrupt:
+        logger.info("\nShutting down bridge...")
+        if ENABLE_OSC_MONITOR:
+            osc_monitor.stop()
+        client.loop_stop()
+        logger.info("Bridge stopped cleanly.")
