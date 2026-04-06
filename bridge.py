@@ -108,6 +108,26 @@ bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
 logger.info("✅ State-aware workspace/snapshot switching (no repeated switches)")
 
+# === MIDI INPUT LISTENER (Cirklon → macro) ===
+import mido
+import threading
+
+def midi_listener():
+    try:
+        inport = mido.open_input("IAC Driver Bus 1")   # ← change to your actual MIDI port name if different
+        logger.info("🎹 MIDI listener started — listening for CC 42 on IAC Driver Bus 1")
+        for msg in inport:
+            if msg.type == "control_change" and msg.control == 42 and msg.channel == 0:   # channel 1 = 0 in mido
+                param = msg.value / 127.0
+                logger.info(f"🎹 MIDI CC 42 received → param {param:.3f}")
+                bridge.run_macro("an12_to_aes_send", param)
+    except Exception as e:
+        logger.error(f"MIDI listener failed: {e}")
+
+# Start MIDI listener in background
+threading.Thread(target=midi_listener, daemon=True).start()
+
+
 if __name__ == "__main__":
     logger.info("Starting full bridge...")
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
