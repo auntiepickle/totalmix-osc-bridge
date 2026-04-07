@@ -96,12 +96,19 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         print(f"DEBUG MQTT IN → {msg.topic} | {payload}")   # ← loud debug on EVERY message
 
         try:
-            # === HA WORKSPACE / SNAPSHOT → now also sync bridge state ===
+            # === HA WORKSPACE / SNAPSHOT → resolve friendly name + sync bridge state ===
             if msg.topic == "totalmix/workspace":
                 ws_slot = int(payload)
                 send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
                 print(f"→ WORKSPACE slot {ws_slot} LOADED")
-                bridge.update_workspace(slot=ws_slot)          # ← NEW: sync state
+
+                # Resolve friendly name from the full SMB snapshot map
+                ws_name = next(
+                    (name for name, data in SNAPSHOT_MAP.items()
+                     if isinstance(data, dict) and data.get("slot") == ws_slot),
+                    f"slot_{ws_slot}"
+                )
+                bridge.update_workspace(name=ws_name)          # ← now passes friendly name
 
             elif msg.topic == "totalmix/snapshot":
                 snap_num = int(payload)
@@ -111,7 +118,17 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     send_osc(address, 1.0, osc_ip, osc_port)
                     print(f"→ SNAPSHOT #{snap_num} RECALLED")
                     client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
-                    bridge.update_snapshot(index=snap_num)     # ← NEW: sync state
+
+                    # Resolve friendly name using current workspace + SMB map
+                    ws = bridge.current_workspace
+                    snap_name = None
+                    if ws and ws in SNAPSHOT_MAP:
+                        snapshots = SNAPSHOT_MAP[ws].get("snapshots", {})
+                        snap_name = snapshots.get(str(snap_num))   # key = "1" → "Default"
+                    if not snap_name:
+                        snap_name = f"snap_{snap_num}"
+
+                    bridge.update_snapshot(name=snap_name)     # ← now passes friendly name
 
             elif msg.topic == "totalmix/config/snapshot_map":
                 global SNAPSHOT_MAP
