@@ -108,51 +108,47 @@ class TotalMixOSCBridge:
         logger.info(f"DEBUG — running macro from GitHub commit 'fixing state sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
-        # === STATE-AWARE SWITCH + HA FEEDBACK ===
+        # === ALWAYS RESOLVE SLOTS/INDICES (never publish "unknown" again) ===
         ws_slot = None
-        if ws_name:
-            should_switch_ws = force_switch or (not self.current_workspace or self.current_workspace.lower() != str(ws_name).lower())
-            if should_switch_ws and ws_name in self.snapshot_map:
-                ws_slot = self.snapshot_map[ws_name].get("slot")
-                if ws_slot is not None:
-                    self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
-                    logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
+        snap_num = None
+
+        if ws_name and ws_name in self.snapshot_map:
+            ws_slot = self.snapshot_map[ws_name].get("slot")
+
+        if snap_name and ws_name in self.snapshot_map:
+            snapshots = self.snapshot_map[ws_name].get("snapshots", {})
+            for snap_key, snap_data in snapshots.items():
+                if isinstance(snap_data, dict):
+                    candidate_name = snap_data.get("name") or snap_key
+                    candidate_index = snap_data.get("index")
+                else:
+                    candidate_name = snap_data
+                    candidate_index = snap_key
+                if str(candidate_name).title() == str(snap_name).title():
+                    snap_num = candidate_index or snap_key
+                    break
+
+        # === CRITICAL: Always execute workspace + snapshot (with delay) ===
+        if ws_name and ws_slot is not None:
+            self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
+            logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
             self.current_workspace = ws_name
             if self.mqtt_client:
-                self.mqtt_client.publish("totalmix/workspace", str(ws_slot or "unknown"), retain=True)
-                logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot or 'unknown'}")
-            time.sleep(0.3)
+                self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
+                logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
+            time.sleep(1.0)  # ← This is what makes the snapshot actually appear in TotalMix
 
-        if snap_name and ws_name:
-            should_switch_snap = force_switch or (not self.current_snapshot or str(self.current_snapshot).lower() != str(snap_name).lower())
-            snap_num = None
-            if ws_name in self.snapshot_map:
-                snapshots = self.snapshot_map[ws_name].get("snapshots", {})
-                for snap_key, snap_data in snapshots.items():
-                    # NEW FORMAT: key = name ("reset"), value = {"index": 4}
-                    if isinstance(snap_data, dict):
-                        candidate_name = snap_data.get("name") or snap_key
-                        candidate_index = snap_data.get("index")
-                    else:
-                        candidate_name = snap_data
-                        candidate_index = snap_key
-                    if str(candidate_name).title() == str(snap_name):
-                        snap_num = candidate_index or snap_key
-                        break
-                if not snap_num:
-                    logger.warning(f"   ⚠️  Snapshot '{snap_name}' NOT FOUND in workspace '{ws_name}'")
-                    logger.info(f"   Available snapshots in '{ws_name}': {snapshots}")
-            if should_switch_snap and snap_num is not None:
-                osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
-                self.osc_client.send_message(osc_addr, 1.0)
-                logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr})")
+        if snap_name and snap_num is not None:
+            osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
+            self.osc_client.send_message(osc_addr, 1.0)
+            logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
             self.current_snapshot = snap_name
-            if self.mqtt_client and snap_num is not None:
+            if self.mqtt_client:
                 self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
                 logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
             time.sleep(0.3)
 
-        # === MACRO STEPS (always run) ===
+        # === MACRO STEPS (submix + fader etc.) ===
         for step in macro.get("steps", []):
             osc_addr = step["osc"]
             step_val = value if step.get("value") == "{{param}}" else step["value"]

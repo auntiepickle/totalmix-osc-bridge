@@ -100,35 +100,41 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         try:
             # === HA WORKSPACE / SNAPSHOT → resolve friendly name + sync bridge state ===
             if msg.topic == "totalmix/workspace":
-                ws_slot = int(payload)
-                send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
-                print(f"→ WORKSPACE slot {ws_slot} LOADED")
+                try:
+                    ws_slot = int(payload)
+                    send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
+                    print(f"→ WORKSPACE slot {ws_slot} LOADED")
 
-                ws_name = next(
-                    (name for name, data in SNAPSHOT_MAP.items()
-                     if isinstance(data, dict) and data.get("slot") == ws_slot),
-                    f"slot_{ws_slot}"
-                )
-                bridge.update_workspace(name=ws_name)
+                    ws_name = next(
+                        (name for name, data in SNAPSHOT_MAP.items()
+                         if isinstance(data, dict) and data.get("slot") == ws_slot),
+                        f"slot_{ws_slot}"
+                    )
+                    bridge.update_workspace(name=ws_name)
+                except ValueError:
+                    print(f"→ Ignored non-integer workspace payload: {payload} (safe)")
 
             elif msg.topic == "totalmix/snapshot":
-                snap_num = int(payload)
-                if 1 <= snap_num <= 8:
-                    index = 9 - snap_num
-                    address = f"/3/snapshots/{index}/1"
-                    send_osc(address, 1.0, osc_ip, osc_port)
-                    print(f"→ SNAPSHOT #{snap_num} RECALLED")
-                    client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
+                try:
+                    snap_num = int(payload)
+                    if 1 <= snap_num <= 8:
+                        index = 9 - snap_num
+                        address = f"/3/snapshots/{index}/1"
+                        send_osc(address, 1.0, osc_ip, osc_port)
+                        print(f"→ SNAPSHOT #{snap_num} RECALLED")
+                        client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
 
-                    ws = bridge.current_workspace
-                    snap_name = None
-                    if ws and ws in SNAPSHOT_MAP:
-                        snapshots = SNAPSHOT_MAP[ws].get("snapshots", {})
-                        snap_name = snapshots.get(str(snap_num))
-                    if not snap_name:
-                        snap_name = f"snap_{snap_num}"
+                        ws = bridge.current_workspace
+                        snap_name = None
+                        if ws and ws in SNAPSHOT_MAP:
+                            snapshots = SNAPSHOT_MAP[ws].get("snapshots", {})
+                            snap_name = snapshots.get(str(snap_num))
+                        if not snap_name:
+                            snap_name = f"snap_{snap_num}"
 
-                    bridge.update_snapshot(name=snap_name)
+                        bridge.update_snapshot(name=snap_name)
+                except ValueError:
+                    print(f"→ Ignored non-integer snapshot payload: {payload} (safe)")
 
             elif msg.topic == "totalmix/config/snapshot_map":
                 SNAPSHOT_MAP = json.loads(payload)
