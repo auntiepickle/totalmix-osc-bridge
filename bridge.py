@@ -53,6 +53,7 @@ logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
+        self._suppress_handler = False   # ← ADD THIS LINE
         self.osc_client = osc_client
         self.mappings = mappings
         self.snapshot_map = snapshot_map
@@ -92,7 +93,7 @@ class TotalMixOSCBridge:
         value = max(macro.get("param_range", [0.0, 1.0])[0],
                     min(macro.get("param_range", [0.0, 1.0])[1], float(param)))
 
-        # === ROBUST NAME EXTRACTION + HA DROPDOWN CLEANING ===
+        # === ROBUST NAME EXTRACTION ===
         ws_name = macro.get("workspace")
         snap_name = macro.get("snapshot")
         if isinstance(snap_name, dict):
@@ -108,57 +109,71 @@ class TotalMixOSCBridge:
         logger.info(f"DEBUG — running macro from GitHub commit 'fixing state sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
-        # === ALWAYS RESOLVE SLOTS/INDICES (never publish "unknown" again) ===
-        ws_slot = None
-        snap_num = None
+        # === DEBOUNCE: stop double macro triggers from MQTT echo ===
+        current_time = time.time()
+        if hasattr(self, '_last_macro_time') and current_time - self._last_macro_time < 1.5 and getattr(self, '_last_macro_name', None) == macro_name:
+            logger.info(f"   → Debounced duplicate macro trigger (ignored)")
+            return
+        self._last_macro_time = current_time
+        self._last_macro_name = macro_name
 
-        if ws_name and ws_name in self.snapshot_map:
-            ws_slot = self.snapshot_map[ws_name].get("slot")
+        self._suppress_handler = True   # ← Prevent on_message feedback loop
 
-        if snap_name and ws_name in self.snapshot_map:
-            snapshots = self.snapshot_map[ws_name].get("snapshots", {})
-            for snap_key, snap_data in snapshots.items():
-                if isinstance(snap_data, dict):
-                    candidate_name = snap_data.get("name") or snap_key
-                    candidate_index = snap_data.get("index")
-                else:
-                    candidate_name = snap_data
-                    candidate_index = snap_key
-                if str(candidate_name).title() == str(snap_name).title():
-                    snap_num = candidate_index or snap_key
-                    break
+        try:
+            # === ALWAYS RESOLVE SLOTS/INDICES ===
+            ws_slot = None
+            snap_num = None
 
-        # === CRITICAL: Always execute workspace + snapshot (with delay) ===
-        if ws_name and ws_slot is not None:
-            self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
-            logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
-            self.current_workspace = ws_name
-            if self.mqtt_client:
-                self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
-                logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
-            time.sleep(1.0)  # ← This is what makes the snapshot actually appear in TotalMix
+            if ws_name and ws_name in self.snapshot_map:
+                ws_slot = self.snapshot_map[ws_name].get("slot")
 
-        if snap_name and snap_num is not None:
-            osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
-            self.osc_client.send_message(osc_addr, 1.0)
-            logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
-            self.current_snapshot = snap_name
-            if self.mqtt_client:
-                self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
-                logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
-            time.sleep(0.3)
+            if snap_name and ws_name in self.snapshot_map:
+                snapshots = self.snapshot_map[ws_name].get("snapshots", {})
+                for snap_key, snap_data in snapshots.items():
+                    if isinstance(snap_data, dict):
+                        candidate_name = snap_data.get("name") or snap_key
+                        candidate_index = snap_data.get("index")
+                    else:
+                        candidate_name = snap_data
+                        candidate_index = snap_key
+                    if str(candidate_name).title() == str(snap_name).title():
+                        snap_num = candidate_index or snap_key
+                        break
 
-        # === MACRO STEPS (submix + fader etc.) ===
-        for step in macro.get("steps", []):
-            osc_addr = step["osc"]
-            step_val = value if step.get("value") == "{{param}}" else step["value"]
-            try:
-                self.osc_client.send_message(osc_addr, float(step_val))
-                logger.info(f"   → {osc_addr} = {step_val}")
-            except Exception as e:
-                logger.error(f"OSC send failed: {e}")
+            # === EXECUTE WORKSPACE + SNAPSHOT (with delay) ===
+            if ws_name and ws_slot is not None:
+                self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
+                logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
+                self.current_workspace = ws_name
+                if self.mqtt_client:
+                    self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
+                    logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
+                time.sleep(1.0)   # CRITICAL for TotalMix UI
 
-        logger.info(f"Macro '{macro_name}' complete")
+            if snap_name and snap_num is not None:
+                osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
+                self.osc_client.send_message(osc_addr, 1.0)
+                logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
+                self.current_snapshot = snap_name
+                if self.mqtt_client:
+                    self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
+                    logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
+                time.sleep(0.3)
+
+            # === MACRO STEPS (submix + fader) ===
+            for step in macro.get("steps", []):
+                osc_addr = step["osc"]
+                step_val = value if step.get("value") == "{{param}}" else step["value"]
+                try:
+                    self.osc_client.send_message(osc_addr, float(step_val))
+                    logger.info(f"   → {osc_addr} = {step_val}")
+                except Exception as e:
+                    logger.error(f"OSC send failed: {e}")
+
+            logger.info(f"Macro '{macro_name}' complete")
+
+        finally:
+            self._suppress_handler = False   # Always restore
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)

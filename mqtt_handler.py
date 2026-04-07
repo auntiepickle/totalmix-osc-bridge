@@ -93,7 +93,12 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         global SNAPSHOT_MAP
         payload = msg.payload.decode().strip()
 
-        # === CLEAN LOGGING (no more spam) ===
+        # === SUPPRESS FEEDBACK LOOP DURING MACRO EXECUTION ===
+        if getattr(bridge, '_suppress_handler', False) and msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
+            print(f"→ Suppressed handler for {msg.topic} (self-triggered by macro)")
+            return
+
+        # === CLEAN LOGGING ===
         if msg.topic.startswith("totalmix/macro/") or "workspace" in msg.topic or "snapshot" in msg.topic:
             print(f"MQTT → {msg.topic} | {payload}")
 
