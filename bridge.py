@@ -55,12 +55,11 @@ class TotalMixOSCBridge:
         self.osc_client = osc_client
         self.mappings = mappings
         self.snapshot_map = snapshot_map
-        self.current_workspace = None   # ← state tracking
-        self.current_snapshot = None    # ← state tracking
-        self.mqtt_client = None         # ← NEW for HA bidirectional feedback
+        self.current_workspace = None
+        self.current_snapshot = None
+        self.mqtt_client = None
 
     def update_workspace(self, name: str = None, slot: int = None):
-        """Update internal state from either friendly name or TotalMix slot number."""
         if name:
             self.current_workspace = name
         elif slot is not None and self.snapshot_map:
@@ -71,16 +70,15 @@ class TotalMixOSCBridge:
         logger.info(f"BRIDGE STATE → workspace = {self.current_workspace or 'None'}")
 
     def update_snapshot(self, name: str = None, index: int = None, workspace: str = None):
-        """Update internal state from either friendly name or snapshot index (1-8)."""
         if name:
             self.current_snapshot = name
         elif index is not None and (workspace or self.current_workspace):
             ws = workspace or self.current_workspace
             if ws and ws in self.snapshot_map:
                 snapshots = self.snapshot_map[ws].get("snapshots", {})
-                for snap_name, data in snapshots.items():
-                    if data.get("index") == index or (data.get("index") or 1) == index:
-                        self.current_snapshot = snap_name
+                for snap_key, snap_value in snapshots.items():
+                    if str(snap_key) == str(index) or snap_value == name:
+                        self.current_snapshot = snap_value
                         break
         logger.info(f"BRIDGE STATE → snapshot = {self.current_snapshot or 'None'}")
 
@@ -93,13 +91,18 @@ class TotalMixOSCBridge:
         value = max(macro.get("param_range", [0.0, 1.0])[0],
                     min(macro.get("param_range", [0.0, 1.0])[1], float(param)))
 
+        # === ROBUST NAME EXTRACTION (handles old dict + new string format) ===
         ws_name = macro.get("workspace")
         snap_name = macro.get("snapshot")
+        if isinstance(snap_name, dict):
+            snap_name = snap_name.get("name") or list(snap_name.values())[0] if snap_name else None
+        if isinstance(ws_name, dict):
+            ws_name = ws_name.get("name") or list(ws_name.values())[0] if ws_name else None
 
         logger.info(f"🚀 Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f}")
 
-        # === STATE-AWARE SWITCH (only if needed) + HA feedback ===
-        if ws_name and (not self.current_workspace or self.current_workspace.lower() != ws_name.lower()):
+        # === STATE-AWARE SWITCH + HA FEEDBACK ===
+        if ws_name and (not self.current_workspace or self.current_workspace.lower() != str(ws_name).lower()):
             if ws_name in self.snapshot_map:
                 ws_slot = self.snapshot_map[ws_name].get("slot")
                 if ws_slot is not None:
@@ -108,13 +111,14 @@ class TotalMixOSCBridge:
                     logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
                     if self.mqtt_client:
                         self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
+                        logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
                     time.sleep(0.3)
 
-        if snap_name and ws_name and (not self.current_snapshot or self.current_snapshot.lower() != snap_name.lower()):
+        if snap_name and ws_name and (not self.current_snapshot or str(self.current_snapshot).lower() != str(snap_name).lower()):
             if ws_name in self.snapshot_map:
                 snapshots = self.snapshot_map[ws_name].get("snapshots", {})
-                # New map format: snapshots keyed by string number → name
-                snap_num = next((k for k, v in snapshots.items() if v.lower() == snap_name.lower()), None)
+                # New map format: {"4": "Reset", "1": "Default", ...}
+                snap_num = next((k for k, v in snapshots.items() if str(v).lower() == str(snap_name).lower()), None)
                 if snap_num:
                     osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
                     self.osc_client.send_message(osc_addr, 1.0)
@@ -122,6 +126,7 @@ class TotalMixOSCBridge:
                     logger.info(f"   → Switched snapshot to '{snap_name}'")
                     if self.mqtt_client:
                         self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
+                        logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
                     time.sleep(0.3)
 
         # === MACRO STEPS (always run) ===
@@ -141,7 +146,7 @@ bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
 logger.info("✅ State-aware workspace/snapshot switching (no repeated switches)")
-# === BRIDGE STARTUP — CENTRALIZED SERVER MODE (no local MIDI) ===
+# === BRIDGE STARTUP — CENTRALIZED SERVER MODE ===
 if __name__ == "__main__":
     logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
     logger.info(f"OSC target → {OSC_IP}:{OSC_PORT}")
@@ -149,9 +154,8 @@ if __name__ == "__main__":
 
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     
-    # Pass bridge so mqtt_handler can call run_macro
     setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, bridge)
-    bridge.mqtt_client = client          # ← NEW: give bridge access to MQTT for HA feedback
+    bridge.mqtt_client = client
 
     if ENABLE_OSC_MONITOR:
         osc_monitor.start()
