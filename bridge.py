@@ -6,7 +6,7 @@ import json
 import mido
 import threading
 import paho.mqtt.client as mqtt
-import re  # ← NEW: for cleaning "4 - Reset" format
+import re
 from pythonosc import udp_client
 from config import *
 from mqtt_handler import setup_mqtt
@@ -100,7 +100,6 @@ class TotalMixOSCBridge:
         if isinstance(ws_name, dict):
             ws_name = ws_name.get("name") or list(ws_name.values())[0] if ws_name else None
 
-        # ← CRITICAL FIX: strip HA "4 - Reset" → "Reset"
         if snap_name:
             snap_name = re.sub(r'^\d+\s*-\s*', '', str(snap_name)).strip().title()
 
@@ -110,7 +109,7 @@ class TotalMixOSCBridge:
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
         # === STATE-AWARE SWITCH + HA FEEDBACK ===
-        ws_slot = None  # ← FIX: prevent UnboundLocalError
+        ws_slot = None
         if ws_name:
             should_switch_ws = force_switch or (not self.current_workspace or self.current_workspace.lower() != str(ws_name).lower())
             if should_switch_ws and ws_name in self.snapshot_map:
@@ -129,21 +128,26 @@ class TotalMixOSCBridge:
             snap_num = None
             if ws_name in self.snapshot_map:
                 snapshots = self.snapshot_map[ws_name].get("snapshots", {})
-                # Support BOTH old format (index: name) AND new format (name: {"index": N})
-                for k, v in snapshots.items():
-                    name_to_check = v.get("name", v) if isinstance(v, dict) else v
-                    if str(name_to_check).title() == str(snap_name):
-                        snap_num = k if isinstance(v, dict) else k  # use index key
+                for snap_key, snap_data in snapshots.items():
+                    # NEW FORMAT: key = name ("reset"), value = {"index": 4}
+                    if isinstance(snap_data, dict):
+                        candidate_name = snap_data.get("name") or snap_key
+                        candidate_index = snap_data.get("index")
+                    else:
+                        candidate_name = snap_data
+                        candidate_index = snap_key
+                    if str(candidate_name).title() == str(snap_name):
+                        snap_num = candidate_index or snap_key
                         break
                 if not snap_num:
                     logger.warning(f"   ⚠️  Snapshot '{snap_name}' NOT FOUND in workspace '{ws_name}'")
                     logger.info(f"   Available snapshots in '{ws_name}': {snapshots}")
-            if should_switch_snap and snap_num:
+            if should_switch_snap and snap_num is not None:
                 osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
                 self.osc_client.send_message(osc_addr, 1.0)
                 logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr})")
             self.current_snapshot = snap_name
-            if self.mqtt_client and snap_num:
+            if self.mqtt_client and snap_num is not None:
                 self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
                 logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
             time.sleep(0.3)
@@ -164,12 +168,12 @@ class TotalMixOSCBridge:
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("State-aware workspace/snapshot switching with HA dropdown cleaning + force_switch")
+logger.info("State-aware workspace/snapshot switching (NO force) + new snapshot_map format")
 # === BRIDGE STARTUP — CENTRALIZED SERVER MODE ===
 if __name__ == "__main__":
     logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
     logger.info(f"OSC target → {OSC_IP}:{OSC_PORT}")
-    logger.info("MQTT macro namespace → totalmix/macro/<name>  (remote clients publish here)")
+    logger.info("MQTT macro namespace → totalmix/macro/<name> (remote clients publish here)")
 
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     
