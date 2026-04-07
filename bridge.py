@@ -129,6 +129,7 @@ class TotalMixOSCBridge:
                 snapshots = self.snapshot_map[ws_name].get("snapshots", {})
                 snap_num = next((k for k, v in snapshots.items() if str(v).title() == str(snap_name)), None)
                 if not snap_num:
+                    logger.warning(snapshots.items())
                     logger.warning(f"   ⚠️  Snapshot '{snap_name}' NOT FOUND in workspace '{ws_name}'")
                     logger.info(f"   Available snapshots in '{ws_name}': {snapshots}")
             if should_switch_snap and snap_num:
