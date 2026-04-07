@@ -141,27 +141,38 @@ class TotalMixOSCBridge:
                         snap_num = candidate_index or snap_key
                         break
 
-            # === EXECUTE WORKSPACE + SNAPSHOT (with delay) ===
-            if ws_name and ws_slot is not None:
-                self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
-                logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
-                self.current_workspace = ws_name
-                if self.mqtt_client:
-                    self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
-                    logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
-                time.sleep(1.0)
+            # === STATE-AWARE SWITCH (respect force_switch=False) ===
+            already_on_target = (
+                self.current_workspace == ws_name and
+                self.current_snapshot == snap_name and
+                ws_name is not None and snap_name is not None
+            )
 
-            if snap_name and snap_num is not None:
-                osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
-                self.osc_client.send_message(osc_addr, 1.0)
-                logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
-                self.current_snapshot = snap_name   # ← always friendly name "Reset"
-                if self.mqtt_client:
-                    self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
-                    logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
-                time.sleep(0.3)
+            if force_switch or not already_on_target:
+                logger.info(f"   → Need to switch (force={force_switch} or state mismatch)")
 
-            # === MACRO STEPS (submix + fader) ===
+                if ws_name and ws_slot is not None:
+                    self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
+                    logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
+                    self.current_workspace = ws_name
+                    if self.mqtt_client:
+                        self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
+                        logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
+                    time.sleep(1.0)   # CRITICAL for TotalMix UI
+
+                if snap_name and snap_num is not None:
+                    osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
+                    self.osc_client.send_message(osc_addr, 1.0)
+                    logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
+                    self.current_snapshot = snap_name
+                    if self.mqtt_client:
+                        self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
+                        logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
+                    time.sleep(0.3)
+            else:
+                logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
+
+            # === MACRO STEPS (submix + fader) — ALWAYS run ===
             for step in macro.get("steps", []):
                 osc_addr = step["osc"]
                 step_val = value if step.get("value") == "{{param}}" else step["value"]
@@ -175,8 +186,7 @@ class TotalMixOSCBridge:
 
         finally:
             self._suppress_handler = False
-            self._last_macro_end_time = time.time()   # ← start cooldown for handler
-
+            self._last_macro_end_time = time.time()
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
