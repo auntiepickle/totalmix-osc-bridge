@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 try:
     with open("ufx2_snapshot_map.json", "r", encoding="utf-8") as f:
         SNAPSHOT_MAP = json.load(f)
-    logger.info(f"✅ Loaded ufx2_snapshot_map.json — workspaces: {list(SNAPSHOT_MAP.keys())}")
+    logger.info(f"Loaded ufx2_snapshot_map.json — workspaces: {list(SNAPSHOT_MAP.keys())}")
 except Exception as e:
     logger.error(f"Failed to load ufx2_snapshot_map.json: {e}")
     SNAPSHOT_MAP = {}
@@ -41,7 +41,7 @@ except Exception as e:
 try:
     with open("mappings.json", "r", encoding="utf-8") as f:
         MAPPINGS = json.load(f)
-    logger.info("✅ Loaded mappings.json — macros fully data-driven")
+    logger.info("Loaded mappings.json — macros fully data-driven")
 except Exception as e:
     logger.error(f"Failed to load mappings.json: {e}")
     MAPPINGS = {"macros": {}}
@@ -99,35 +99,43 @@ class TotalMixOSCBridge:
         if isinstance(ws_name, dict):
             ws_name = ws_name.get("name") or list(ws_name.values())[0] if ws_name else None
 
-        logger.info(f"🚀 Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f}")
+        force_switch = macro.get("force_switch", False)
 
-        # === STATE-AWARE SWITCH + HA FEEDBACK ===
-        if ws_name and (not self.current_workspace or self.current_workspace.lower() != str(ws_name).lower()):
-            if ws_name in self.snapshot_map:
+        logger.info(f"DEBUG — running macro from GitHub commit 'patching bridge to support full HA ws/ss sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
+        logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
+
+        # === STATE-AWARE SWITCH + HA FEEDBACK (NOW RESPECTS force_switch) ===
+        if ws_name:
+            should_switch_ws = force_switch or (not self.current_workspace or self.current_workspace.lower() != str(ws_name).lower())
+            if should_switch_ws and ws_name in self.snapshot_map:
                 ws_slot = self.snapshot_map[ws_name].get("slot")
                 if ws_slot is not None:
                     self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
-                    self.current_workspace = ws_name
                     logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
-                    if self.mqtt_client:
-                        self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
-                        logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
-                    time.sleep(0.3)
+            self.current_workspace = ws_name
+            if self.mqtt_client:
+                self.mqtt_client.publish("totalmix/workspace", str(ws_slot or "unknown"), retain=True)
+                logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot or 'unknown'}")
+            time.sleep(0.3)
 
-        if snap_name and ws_name and (not self.current_snapshot or str(self.current_snapshot).lower() != str(snap_name).lower()):
+        if snap_name and ws_name:
+            should_switch_snap = force_switch or (not self.current_snapshot or str(self.current_snapshot).lower() != str(snap_name).lower())
+            snap_num = None
             if ws_name in self.snapshot_map:
                 snapshots = self.snapshot_map[ws_name].get("snapshots", {})
-                # New map format: {"4": "Reset", "1": "Default", ...}
                 snap_num = next((k for k, v in snapshots.items() if str(v).lower() == str(snap_name).lower()), None)
-                if snap_num:
-                    osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
-                    self.osc_client.send_message(osc_addr, 1.0)
-                    self.current_snapshot = snap_name
-                    logger.info(f"   → Switched snapshot to '{snap_name}'")
-                    if self.mqtt_client:
-                        self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
-                        logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
-                    time.sleep(0.3)
+                if not snap_num:
+                    logger.warning(f"   ⚠️  Snapshot '{snap_name}' NOT FOUND in workspace '{ws_name}' — check casing in ufx2_snapshot_map.json")
+                    logger.debug(f"   Available snapshots: {snapshots}")
+            if should_switch_snap and snap_num:
+                osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
+                self.osc_client.send_message(osc_addr, 1.0)
+                logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr})")
+            self.current_snapshot = snap_name
+            if self.mqtt_client and snap_num:
+                self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
+                logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
+            time.sleep(0.3)
 
         # === MACRO STEPS (always run) ===
         for step in macro.get("steps", []):
@@ -139,13 +147,13 @@ class TotalMixOSCBridge:
             except Exception as e:
                 logger.error(f"OSC send failed: {e}")
 
-        logger.info(f"✅ Macro '{macro_name}' complete")
+        logger.info(f"Macro '{macro_name}' complete")
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("✅ State-aware workspace/snapshot switching (no repeated switches)")
+logger.info("State-aware workspace/snapshot switching with force_switch support")
 # === BRIDGE STARTUP — CENTRALIZED SERVER MODE ===
 if __name__ == "__main__":
     logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
