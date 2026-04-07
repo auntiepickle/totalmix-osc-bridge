@@ -57,6 +57,30 @@ class TotalMixOSCBridge:
         self.snapshot_map = snapshot_map
         self.current_workspace = None   # ← state tracking
         self.current_snapshot = None    # ← state tracking
+    def update_workspace(self, name: str = None, slot: int = None):
+        """Update internal state from either friendly name or TotalMix slot number."""
+        if name:
+            self.current_workspace = name
+        elif slot is not None and self.snapshot_map:
+            for ws_name, data in self.snapshot_map.items():
+                if data.get("slot") == slot:
+                    self.current_workspace = ws_name
+                    break
+        logger.info(f"BRIDGE STATE → workspace = {self.current_workspace or 'None'}")
+
+    def update_snapshot(self, name: str = None, index: int = None, workspace: str = None):
+        """Update internal state from either friendly name or snapshot index (1-8)."""
+        if name:
+            self.current_snapshot = name
+        elif index is not None and (workspace or self.current_workspace):
+            ws = workspace or self.current_workspace
+            if ws and ws in self.snapshot_map:
+                snapshots = self.snapshot_map[ws].get("snapshots", {})
+                for snap_name, data in snapshots.items():
+                    if data.get("index") == index or (data.get("index") or 1) == index:
+                        self.current_snapshot = snap_name
+                        break
+        logger.info(f"BRIDGE STATE → snapshot = {self.current_snapshot or 'None'}")
 
     def run_macro(self, macro_name: str, param: float = 0.5):
         if macro_name not in self.mappings.get("macros", {}):

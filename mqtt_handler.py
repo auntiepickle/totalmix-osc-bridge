@@ -96,11 +96,12 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         print(f"DEBUG MQTT IN → {msg.topic} | {payload}")   # ← loud debug on EVERY message
 
         try:
-            # === EXISTING HA WORKSPACE/SNAPSHOT (unchanged) ===
+            # === HA WORKSPACE / SNAPSHOT → now also sync bridge state ===
             if msg.topic == "totalmix/workspace":
-                ws = int(payload)
-                send_osc("/loadQuickWorkspace", ws, osc_ip, osc_port)
-                print(f"→ WORKSPACE {ws} LOADED")
+                ws_slot = int(payload)
+                send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
+                print(f"→ WORKSPACE slot {ws_slot} LOADED")
+                bridge.update_workspace(slot=ws_slot)          # ← NEW: sync state
 
             elif msg.topic == "totalmix/snapshot":
                 snap_num = int(payload)
@@ -110,6 +111,7 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     send_osc(address, 1.0, osc_ip, osc_port)
                     print(f"→ SNAPSHOT #{snap_num} RECALLED")
                     client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
+                    bridge.update_snapshot(index=snap_num)     # ← NEW: sync state
 
             elif msg.topic == "totalmix/config/snapshot_map":
                 global SNAPSHOT_MAP
