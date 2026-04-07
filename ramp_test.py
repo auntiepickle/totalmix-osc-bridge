@@ -4,7 +4,26 @@ import subprocess
 import os
 import sys
 
-# ================== CONFIG (reads your existing shell variables) ==================
+# ================== AUTO-LOAD .env ==================
+def load_dotenv():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(env_path):
+        print(f"❌ .env file not found at {env_path}")
+        sys.exit(1)
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            os.environ[key] = value
+    print("✅ Loaded .env file")
+
+load_dotenv()
+# ===================================================
+
 MQTT_HOST = "127.0.0.1"
 MQTT_PORT = 1883
 MQTT_USER = os.getenv("MQTT_USER")
@@ -13,12 +32,12 @@ MACRO_TOPIC = "totalmix/macro/an12_to_aes_send"
 
 DURATION = 3.42857      # exact 2 bars @ 140 BPM (8 beats)
 STEPS_PER_SECOND = 50   # smooth fader movement
-# =================================================================================
 
 if not MQTT_USER or not MQTT_PASS:
-    print("❌ ERROR: MQTT_USER or MQTT_PASS environment variables are not set!")
-    print("   Make sure you have run: export MQTT_USER=youruser && export MQTT_PASS=yourpass")
-    print("   Or source your .env / credentials file before running this script.")
+    print("❌ ERROR: MQTT_USER or MQTT_PASS still missing after loading .env")
+    print("   Check that your .env file contains:")
+    print("   MQTT_USER=your_username")
+    print("   MQTT_PASS=your_password")
     sys.exit(1)
 
 def publish_param(value: float):
