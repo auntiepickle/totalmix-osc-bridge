@@ -92,6 +92,7 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         publish_dynamic_workspaces(client)
 
     def on_message(client, userdata, msg):
+        global SNAPSHOT_MAP                     # ← MOVED TO TOP (fixes SyntaxError)
         payload = msg.payload.decode().strip()
         print(f"DEBUG MQTT IN → {msg.topic} | {payload}")   # ← loud debug on EVERY message
 
@@ -131,7 +132,6 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     bridge.update_snapshot(name=snap_name)     # ← now passes friendly name
 
             elif msg.topic == "totalmix/config/snapshot_map":
-                global SNAPSHOT_MAP
                 SNAPSHOT_MAP = json.loads(payload)
                 publish_snapshot_map(client)
                 publish_dynamic_workspaces(client)
