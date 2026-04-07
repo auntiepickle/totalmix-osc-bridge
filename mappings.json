@@ -1,13 +1,21 @@
 {
   "macros": {
     "an12_to_aes_send": {
-      "description": "Hardware Input AN 1/2 → AES Hardware Output send",
+      "description": "Hardware Input AN 1/2 → AES Hardware Output send (with native ramp)",
       "workspace": "Pill_setup",
       "snapshot": "Reset",
       "force_switch": false,
       "steps": [
         { "osc": "/setSubmix", "value": 12.0 },
-        { "osc": "/1/volume1", "value": "{{param}}" }
+        {
+          "osc": "/1/volume1",
+          "value": "{{param}}",
+          "ramp": {
+            "bars": 2,
+            "bpm": 140,
+            "curve": "triangle"
+          }
+        }
       ],
       "midi_triggers": [
         {

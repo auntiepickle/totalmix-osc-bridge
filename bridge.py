@@ -110,7 +110,7 @@ class TotalMixOSCBridge:
         logger.info(f"DEBUG — running macro from GitHub commit 'fixing state sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
-        # === DEBOUNCE: stop double macro triggers from MQTT echo ===
+        # === DEBOUNCE ===
         current_time = time.time()
         if hasattr(self, '_last_macro_time') and current_time - self._last_macro_time < 1.5 and getattr(self, '_last_macro_name', None) == macro_name:
             logger.info(f"   → Debounced duplicate macro trigger (ignored)")
@@ -141,7 +141,7 @@ class TotalMixOSCBridge:
                         snap_num = candidate_index or snap_key
                         break
 
-            # === STATE-AWARE SWITCH (respect force_switch=False) ===
+            # === STATE-AWARE SWITCH ===
             already_on_target = (
                 self.current_workspace == ws_name and
                 self.current_snapshot == snap_name and
@@ -158,7 +158,7 @@ class TotalMixOSCBridge:
                     if self.mqtt_client:
                         self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
                         logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
-                    time.sleep(1.0)   # CRITICAL for TotalMix UI
+                    time.sleep(1.0)
 
                 if snap_name and snap_num is not None:
                     osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
@@ -172,10 +172,50 @@ class TotalMixOSCBridge:
             else:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
-            # === MACRO STEPS (submix + fader) — ALWAYS run ===
+            # === MACRO STEPS (NOW WITH NATIVE RAMP SUPPORT) ===
             for step in macro.get("steps", []):
                 osc_addr = step["osc"]
-                step_val = value if step.get("value") == "{{param}}" else step["value"]
+                step_val = value if step.get("value") == "{{param}}" else step.get("value")
+
+                # === NEW: NATIVE RAMP ===
+                if isinstance(step.get("ramp"), dict) and step.get("value") == "{{param}}":
+                    ramp_cfg = step["ramp"]
+                    # Calculate duration
+                    if "duration" in ramp_cfg:
+                        duration = float(ramp_cfg["duration"])
+                    elif "bars" in ramp_cfg and "bpm" in ramp_cfg:
+                        beats = ramp_cfg["bars"] * 4
+                        duration = (beats * 60.0) / ramp_cfg["bpm"]
+                    else:
+                        duration = 2.0  # fallback
+
+                    curve = ramp_cfg.get("curve", "triangle")
+                    steps_per_sec = 20  # smooth but not flooding
+                    total_steps = int(duration * steps_per_sec) + 1
+
+                    logger.info(f"   → Starting native ramp on {osc_addr} ({curve}) over {duration:.3f}s")
+
+                    start_t = time.time()
+                    for i in range(total_steps):
+                        t = (time.time() - start_t) / duration
+                        if t > 1.0:
+                            t = 1.0
+
+                        if curve == "triangle":
+                            param = 2.0 * t if t < 0.5 else 2.0 - (2.0 * t)
+                        else:  # linear fallback
+                            param = t
+
+                        self.osc_client.send_message(osc_addr, float(param))
+                        logger.info(f"   → {osc_addr} = {param:.4f} (ramp)")
+                        time.sleep(1.0 / steps_per_sec)
+
+                    # Final exact 0.0
+                    self.osc_client.send_message(osc_addr, 0.0)
+                    logger.info(f"   → {osc_addr} = 0.0 (ramp end)")
+                    continue  # skip normal single send
+
+                # === NORMAL (non-ramp) step ===
                 try:
                     self.osc_client.send_message(osc_addr, float(step_val))
                     logger.info(f"   → {osc_addr} = {step_val}")
