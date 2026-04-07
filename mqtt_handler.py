@@ -93,7 +93,7 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
 
     def on_message(client, userdata, msg):
         payload = msg.payload.decode().strip()
-        print(f"MQTT IN → {msg.topic} | {payload}")
+        print(f"DEBUG MQTT IN → {msg.topic} | {payload}")   # ← loud debug on EVERY message
 
         try:
             # === EXISTING HA WORKSPACE/SNAPSHOT (unchanged) ===
@@ -117,7 +117,7 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                 publish_snapshot_map(client)
                 publish_dynamic_workspaces(client)
 
-            # === NEW: Centralized macro trigger from ANY client ===
+            # === MACRO HANDLER ===
             elif msg.topic.startswith("totalmix/macro/"):
                 macro_name = msg.topic.split("/")[-1]
                 if macro_name in bridge.mappings.get("macros", {}):
@@ -127,10 +127,11 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         bridge.run_macro(macro_name, param)
                     except ValueError:
                         print(f"Invalid param for macro {macro_name}: {payload}")
+                else:
+                    print(f"WARNING: macro '{macro_name}' not found in mappings.json")
 
         except Exception as e:
             print(f"Handler error: {e}")
-
     client.on_connect = on_connect
     client.on_message = on_message
     client.username_pw_set(mqtt_user, mqtt_pass)
