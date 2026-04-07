@@ -6,6 +6,7 @@ import json
 import mido
 import threading
 import paho.mqtt.client as mqtt
+import re  # ← NEW: for cleaning "4 - Reset" format
 from pythonosc import udp_client
 from config import *
 from mqtt_handler import setup_mqtt
@@ -91,7 +92,7 @@ class TotalMixOSCBridge:
         value = max(macro.get("param_range", [0.0, 1.0])[0],
                     min(macro.get("param_range", [0.0, 1.0])[1], float(param)))
 
-        # === ROBUST NAME EXTRACTION + CANONICAL NORMALIZATION ===
+        # === ROBUST NAME EXTRACTION + HA DROPDOWN CLEANING ===
         ws_name = macro.get("workspace")
         snap_name = macro.get("snapshot")
         if isinstance(snap_name, dict):
@@ -99,9 +100,9 @@ class TotalMixOSCBridge:
         if isinstance(ws_name, dict):
             ws_name = ws_name.get("name") or list(ws_name.values())[0] if ws_name else None
 
-        # Normalize snapshot name to match ufx2_snapshot_map.json exactly (title case)
+        # ← CRITICAL FIX: strip HA "4 - Reset" → "Reset"
         if snap_name:
-            snap_name = str(snap_name).strip().title()
+            snap_name = re.sub(r'^\d+\s*-\s*', '', str(snap_name)).strip().title()
 
         force_switch = macro.get("force_switch", False)
 
@@ -109,6 +110,7 @@ class TotalMixOSCBridge:
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
         # === STATE-AWARE SWITCH + HA FEEDBACK ===
+        ws_slot = None  # ← FIX: prevent UnboundLocalError
         if ws_name:
             should_switch_ws = force_switch or (not self.current_workspace or self.current_workspace.lower() != str(ws_name).lower())
             if should_switch_ws and ws_name in self.snapshot_map:
@@ -127,9 +129,13 @@ class TotalMixOSCBridge:
             snap_num = None
             if ws_name in self.snapshot_map:
                 snapshots = self.snapshot_map[ws_name].get("snapshots", {})
-                snap_num = next((k for k, v in snapshots.items() if str(v).title() == str(snap_name)), None)
+                # Support BOTH old format (index: name) AND new format (name: {"index": N})
+                for k, v in snapshots.items():
+                    name_to_check = v.get("name", v) if isinstance(v, dict) else v
+                    if str(name_to_check).title() == str(snap_name):
+                        snap_num = k if isinstance(v, dict) else k  # use index key
+                        break
                 if not snap_num:
-                    logger.warning(snapshots.items())
                     logger.warning(f"   ⚠️  Snapshot '{snap_name}' NOT FOUND in workspace '{ws_name}'")
                     logger.info(f"   Available snapshots in '{ws_name}': {snapshots}")
             if should_switch_snap and snap_num:
@@ -158,7 +164,7 @@ class TotalMixOSCBridge:
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("State-aware workspace/snapshot switching with force_switch + name normalization")
+logger.info("State-aware workspace/snapshot switching with HA dropdown cleaning + force_switch")
 # === BRIDGE STARTUP — CENTRALIZED SERVER MODE ===
 if __name__ == "__main__":
     logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
