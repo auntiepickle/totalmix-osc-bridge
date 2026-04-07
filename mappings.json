@@ -3,7 +3,7 @@
     "an12_to_aes_send": {
       "description": "Hardware Input AN 1/2 → AES Hardware Output send",
       "workspace": "Pill_setup",
-      "snapshot": "reset",
+      "snapshot": "Reset",
       "force_switch": true,
       "steps": [
         { "osc": "/setSubmix", "value": 12.0 },

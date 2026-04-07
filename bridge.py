@@ -91,7 +91,7 @@ class TotalMixOSCBridge:
         value = max(macro.get("param_range", [0.0, 1.0])[0],
                     min(macro.get("param_range", [0.0, 1.0])[1], float(param)))
 
-        # === ROBUST NAME EXTRACTION (handles old dict + new string format) ===
+        # === ROBUST NAME EXTRACTION + CANONICAL NORMALIZATION ===
         ws_name = macro.get("workspace")
         snap_name = macro.get("snapshot")
         if isinstance(snap_name, dict):
@@ -99,12 +99,16 @@ class TotalMixOSCBridge:
         if isinstance(ws_name, dict):
             ws_name = ws_name.get("name") or list(ws_name.values())[0] if ws_name else None
 
+        # Normalize snapshot name to match ufx2_snapshot_map.json exactly (title case)
+        if snap_name:
+            snap_name = str(snap_name).strip().title()
+
         force_switch = macro.get("force_switch", False)
 
-        logger.info(f"DEBUG — running macro from GitHub commit 'patching bridge to support full HA ws/ss sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
+        logger.info(f"DEBUG — running macro from GitHub commit 'fixing state sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
-        # === STATE-AWARE SWITCH + HA FEEDBACK (NOW RESPECTS force_switch) ===
+        # === STATE-AWARE SWITCH + HA FEEDBACK ===
         if ws_name:
             should_switch_ws = force_switch or (not self.current_workspace or self.current_workspace.lower() != str(ws_name).lower())
             if should_switch_ws and ws_name in self.snapshot_map:
@@ -123,10 +127,10 @@ class TotalMixOSCBridge:
             snap_num = None
             if ws_name in self.snapshot_map:
                 snapshots = self.snapshot_map[ws_name].get("snapshots", {})
-                snap_num = next((k for k, v in snapshots.items() if str(v).lower() == str(snap_name).lower()), None)
+                snap_num = next((k for k, v in snapshots.items() if str(v).title() == str(snap_name)), None)
                 if not snap_num:
-                    logger.warning(f"   ⚠️  Snapshot '{snap_name}' NOT FOUND in workspace '{ws_name}' — check casing in ufx2_snapshot_map.json")
-                    logger.debug(f"   Available snapshots: {snapshots}")
+                    logger.warning(f"   ⚠️  Snapshot '{snap_name}' NOT FOUND in workspace '{ws_name}'")
+                    logger.info(f"   Available snapshots in '{ws_name}': {snapshots}")
             if should_switch_snap and snap_num:
                 osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
                 self.osc_client.send_message(osc_addr, 1.0)
@@ -153,7 +157,7 @@ class TotalMixOSCBridge:
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("State-aware workspace/snapshot switching with force_switch support")
+logger.info("State-aware workspace/snapshot switching with force_switch + name normalization")
 # === BRIDGE STARTUP — CENTRALIZED SERVER MODE ===
 if __name__ == "__main__":
     logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
