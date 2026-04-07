@@ -93,10 +93,11 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         global SNAPSHOT_MAP
         payload = msg.payload.decode().strip()
 
-        # === SUPPRESS FEEDBACK LOOP DURING MACRO EXECUTION ===
-        if getattr(bridge, '_suppress_handler', False) and msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
-            print(f"→ Suppressed handler for {msg.topic} (self-triggered by macro)")
-            return
+        # === TIME-BASED COOLDOWN + SUPPRESSION (kills retained-message feedback loop) ===
+        if getattr(bridge, '_last_macro_end_time', 0) > 0 and time.time() - bridge._last_macro_end_time < 2.5:
+            if msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
+                print(f"→ Suppressed handler for {msg.topic} (cooldown after macro)")
+                return
 
         # === CLEAN LOGGING ===
         if msg.topic.startswith("totalmix/macro/") or "workspace" in msg.topic or "snapshot" in msg.topic:
@@ -107,6 +108,18 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
             if msg.topic == "totalmix/workspace":
                 try:
                     ws_slot = int(payload)
+                    # Skip OSC if already on this workspace (prevents double-fire)
+                    if getattr(bridge, 'current_workspace', None) and bridge.current_workspace != "unknown":
+                        # We still publish state but skip re-load if already correct
+                        ws_name = next(
+                            (name for name, data in SNAPSHOT_MAP.items()
+                             if isinstance(data, dict) and data.get("slot") == ws_slot),
+                            None
+                        )
+                        if ws_name == bridge.current_workspace:
+                            print(f"→ WORKSPACE slot {ws_slot} already current — skipping OSC")
+                            bridge.update_workspace(name=ws_name)
+                            return
                     send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
                     print(f"→ WORKSPACE slot {ws_slot} LOADED")
 
@@ -123,6 +136,12 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                 try:
                     snap_num = int(payload)
                     if 1 <= snap_num <= 8:
+                        # Skip OSC if already on this snapshot
+                        if getattr(bridge, 'current_snapshot', None) == "Reset" and snap_num == 4:
+                            print(f"→ SNAPSHOT #{snap_num} already current — skipping OSC")
+                            client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
+                            return
+
                         index = 9 - snap_num
                         address = f"/3/snapshots/{index}/1"
                         send_osc(address, 1.0, osc_ip, osc_port)

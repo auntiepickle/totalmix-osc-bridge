@@ -53,7 +53,8 @@ logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
-        self._suppress_handler = False   # ← ADD THIS LINE
+        self._suppress_handler = False   
+        self._last_macro_end_time = 0.0
         self.osc_client = osc_client
         self.mappings = mappings
         self.snapshot_map = snapshot_map
@@ -117,7 +118,7 @@ class TotalMixOSCBridge:
         self._last_macro_time = current_time
         self._last_macro_name = macro_name
 
-        self._suppress_handler = True   # ← Prevent on_message feedback loop
+        self._suppress_handler = True
 
         try:
             # === ALWAYS RESOLVE SLOTS/INDICES ===
@@ -148,13 +149,13 @@ class TotalMixOSCBridge:
                 if self.mqtt_client:
                     self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
                     logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
-                time.sleep(1.0)   # CRITICAL for TotalMix UI
+                time.sleep(1.0)
 
             if snap_name and snap_num is not None:
                 osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
                 self.osc_client.send_message(osc_addr, 1.0)
                 logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
-                self.current_snapshot = snap_name
+                self.current_snapshot = snap_name   # ← always friendly name "Reset"
                 if self.mqtt_client:
                     self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
                     logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
@@ -173,7 +174,8 @@ class TotalMixOSCBridge:
             logger.info(f"Macro '{macro_name}' complete")
 
         finally:
-            self._suppress_handler = False   # Always restore
+            self._suppress_handler = False
+            self._last_macro_end_time = time.time()   # ← start cooldown for handler
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
