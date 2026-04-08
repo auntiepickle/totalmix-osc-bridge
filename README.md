@@ -23,6 +23,6 @@ Perfect for:
 2. Run the bridge.
 3. On any MIDI client device, send MQTT: `totalmix/macro/an12_aes_send` with payload `0.0–1.0`.
 
-See `RME_UFX_II_TotalMix_OSC_Bridge_Project.md` and `MIDI_to_OSC_Mapping_System.md` for full details.
+See `RME_UFX_II_TotalMix_OSC_Bridge_Project.md` (full architecture & setup) and `MIDI_to_OSC_Mapping_System.md` (macro system & JSON format) for complete details.
 
 Last updated: April 2026
