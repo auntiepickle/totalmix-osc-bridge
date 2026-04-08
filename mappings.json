@@ -1,7 +1,7 @@
 {
   "macros": {
     "an12_to_aes_send": {
-      "description": "Hardware Input AN 1/2 → AES Hardware Output send (with native ramp)",
+      "description": "Hardware Input AN 1/2 → AES Hardware Output send (native ramp)",
       "workspace": "Pill_setup",
       "snapshot": "Reset",
       "force_switch": false,
@@ -10,7 +10,8 @@
         {
           "osc": "/1/volume1",
           "value": "{{param}}",
-          "ramp": {
+          "operation": {
+            "type": "ramp",
             "bars": 2,
             "bpm": 140,
             "curve": "triangle"
@@ -18,12 +19,30 @@
         }
       ],
       "midi_triggers": [
+        { "type": "control_change", "number": 42, "channel": 1, "use_value_as_param": true }
+      ],
+      "param_range": [0.0, 1.0]
+    },
+    "an12_lfo_test": {
+      "description": "AN 1/2 send LFO test",
+      "workspace": "Pill_setup",
+      "snapshot": "Reset",
+      "force_switch": false,
+      "steps": [
+        { "osc": "/setSubmix", "value": 12.0 },
         {
-          "type": "control_change",
-          "number": 42,
-          "channel": 1,
-          "use_value_as_param": true
+          "osc": "/1/volume1",
+          "value": "{{param}}",
+          "operation": {
+            "type": "lfo",
+            "bars": 4,
+            "bpm": 140,
+            "depth": 0.8
+          }
         }
+      ],
+      "midi_triggers": [
+        { "type": "control_change", "number": 43, "channel": 1, "use_value_as_param": true }
       ],
       "param_range": [0.0, 1.0]
     }
