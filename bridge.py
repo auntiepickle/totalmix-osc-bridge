@@ -7,6 +7,7 @@ import mido
 import threading
 import paho.mqtt.client as mqtt
 import re
+import asyncio  # ← NEW: required for async-safe WebSocket broadcast
 from pythonosc import udp_client
 from config import *
 from mqtt_handler import setup_mqtt
@@ -52,11 +53,11 @@ except Exception as e:
 osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) if OSC_IP and OSC_PORT else None
 logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 
-# === WEBSOCKET HOOK FOR WEB CLIENT v1 (port 8090) ===
+# === WEBSOCKET HOOK FOR WEB CLIENT v1 ===
 ws_clients = []  # list of active FastAPI WebSocket connections
 
 def broadcast_state(bridge_instance):
-    """Broadcast current state to all connected web clients"""
+    """Broadcast current state to all connected web clients (async-safe)"""
     if not ws_clients:
         return
     payload = {
@@ -66,7 +67,8 @@ def broadcast_state(bridge_instance):
     }
     for client in list(ws_clients):
         try:
-            client.send_text(json.dumps(payload))
+            # Fire-and-forget async send from sync code (fixes RuntimeWarning)
+            asyncio.create_task(client.send_text(json.dumps(payload)))
         except Exception:
             if client in ws_clients:
                 ws_clients.remove(client)
