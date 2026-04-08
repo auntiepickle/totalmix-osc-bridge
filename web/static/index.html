@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TotalMix OSC Bridge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-[#111111] text-white font-sans">
+    <div class="max-w-7xl mx-auto p-6">
+        <!-- Top bar -->
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold flex items-center gap-3">
+                <span class="text-orange-500">RME</span> TOTALMIX OSC BRIDGE
+            </h1>
+            <div id="status" class="flex items-center gap-2 bg-[#1E1E1E] px-4 py-2 rounded-full">
+                <div class="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                <span id="workspace" class="font-mono">Workspace: Pill_setup</span>
+                <span id="snapshot" class="font-mono">Snapshot: Reset</span>
+            </div>
+        </div>
+
+        <!-- Macro Grid -->
+        <div id="macro-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
