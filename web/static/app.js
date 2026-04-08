@@ -1,6 +1,94 @@
 const ws = new WebSocket(`ws://${window.location.host}/ws`);
 let macros = {};
 
+// ==================== CLIENT-SIDE MIDI (M1) ====================
+let midiAccess = null;
+let midiInput = null;
+
+async function initWebMIDI() {
+    if (!navigator.requestMIDIAccess) {
+        console.error("Web MIDI API not supported in this browser");
+        return;
+    }
+    try {
+        midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+        console.log("Web MIDI ready — available inputs:", Array.from(midiAccess.inputs.values()).map(i => i.name));
+        
+        // Auto-select first Cirklon (or any MIDI port containing "Cirklon" / "MIDI")
+        for (const input of midiAccess.inputs.values()) {
+            if (input.name.toLowerCase().includes("cirklon") || input.name.toLowerCase().includes("midi")) {
+                midiInput = input;
+                midiInput.onmidimessage = handleMIDIMessage;
+                console.log(`✅ Connected to Cirklon: ${input.name}`);
+                updateMIDIBadge(`Connected: ${input.name}`);
+                return;
+            }
+        }
+        console.warn("No Cirklon found — connect one and refresh (or click the button)");
+    } catch (err) {
+        console.error("MIDI access denied or failed", err);
+    }
+}
+
+function handleMIDIMessage(message) {
+    const [status, data1, data2] = message.data;
+    const channel = (status & 0x0F) + 1;        // 1-based
+    const cc = data1;
+    const valueRaw = data2;                     // 0-127
+
+    if ((status & 0xF0) !== 0xB0) return;      // only CC messages
+
+    const value = valueRaw / 127.0;             // 0.0–1.0
+
+    // Match against every loaded macro’s midi_triggers
+    Object.keys(macros).forEach(name => {
+        const macro = macros[name];
+        for (const trigger of macro.midi_triggers || []) {
+            if (trigger.type === "control_change" &&
+                trigger.number === cc &&
+                trigger.channel === channel) {
+
+                // Scale to param_range exactly like server would
+                const range = macro.param_range || [0.0, 1.0];
+                const scaled = Math.max(range[0], Math.min(range[1], value));
+
+                console.log(`🎹 MIDI → ${name} (CC${cc} ch${channel} → ${scaled.toFixed(3)})`);
+                fireMacro(name, scaled, false);    // fixed: added isLFO=false
+                updateCardLastTrigger(name, cc, valueRaw);
+                return;                            // one macro per CC for now
+            }
+        }
+    });
+}
+
+// Simple visual feedback on cards
+function updateCardLastTrigger(name, cc, value) {
+    const card = Array.from(document.querySelectorAll('.card')).find(c => 
+        c.querySelector('h3').textContent === name);
+    if (card) {
+        let badge = card.querySelector('.midi-badge');
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.className = 'midi-badge text-[10px] font-mono bg-green-500/20 text-green-400 px-2 py-0.5 rounded mt-2';
+            card.appendChild(badge);
+        }
+        badge.textContent = `CC${cc} • ${value}`;
+    }
+}
+
+function updateMIDIBadge(text) {
+    let badge = document.getElementById('midi-status-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'midi-status-badge';
+        badge.className = 'px-4 py-1 bg-green-600/90 text-white text-sm font-medium rounded-2xl flex items-center gap-2';
+        // Insert after the snapshot div (adjust selector if your top bar is different)
+        const topBar = document.querySelector('.flex.justify-between'); // or wherever your header is
+        if (topBar) topBar.appendChild(badge);
+    }
+    badge.innerHTML = `🎹 ${text}`;
+}
+
 ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
     if (data.type === "state") {
@@ -74,5 +162,10 @@ async function fireMacro(name, param, isLFO = false) {
     await fetch(`/api/trigger/${name}?param=${param}`, { method: 'POST' });
 }
 
-ws.onopen = loadMacros;
+// ==================== FINAL STARTUP (merged) ====================
+ws.onopen = () => {
+    loadMacros().then(() => {
+        initWebMIDI();           // now guaranteed macros are loaded first
+    });
+};
 ws.onerror = () => console.error("WebSocket error");
