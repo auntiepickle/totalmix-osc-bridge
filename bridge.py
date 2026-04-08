@@ -234,26 +234,34 @@ class TotalMixOSCBridge:
             self._suppress_handler = False
             self._last_macro_end_time = time.time()
 
+
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
 logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegistry + WebSocket live updates for Web Client v1")
 
-# === BRIDGE STARTUP — CENTRALIZED SERVER MODE ===
-if __name__ == "__main__":
-    logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
+# === NEW: MQTT STARTUP METHOD (works in BOTH standalone + web mode) ===
+def start_mqtt(self):
+    logger.info("=== TOTALMIX OSC BRIDGE STARTING MQTT (web or standalone mode) ===")
     logger.info(f"OSC target → {OSC_IP}:{OSC_PORT}")
-    logger.info("MQTT macro namespace → totalmix/macro/<name> (remote clients publish here)")
+    logger.info("MQTT macro namespace → totalmix/macro/<name>")
 
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-    
-    setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, bridge)
-    bridge.mqtt_client = client
+    setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, self)
+    self.mqtt_client = client
 
     if ENABLE_OSC_MONITOR:
         osc_monitor.start()
 
     client.loop_start()
+    logger.info("MQTT client loop started — macro subscriptions ACTIVE")
+
+# Attach the method to the bridge instance
+TotalMixOSCBridge.start_mqtt = start_mqtt
+
+# === BRIDGE STARTUP — CENTRALIZED MODE (for python bridge.py) ===
+if __name__ == "__main__":
+    bridge.start_mqtt()   # re-uses the same function
 
     try:
         while True:
@@ -262,5 +270,6 @@ if __name__ == "__main__":
         logger.info("\nShutting down bridge...")
         if ENABLE_OSC_MONITOR:
             osc_monitor.stop()
-        client.loop_stop()
+        if bridge.mqtt_client:
+            bridge.mqtt_client.loop_stop()
         logger.info("Bridge stopped cleanly.")
