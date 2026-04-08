@@ -1,41 +1,93 @@
 # ================================================
-# TotalMix OSC Bridge - Example docker-compose
-# Copy & paste the "totalmix-osc-bridge" service into your main compose file
+# TotalMix OSC Bridge + Web Client v1
+# Full example docker-compose service
+# Copy & paste the "totalmix-osc-bridge" block into your main docker-compose.yml
 # ================================================
 
 version: '3.9'
 
 services:
   totalmix-osc-bridge:
+    # === BUILD OPTIONS ===
+    # Option A: Build from GitHub (one-click, always latest)
     build:
       context: https://github.com/auntiepickle/totalmix-osc-bridge.git
-      # You can pin to a specific commit/tag for stability:
-      # context: https://github.com/auntiepickle/totalmix-osc-bridge.git#v1.0.0
+      # Pin to a specific commit for production stability:
+      # context: https://github.com/auntiepickle/totalmix-osc-bridge.git#4a712b55c96c6744fe2453f678c85ace03d2a7a6
+
+    # Option B: Local development (uncomment if you cloned the repo)
+    # build: .
+    # context: .   # points to your local totalmix-osc-bridge folder
 
     container_name: totalmix-osc-bridge
     restart: unless-stopped
 
-    # Best practice: Use .env file (recommended)
+    # === ENVIRONMENT ===
     env_file:
-      - /path/to/your/totalmix-osc-bridge/.env     # ← Change this path
+      - /path/to/your/totalmix-osc-bridge/.env     # ← CHANGE THIS PATH
 
-    # Alternative: Inline environment (less secure)
+    # Alternative inline env (less secure, for quick testing only)
     # environment:
     #   - OSC_IP=192.168.1.50
-    #   - MQTT_USER=your_mqtt_user
-    #   - MQTT_PASS=your_mqtt_password
+    #   - OSC_PORT=9001
+    #   - MQTT_BROKER=127.0.0.1
+    #   - MQTT_PORT=1883
+    #   - MQTT_USER=youruser
+    #   - MQTT_PASS=yourpass
+
+    # === PORTS & NETWORK ===
+    # OSC ports (TotalMix incoming + OSC Monitor outgoing)
+    ports:
+      - "9001:9001/udp"   # RME UFX II OSC control
+      - "9003:9003/udp"   # OSC Monitor (TotalMix outgoing)
+
+    # Web Client v1 (FastAPI + Tailwind UI)
+    # http://YOUR-STUDIO-IP:8090  ← beautiful macro grid, live status, Fire buttons
+    # (automatically served by the updated Dockerfile + uvicorn)
+    # Because we use network_mode: host below, no extra port mapping is needed for 8090.
 
     depends_on:
       - mosquitto
 
-    # If your mosquitto is on a different network, add:
+    # === STUDIO RECOMMENDED MODE ===
+    network_mode: host          # ← BEST FOR STUDIO: full MIDI/ALSA access + direct 8090 web UI
+
+    # Alternative (if you prefer isolated network):
     # networks:
     #   - mqtt_net
+    # ports:
+    #   - "8090:8090"         # ← uncomment if NOT using network_mode: host
+
+    # === VOLUMES ===
+    volumes:
+      - ../totalmix-osc-bridge:/app               # ← LIVE code changes (no rebuild needed)
+      - /mnt/md0/NAS/guest/Scripts/totalmix:/app/config:ro   # ← your config folder
 
 # ================================================
-# Example of your existing mosquitto for reference
+# Example mosquitto broker (add to the same file if needed)
 # ================================================
 #   mosquitto:
-#     image: eclipse-mosquitto
+#     image: eclipse-mosquitto:latest
 #     container_name: mosquitto
-#     ...
+#     restart: unless-stopped
+#     ports:
+#       - "1883:1883"
+#     volumes:
+#       - ./mosquitto/config:/mosquitto/config
+#       - ./mosquitto/data:/mosquitto/data
+#       - ./mosquitto/log:/mosquitto/log
+#     network_mode: host   # matches the bridge
+
+# ================================================
+# Quick Start
+# ================================================
+# 1. Copy this service into your main docker-compose.yml
+# 2. Update the .env path and volumes
+# 3. docker compose up -d
+# 4. Open http://YOUR-STUDIO-IP:8090
+#
+# Web Client v1 features:
+# • Auto-loaded macro cards from mappings.json
+# • One-click FIRE + Run as Ramp/LFO
+# • Live workspace/snapshot status via WebSocket
+# • Dark TotalMix/Ableton look & feel

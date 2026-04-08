@@ -52,6 +52,25 @@ except Exception as e:
 osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) if OSC_IP and OSC_PORT else None
 logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 
+# === WEBSOCKET HOOK FOR WEB CLIENT v1 (port 8090) ===
+ws_clients = []  # list of active FastAPI WebSocket connections
+
+def broadcast_state(bridge_instance):
+    """Broadcast current state to all connected web clients"""
+    if not ws_clients:
+        return
+    payload = {
+        "type": "state",
+        "workspace": getattr(bridge_instance, "current_workspace", None),
+        "snapshot": getattr(bridge_instance, "current_snapshot", None)
+    }
+    for client in list(ws_clients):
+        try:
+            client.send_text(json.dumps(payload))
+        except Exception:
+            if client in ws_clients:
+                ws_clients.remove(client)
+
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
         self._suppress_handler = False   
@@ -62,6 +81,8 @@ class TotalMixOSCBridge:
         self.current_workspace = None
         self.current_snapshot = None
         self.mqtt_client = None
+        # WebSocket hook (live UI updates)
+        self.broadcast_state = lambda: broadcast_state(self)
 
     def update_workspace(self, name: str = None, slot: int = None):
         if name:
@@ -72,6 +93,7 @@ class TotalMixOSCBridge:
                     self.current_workspace = ws_name
                     break
         logger.info(f"BRIDGE STATE → workspace = {self.current_workspace or 'None'}")
+        self.broadcast_state()  # ← live web update
 
     def update_snapshot(self, name: str = None, index: int = None, workspace: str = None):
         if name:
@@ -85,6 +107,7 @@ class TotalMixOSCBridge:
                         self.current_snapshot = snap_value
                         break
         logger.info(f"BRIDGE STATE → snapshot = {self.current_snapshot or 'None'}")
+        self.broadcast_state()  # ← live web update
 
     def run_macro(self, macro_name: str, param: float = 0.5):
         if macro_name not in self.mappings.get("macros", {}):
@@ -174,8 +197,6 @@ class TotalMixOSCBridge:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
             # === MACRO STEPS WITH OPERATION LIBRARY ===
-            from operations import OperationRegistry   # ← new import at top of file too
-
             for step in macro.get("steps", []):
                 osc_addr = step["osc"]
 
@@ -207,6 +228,7 @@ class TotalMixOSCBridge:
                     self.mqtt_client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
 
             logger.info(f"Macro '{macro_name}' complete")
+            self.broadcast_state()  # ← live web update after macro runs
 
         finally:
             self._suppress_handler = False
@@ -215,7 +237,8 @@ class TotalMixOSCBridge:
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("State-aware workspace/snapshot switching (NO force) + new snapshot_map format")
+logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegistry + WebSocket live updates for Web Client v1")
+
 # === BRIDGE STARTUP — CENTRALIZED SERVER MODE ===
 if __name__ == "__main__":
     logger.info("=== TOTALMIX OSC BRIDGE STARTING (centralized mode) ===")
