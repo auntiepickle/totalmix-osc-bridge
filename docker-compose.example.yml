@@ -9,85 +9,42 @@ version: '3.9'
 services:
   totalmix-osc-bridge:
     # === BUILD OPTIONS ===
-    # Option A: Build from GitHub (one-click, always latest)
     build:
       context: https://github.com/auntiepickle/totalmix-osc-bridge.git
-      # Pin to a specific commit for production stability:
+      # Pin to specific commit for stability:
       # context: https://github.com/auntiepickle/totalmix-osc-bridge.git#4a712b55c96c6744fe2453f678c85ace03d2a7a6
-
-    # Option B: Local development (uncomment if you cloned the repo)
-    # build: .
-    # context: .   # points to your local totalmix-osc-bridge folder
 
     container_name: totalmix-osc-bridge
     restart: unless-stopped
 
-    # === ENVIRONMENT ===
+    # === ENVIRONMENT (WEB_PORT now lives here — single source of truth) ===
     env_file:
-      - /path/to/your/totalmix-osc-bridge/.env     # ← CHANGE THIS PATH
-
-    # Alternative inline env (less secure, for quick testing only)
-    # environment:
-    #   - OSC_IP=192.168.1.50
-    #   - OSC_PORT=9001
-    #   - MQTT_BROKER=127.0.0.1
-    #   - MQTT_PORT=1883
-    #   - MQTT_USER=youruser
-    #   - MQTT_PASS=yourpass
-
-    # === PORTS & NETWORK ===
-    # OSC ports (TotalMix incoming + OSC Monitor outgoing)
-    ports:
-      - "9001:9001/udp"   # RME UFX II OSC control
-      - "9003:9003/udp"   # OSC Monitor (TotalMix outgoing)
-
-    # Web Client v1 (FastAPI + Tailwind UI)
-    # http://YOUR-STUDIO-IP:8090  ← beautiful macro grid, live status, Fire buttons
-    # (automatically served by the updated Dockerfile + uvicorn)
-    # Because we use network_mode: host below, no extra port mapping is needed for 8090.
+      - /path/to/your/totalmix-osc-bridge/.env     # ← must contain WEB_PORT=
 
     depends_on:
       - mosquitto
 
-    # === STUDIO RECOMMENDED MODE ===
-    network_mode: host          # ← BEST FOR STUDIO: full MIDI/ALSA access + direct 8090 web UI
+    # === PORTS & NETWORK ===
+    ports:
+      - "9001:9001/udp"   # RME UFX II OSC control
+      - "9003:9003/udp"   # OSC Monitor
 
-    # Alternative (if you prefer isolated network):
-    # networks:
-    #   - mqtt_net
-    # ports:
-    #   - "8090:8090"         # ← uncomment if NOT using network_mode: host
+    # Web Client v1 now lives at http://YOUR-STUDIO-IP:${WEB_PORT}
+    # (8088 by default — change once in .env and you're done)
+
+    # Studio recommended:
+    network_mode: host
 
     # === VOLUMES ===
     volumes:
-      - ../totalmix-osc-bridge:/app               # ← LIVE code changes (no rebuild needed)
-      - /mnt/md0/NAS/guest/Scripts/totalmix:/app/config:ro   # ← your config folder
-
-# ================================================
-# Example mosquitto broker (add to the same file if needed)
-# ================================================
-#   mosquitto:
-#     image: eclipse-mosquitto:latest
-#     container_name: mosquitto
-#     restart: unless-stopped
-#     ports:
-#       - "1883:1883"
-#     volumes:
-#       - ./mosquitto/config:/mosquitto/config
-#       - ./mosquitto/data:/mosquitto/data
-#       - ./mosquitto/log:/mosquitto/log
-#     network_mode: host   # matches the bridge
+      - ../totalmix-osc-bridge:/app
+      - /mnt/md0/NAS/guest/Scripts/totalmix:/app/config:ro
 
 # ================================================
 # Quick Start
 # ================================================
-# 1. Copy this service into your main docker-compose.yml
-# 2. Update the .env path and volumes
-# 3. docker compose up -d
-# 4. Open http://YOUR-STUDIO-IP:8090
+# 1. Add WEB_PORT=8088 to your .env
+# 2. docker compose up -d
+# 3. Open http://YOUR-STUDIO-IP:8088
 #
-# Web Client v1 features:
-# • Auto-loaded macro cards from mappings.json
-# • One-click FIRE + Run as Ramp/LFO
-# • Live workspace/snapshot status via WebSocket
-# • Dark TotalMix/Ableton look & feel
+# One change in .env now controls EVERYTHING.

@@ -1,4 +1,5 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
+import os
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 import json
 import threading
@@ -7,11 +8,14 @@ from bridge import bridge, ws_clients, MAPPINGS
 
 app = FastAPI(title="TotalMix OSC Bridge Web Client")
 
+# === CONFIGURABLE WEB PORT (single source: .env) ===
+WEB_PORT = int(os.getenv("WEB_PORT", 8088))
+
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 @app.get("/")
 async def root():
-    return {"message": "TotalMix Web Client running — open /static/index.html"}
+    return {"message": f"TotalMix Web Client running on port {WEB_PORT} — open /static/index.html"}
 
 @app.get("/api/macros")
 async def get_macros():
@@ -41,7 +45,7 @@ def start_bridge():
 @app.on_event("startup")
 async def startup_event():
     threading.Thread(target=start_bridge, daemon=True).start()
-    print("🚀 TotalMix Web Client + Bridge started (port 8090)")
+    print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT})")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8090)
+    uvicorn.run(app, host="0.0.0.0", port=WEB_PORT)
