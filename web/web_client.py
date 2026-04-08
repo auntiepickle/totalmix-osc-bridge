@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -12,11 +13,13 @@ app = FastAPI(title="TotalMix OSC Bridge Web Client")
 # === CONFIGURABLE WEB PORT (single source: .env) ===
 WEB_PORT = int(os.getenv("WEB_PORT", 8088))
 
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
+# ROBUST STATIC MOUNT - absolute path guarantees it works from /app/web/
+static_dir = str(Path(__file__).parent / "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
 async def root():
-    # Auto-redirect to the beautiful UI (no more JSON landing page)
+    # Auto-redirect root → beautiful UI
     return RedirectResponse(url="/static/index.html")
 
 @app.get("/api/macros")
