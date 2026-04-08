@@ -1,0 +1,12 @@
+{
+    auto_https disable_redirects
+}
+
+:80 {
+    redir https://{host}:{env.WEB_HTTPS_PORT}{uri} permanent
+}
+
+:443 {
+    tls internal
+    reverse_proxy 127.0.0.1:{env.WEB_PORT}
+}

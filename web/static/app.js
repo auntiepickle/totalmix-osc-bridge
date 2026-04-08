@@ -14,17 +14,17 @@ async function initWebMIDI() {
         midiAccess = await navigator.requestMIDIAccess({ sysex: false });
         console.log("Web MIDI ready — available inputs:", Array.from(midiAccess.inputs.values()).map(i => i.name));
         
-        // Auto-select first Cirklon (or any MIDI port containing "Cirklon" / "MIDI")
+        // Auto-select first device whose name contains "midi" (works for Cirklon or ANY USB MIDI controller)
         for (const input of midiAccess.inputs.values()) {
-            if (input.name.toLowerCase().includes("cirklon") || input.name.toLowerCase().includes("midi")) {
+            if (input.name.toLowerCase().includes("midi")) {
                 midiInput = input;
                 midiInput.onmidimessage = handleMIDIMessage;
-                console.log(`✅ Connected to Cirklon: ${input.name}`);
+                console.log(`✅ Connected to MIDI Device: ${input.name}`);
                 updateMIDIBadge(`Connected: ${input.name}`);
                 return;
             }
         }
-        console.warn("No Cirklon found — connect one and refresh (or click the button)");
+        console.warn("No MIDI device found — connect one and click Reconnect MIDI");
     } catch (err) {
         console.error("MIDI access denied or failed", err);
     }
@@ -32,15 +32,14 @@ async function initWebMIDI() {
 
 function handleMIDIMessage(message) {
     const [status, data1, data2] = message.data;
-    const channel = (status & 0x0F) + 1;        // 1-based
+    const channel = (status & 0x0F) + 1;
     const cc = data1;
-    const valueRaw = data2;                     // 0-127
+    const valueRaw = data2;
 
     if ((status & 0xF0) !== 0xB0) return;      // only CC messages
 
-    const value = valueRaw / 127.0;             // 0.0–1.0
+    const value = valueRaw / 127.0;
 
-    // Match against every loaded macro’s midi_triggers
     Object.keys(macros).forEach(name => {
         const macro = macros[name];
         for (const trigger of macro.midi_triggers || []) {
@@ -48,20 +47,18 @@ function handleMIDIMessage(message) {
                 trigger.number === cc &&
                 trigger.channel === channel) {
 
-                // Scale to param_range exactly like server would
                 const range = macro.param_range || [0.0, 1.0];
                 const scaled = Math.max(range[0], Math.min(range[1], value));
 
                 console.log(`🎹 MIDI → ${name} (CC${cc} ch${channel} → ${scaled.toFixed(3)})`);
-                fireMacro(name, scaled, false);    // fixed: added isLFO=false
+                fireMacro(name, scaled, false);
                 updateCardLastTrigger(name, cc, valueRaw);
-                return;                            // one macro per CC for now
+                return;
             }
         }
     });
 }
 
-// Simple visual feedback on cards
 function updateCardLastTrigger(name, cc, value) {
     const card = Array.from(document.querySelectorAll('.card')).find(c => 
         c.querySelector('h3').textContent === name);
@@ -82,12 +79,13 @@ function updateMIDIBadge(text) {
         badge = document.createElement('div');
         badge.id = 'midi-status-badge';
         badge.className = 'px-4 py-1 bg-green-600/90 text-white text-sm font-medium rounded-2xl flex items-center gap-2';
-        // Insert after the snapshot div (adjust selector if your top bar is different)
-        const topBar = document.querySelector('.flex.justify-between'); // or wherever your header is
+        const topBar = document.querySelector('.flex.justify-between');
         if (topBar) topBar.appendChild(badge);
     }
     badge.innerHTML = `🎹 ${text}`;
 }
+
+// ==================== WEBSOCKET & UI ====================
 
 ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -134,23 +132,19 @@ async function fireMacro(name, param, isLFO = false) {
     const btns = document.querySelectorAll(`button[onclick^="fireMacro('${name}'"]`);
     btns.forEach(b => b.disabled = true);
 
-    // === START PROGRESS IMMEDIATELY (before server even responds) ===
     const barContainer = document.getElementById(`progress-${name}`);
     if (barContainer) {
         const bar = barContainer.querySelector('.progress-bar');
         barContainer.classList.remove('hidden');
-        bar.style.transitionDuration = '0ms';   // instant reset
+        bar.style.transitionDuration = '0ms';
         bar.style.width = '0%';
 
-        // Force browser reflow
         void bar.offsetWidth;
 
-        // Start smooth animation
-        const durationMs = isLFO ? 4000 : 3500;   // LFO button = longer bar
+        const durationMs = isLFO ? 4000 : 3500;
         bar.style.transitionDuration = `${durationMs}ms`;
         bar.style.width = '100%';
 
-        // Auto-hide after animation
         setTimeout(() => {
             barContainer.classList.add('hidden');
             bar.style.width = '0%';
@@ -158,14 +152,13 @@ async function fireMacro(name, param, isLFO = false) {
         }, durationMs + 800);
     }
 
-    // Fire the actual macro (we already started the visual)
     await fetch(`/api/trigger/${name}?param=${param}`, { method: 'POST' });
 }
 
-// ==================== FINAL STARTUP (merged) ====================
+// ==================== STARTUP ====================
 ws.onopen = () => {
     loadMacros().then(() => {
-        initWebMIDI();           // now guaranteed macros are loaded first
+        initWebMIDI();
     });
 };
 ws.onerror = () => console.error("WebSocket error");
