@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 import json
 import threading
 import uvicorn
@@ -15,7 +16,8 @@ app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 @app.get("/")
 async def root():
-    return {"message": f"TotalMix Web Client running on port {WEB_PORT} — open /static/index.html"}
+    # Auto-redirect to the beautiful UI (no more JSON landing page)
+    return RedirectResponse(url="/static/index.html")
 
 @app.get("/api/macros")
 async def get_macros():
