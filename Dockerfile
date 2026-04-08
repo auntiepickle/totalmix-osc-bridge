@@ -16,7 +16,7 @@ COPY *.py ./
 COPY web/ ./web/
 
 # Expose web port
-EXPOSE 8080
+EXPOSE 8090
 
 # Run the web client (which starts bridge in background + FastAPI)
-CMD ["uvicorn", "web.web_client:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
+CMD ["uvicorn", "web.web_client:app", "--host", "0.0.0.0", "--port", "8090", "--log-level", "info"]
