@@ -26,7 +26,7 @@ async function loadMacros() {
                 </div>
                 <div class="text-xs px-3 py-1 bg-orange-500/20 text-orange-400 rounded-full h-fit">MACRO</div>
             </div>
-            <button onclick="fireMacro('${name}', 1.0)" 
+            <button onclick="fireMacro('${name}', 1.0, false)" 
                     class="fire-btn mt-6 w-full bg-orange-500 hover:bg-orange-600 text-black font-bold py-4 rounded-xl text-lg">
                 FIRE
             </button>
@@ -34,41 +34,44 @@ async function loadMacros() {
                     class="mt-3 w-full border border-orange-500 text-orange-400 hover:bg-orange-500/10 py-3 rounded-xl text-sm">
                 RUN AS RAMP/LFO
             </button>
-            <!-- Progress bar now always visible when running -->
             <div id="progress-${name}" class="hidden mt-4 h-2 bg-gray-800 rounded-full overflow-hidden">
-                <div class="progress-bar h-full bg-gradient-to-r from-orange-400 to-purple-400 transition-all duration-300" style="width:0%"></div>
+                <div class="progress-bar h-full bg-gradient-to-r from-orange-400 to-purple-400 transition-all" style="width:0%"></div>
             </div>
         `;
         grid.appendChild(card);
     });
 }
 
-async function fireMacro(name, param, asRamp = false) {
+async function fireMacro(name, param, isLFO = false) {
     const btns = document.querySelectorAll(`button[onclick^="fireMacro('${name}'"]`);
-    btns.forEach(b => b.disabled = true); // visual feedback
+    btns.forEach(b => b.disabled = true);
 
-    await fetch(`/api/trigger/${name}?param=${param}`, { method: 'POST' });
-
-    // Show + animate progress bar
+    // === START PROGRESS IMMEDIATELY (before server even responds) ===
     const barContainer = document.getElementById(`progress-${name}`);
     if (barContainer) {
         const bar = barContainer.querySelector('.progress-bar');
         barContainer.classList.remove('hidden');
-        bar.style.width = '0%'; // reset
+        bar.style.transitionDuration = '0ms';   // instant reset
+        bar.style.width = '0%';
 
-        // Animate to 100% over ~4 seconds (covers your ramps/LFOs)
-        setTimeout(() => {
-            bar.style.transitionDuration = asRamp ? '3400ms' : '4000ms';
-            bar.style.width = '100%';
-        }, 10);
+        // Force browser reflow
+        void bar.offsetWidth;
 
-        // Auto-hide after animation + extra buffer
+        // Start smooth animation
+        const durationMs = isLFO ? 4000 : 3500;   // LFO button = longer bar
+        bar.style.transitionDuration = `${durationMs}ms`;
+        bar.style.width = '100%';
+
+        // Auto-hide after animation
         setTimeout(() => {
             barContainer.classList.add('hidden');
             bar.style.width = '0%';
             btns.forEach(b => b.disabled = false);
-        }, asRamp ? 5000 : 6000);
+        }, durationMs + 800);
     }
+
+    // Fire the actual macro (we already started the visual)
+    await fetch(`/api/trigger/${name}?param=${param}`, { method: 'POST' });
 }
 
 ws.onopen = loadMacros;
