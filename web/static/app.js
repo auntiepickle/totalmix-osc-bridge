@@ -1,4 +1,6 @@
-const ws = new WebSocket(`ws://${window.location.host}/ws`);
+// === SECURE WEBSOCKET (works on both HTTP and HTTPS) ===
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
 let macros = {};
 
 // ==================== CLIENT-SIDE MIDI (M1) ====================
