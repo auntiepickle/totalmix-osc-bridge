@@ -1,21 +1,22 @@
 # =============================================
-# STAGE 1: Tailwind CSS Builder (Node.js) – v3 pinned
+# STAGE 1: Tailwind CSS Builder (node:20 – reliable)
 # =============================================
-FROM node:20-alpine AS tailwind-builder
+FROM node:20 AS tailwind-builder
 
 WORKDIR /build
 
-# Copy all web assets + Tailwind config (exact structure from commit e12ddbad1dc8e764d7b22979124c774db9f7e7b2)
+# Copy everything Tailwind needs (exact structure from commit e12ddbad1dc8e764d7b22979124c774db9f7e7b2)
 COPY web/static/ ./web/static/
 COPY web/ ./web/
 COPY tailwind.config.js ./
 
-# Create minimal package.json + install Tailwind v3 (this fixes the npx executable error)
+# Create package.json + install Tailwind v3
 RUN npm init -y
 RUN npm install -D tailwindcss@3
 
-# Build production CSS with v3 CLI
+# Build CSS + DEBUG: confirm the file exists
 RUN npx tailwindcss@3 -i ./web/static/input.css -o ./web/static/output.css --minify
+RUN echo "=== TAILWIND BUILD DEBUG ===" && ls -la ./web/static/
 
 # =============================================
 # STAGE 2: Python Runtime (final slim image)
@@ -31,7 +32,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy built web folder (now includes output.css) + Python backend
+# Copy built web folder (includes output.css) + Python backend
 COPY --from=tailwind-builder /build/web ./web
 COPY --from=tailwind-builder /build/*.py ./
 
