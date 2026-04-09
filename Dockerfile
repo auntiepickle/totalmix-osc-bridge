@@ -1,20 +1,21 @@
 # =============================================
-# STAGE 1: Tailwind CSS Builder (Node.js)
+# STAGE 1: Tailwind CSS Builder (Node.js) – v3 pinned
 # =============================================
 FROM node:20-alpine AS tailwind-builder
 
 WORKDIR /build
 
-# Copy all web assets + the config we just created
+# Copy all web assets + Tailwind config (exact structure from commit e12ddbad1dc8e764d7b22979124c774db9f7e7b2)
 COPY web/static/ ./web/static/
 COPY web/ ./web/
 COPY tailwind.config.js ./
 
-# Install Tailwind
-RUN npm install -D tailwindcss
+# Create minimal package.json + install Tailwind v3 (this fixes the npx executable error)
+RUN npm init -y
+RUN npm install -D tailwindcss@3
 
-# Build production CSS (minified)
-RUN ./node_modules/.bin/tailwindcss -i ./web/static/input.css -o ./web/static/output.css --minify
+# Build production CSS with v3 CLI
+RUN npx tailwindcss@3 -i ./web/static/input.css -o ./web/static/output.css --minify
 
 # =============================================
 # STAGE 2: Python Runtime (final slim image)
