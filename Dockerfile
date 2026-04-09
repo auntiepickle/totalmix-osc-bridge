@@ -5,29 +5,15 @@ FROM node:20-alpine AS tailwind-builder
 
 WORKDIR /build
 
-# Copy web assets so Tailwind can scan .html/.js files
+# Copy all web assets + the config we just created
 COPY web/static/ ./web/static/
 COPY web/ ./web/
+COPY tailwind.config.js ./
 
-# Install Tailwind (classic v3 for full compatibility)
+# Install Tailwind
 RUN npm install -D tailwindcss
 
-# Create tailwind.config.js manually (bypasses npx init bug in Alpine)
-RUN cat > tailwind.config.js << 'EOF'
-/** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: [
-    "./web/static/**/*.html",
-    "./web/static/**/*.js",
-  ],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-}
-EOF
-
-# Build production CSS (exact command you asked for, now reliable)
+# Build production CSS (minified)
 RUN ./node_modules/.bin/tailwindcss -i ./web/static/input.css -o ./web/static/output.css --minify
 
 # =============================================
@@ -44,7 +30,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy the *built* web folder (with output.css) + Python backend
+# Copy built web folder (now includes output.css) + Python backend
 COPY --from=tailwind-builder /build/web ./web
 COPY --from=tailwind-builder /build/*.py ./
 
