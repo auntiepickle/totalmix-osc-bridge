@@ -7,6 +7,8 @@ import json
 import threading
 import uvicorn
 import logging
+import asyncio  # ← ADD THIS LINE (fixes the NameError)
+
 from bridge import bridge, ws_clients, MAPPINGS
 
 # Setup logger so the M2 functions can log cleanly
@@ -45,11 +47,10 @@ async def get_macros():
 
 @app.post("/api/trigger/{macro_name}")
 async def trigger_macro(macro_name: str, param: float = 0.5):
-    """Fire a macro when user clicks a card in the web UI.
-    Supports optional ?param=0.XX query parameter (matches bridge.run_macro signature)."""
+    """Fire a macro when user clicks a card in the web UI."""
     if macro_name in MAPPINGS.get("macros", {}):
         logger.info(f"Web UI clicked macro → {macro_name} (param={param:.3f})")
-        bridge.run_macro(macro_name, param)          # correct signature from bridge.py
+        bridge.run_macro(macro_name, param)
         return {"status": "success", "macro": macro_name, "param": param}
     else:
         logger.warning(f"Unknown macro from UI: {macro_name}")
@@ -89,5 +90,8 @@ async def startup_event():
     threading.Thread(target=start_bridge, daemon=True).start()
     # NEW: start MQTT in web mode too
     bridge.start_mqtt()
+    
+    # ←←← THIS LINE NOW WORKS (asyncio is imported)
     bridge.main_loop = asyncio.get_running_loop()
+    
     print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT}) - MQTT ACTIVE")
