@@ -6,10 +6,75 @@ let macros = {};
 // ==================== CLIENT-SIDE MIDI (M1) ====================
 let midiAccess = null;
 let midiInput = null;
-
+// ====================== GLOBAL MIDI STATE ======================
 let midiAccess = null;
 let midiInput = null;
 
+// ====================== HELPER: Update top-bar MIDI status ======================
+function updateMIDIBadge(text) {
+    let badge = document.getElementById('midi-status-badge');
+    if (!badge) {
+        const topBar = document.querySelector('.flex.justify-between');
+        if (topBar) {
+            badge = document.createElement('div');
+            badge.id = 'midi-status-badge';
+            badge.className = 'text-xs font-mono bg-green-500/10 text-green-400 px-3 py-1 rounded-2xl';
+            topBar.appendChild(badge);
+        }
+    }
+    if (badge) badge.textContent = text;
+}
+
+// ====================== MIDI MESSAGE HANDLER (with full device info) ======================
+function handleMIDIMessage(message) {
+    const [status, data1, data2] = message.data;
+    const channel = (status & 0x0F) + 1;
+    const cc = data1;
+    const valueRaw = data2;
+    const deviceName = message.target ? message.target.name : "Unknown MIDI";
+
+    if ((status & 0xF0) !== 0xB0) return;   // only CC messages
+
+    const value = valueRaw / 127.0;
+
+    Object.keys(macros).forEach(name => {
+        const macro = macros[name];
+        for (const trigger of macro.midi_triggers || []) {
+            if (trigger.type === "control_change" &&
+                trigger.number === cc &&
+                trigger.channel === channel) {
+
+                const range = macro.param_range || [0.0, 1.0];
+                const scaled = Math.max(range[0], Math.min(range[1], value));
+
+                console.log(`MIDI → ${name} (${deviceName} | CC${cc} ch${channel} → ${scaled.toFixed(3)})`);
+                fireMacro(name, scaled, false);
+                updateCardLastTrigger(name, cc, valueRaw, deviceName, channel);
+                return;
+            }
+        }
+    });
+}
+
+// ====================== UPDATED CARD BADGE (device + channel + value) ======================
+function updateCardLastTrigger(name, cc, value, deviceName, channel) {
+    const card = Array.from(document.querySelectorAll('.card')).find(c => 
+        c.querySelector('h3').textContent === name);
+    if (card) {
+        let badge = card.querySelector('.midi-badge');
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.className = 'midi-badge text-[10px] font-mono bg-green-500/20 text-green-400 px-2 py-0.5 rounded mt-2 flex flex-col gap-px';
+            card.appendChild(badge);
+        }
+        badge.innerHTML = `
+            <span class="font-semibold">${deviceName}</span>
+            <span>CC${cc} • ch${channel} • ${value}</span>
+        `;
+    }
+}
+
+// ====================== UPDATED INIT (manual selector + auto Cirklon) ======================
 async function initWebMIDI() {
     if (!navigator.requestMIDIAccess) {
         console.error("Web MIDI API not supported");
@@ -21,10 +86,9 @@ async function initWebMIDI() {
 
         console.log("Available MIDI inputs:", inputs.map(i => i.name));
 
-        // Build or update the device selector dropdown
+        // Build or update device selector
         let selector = document.getElementById('midi-device-selector');
         if (!selector) {
-            // First time — create the UI once
             const topBar = document.querySelector('.flex.justify-between');
             if (topBar) {
                 const div = document.createElement('div');
@@ -47,13 +111,13 @@ async function initWebMIDI() {
             selector.appendChild(opt);
         });
 
-        // Auto-connect Cirklon-style device if present
-        const cirklon = inputs.find(i => i.name.toLowerCase().includes("midi"));
-        if (cirklon && !midiInput) {
-            midiInput = cirklon;
+        // Auto-connect any device with "midi" in name (Cirklon, etc.)
+        const targetDevice = inputs.find(i => i.name.toLowerCase().includes("midi"));
+        if (targetDevice && !midiInput) {
+            midiInput = targetDevice;
             midiInput.onmidimessage = handleMIDIMessage;
-            console.log(`Auto-connected: ${cirklon.name}`);
-            updateMIDIBadge(`Connected: ${cirklon.name}`);
+            console.log(`Auto-connected: ${targetDevice.name}`);
+            updateMIDIBadge(`Connected: ${targetDevice.name}`);
         } else if (inputs.length === 0) {
             console.warn("No MIDI devices found");
         }
@@ -61,6 +125,21 @@ async function initWebMIDI() {
         console.error("MIDI access failed", err);
     }
 }
+
+window.connectSelectedMIDI = async () => {
+    const selector = document.getElementById('midi-device-selector');
+    const selectedId = selector.value;
+    if (!selectedId || !midiAccess) return;
+
+    const input = Array.from(midiAccess.inputs.values()).find(i => i.id === selectedId);
+    if (input) {
+        if (midiInput) midiInput.onmidimessage = null;
+        midiInput = input;
+        midiInput.onmidimessage = handleMIDIMessage;
+        console.log(`Manually connected: ${input.name}`);
+        updateMIDIBadge(`Connected: ${input.name}`);
+    }
+};
 
 window.connectSelectedMIDI = async () => {
     const selector = document.getElementById('midi-device-selector');
