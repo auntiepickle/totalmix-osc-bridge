@@ -276,7 +276,7 @@ class TotalMixOSCBridge:
                 "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None
             }
             self.macro_live_state[macro_name] = live_data
-            self.broadcast_state(self, macro_update=live_data)   # one clean broadcast
+            self.broadcast_state(macro_update=live_data)   # one clean broadcast
 
         finally:
             self._suppress_handler = False
