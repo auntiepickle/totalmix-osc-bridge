@@ -1,17 +1,19 @@
 /* =============================================
-   TOTALMIX OSC BRIDGE - Web UI (M2 COMPLETE)
-   Commit base: 3329dd0d017696738abce89fb32be8fd4fa11acd
-   Fixes: initial load, MIDI selector, fire buttons via HTTP, Caddy HTTPS
+   TOTALMIX OSC BRIDGE - Web UI (M2 COMPLETE + FINAL FIXES)
+   Fixes: details panel, progress bar timing, workspace/snapshot header, MIDI status
    ============================================= */
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
 
 let macros = {};
+let currentWorkspace = '—';
+let currentSnapshot = '—';
+let midiConnectedDevice = '—';
 
 ws.onopen = async () => {
     console.log('[WS] Connected to bridge');
-    await loadMacros();                    // initial load
+    await loadMacros();
 };
 
 ws.onclose = () => console.log('[WS] Disconnected');
@@ -20,17 +22,35 @@ ws.onmessage = function(event) {
     const data = JSON.parse(event.data);
     console.log('[WS] Received:', data);
 
-    if (data.type === 'full_state' || data.type === 'macro_update') {
-        if (data.macros) {
-            Object.keys(data.macros).forEach(key => {
-                macros[key] = { ...(macros[key] || {}), ...data.macros[key] };
-            });
-        } else if (data.macro) {
-            macros[data.macro.name] = { ...(macros[data.macro.name] || {}), ...data.macro };
-        }
-        renderCards();
+    // Update live bridge state
+    if (data.current_workspace) currentWorkspace = data.current_workspace;
+    if (data.current_snapshot) currentSnapshot = data.current_snapshot;
+
+    if (data.macro_update) {
+        const mu = data.macro_update;
+        macros[mu.name] = { ...(macros[mu.name] || {}), ...mu };
     }
+
+    updateStatusHeader();
+    renderCards();
 };
+
+// ====================== STATUS HEADER (workspace + snapshot + MIDI) ======================
+function updateStatusHeader() {
+    const header = document.getElementById('status-header');
+    if (header) {
+        header.innerHTML = `
+            <span class="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-sm font-medium">
+                Workspace: <strong>${currentWorkspace}</strong>
+            </span>
+            <span class="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-sm font-medium ml-2">
+                Snapshot: <strong>${currentSnapshot}</strong>
+            </span>
+            <span class="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-sm font-medium ml-2">
+                MIDI: <strong>${midiConnectedDevice}</strong>
+            </span>`;
+    }
+}
 
 // ====================== INITIAL MACRO LOAD ======================
 async function loadMacros() {
@@ -42,21 +62,20 @@ async function loadMacros() {
         macros = await res.json();
         console.log("✅ Loaded", Object.keys(macros).length, "macros");
         renderCards();
+        updateStatusHeader();
     } catch (err) {
         console.error("❌ loadMacros failed:", err);
-        const grid = document.getElementById('macro-grid');
-        if (grid) grid.innerHTML = `<div class="p-8 text-red-400 text-center">Failed to load macros.<br><small>${err.message}</small></div>`;
     }
 }
 
-// ====================== FIRE MACRO (now uses HTTP endpoint) ======================
+// ====================== FIRE MACRO ======================
 async function fireMacro(name, value = 1.0, ramp = false) {
     const macro = macros[name];
     if (!macro) return;
 
     console.log(`[UI] Firing macro: ${name} (value=${value}, ramp=${ramp})`);
 
-    // Start progress bar immediately
+    // Start progress bar immediately with correct duration
     const durationMs = macro.durationMs || (ramp ? 3500 : 500);
     animateProgress(name, durationMs);
 
@@ -73,13 +92,15 @@ async function fireMacro(name, value = 1.0, ramp = false) {
     }
 }
 
-// ====================== PROGRESS ANIMATION ======================
+// ====================== PROGRESS ANIMATION (protected from WS re-render) ======================
 function animateProgress(name, durationMs) {
     const bar = document.getElementById(`progress-bar-${name}`);
     if (!bar) return;
+
     bar.style.transitionDuration = '0ms';
     bar.style.width = '0%';
-    void bar.offsetWidth;
+    void bar.offsetWidth; // force reflow
+
     bar.style.transitionDuration = `${durationMs}ms`;
     bar.style.width = '100%';
 }
@@ -123,17 +144,25 @@ function renderCards() {
     });
 }
 
+// ====================== DETAILS PANEL (now shows MIDI + routing) ======================
 function toggleDetail(name) {
     const panel = document.getElementById(`detail-${name}`);
     const m = macros[name];
     if (!panel || !m) return;
     panel.classList.toggle('hidden');
     if (!panel.classList.contains('hidden')) {
-        panel.innerHTML = `<div class="space-y-4"><strong>Routing</strong><br>${m.routing_label || '—'}</div>`;
+        let html = `<strong>Routing</strong><br>${m.routing_label || '—'}<br><br>`;
+        if (m.midi_triggers && m.midi_triggers.length) {
+            html += `<strong>MIDI Triggers</strong><br>`;
+            m.midi_triggers.forEach(t => {
+                html += `• CC${t.number} ch${t.channel} ${t.use_value_as_param ? '(value as param)' : ''}<br>`;
+            });
+        }
+        panel.innerHTML = html;
     }
 }
 
-// ====================== MIDI (fully restored) ======================
+// ====================== MIDI (fully restored + visual status) ======================
 let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
@@ -194,7 +223,9 @@ async function initWebMIDI() {
         if (target) {
             midiInput = target;
             midiInput.onmidimessage = handleMIDIMessage;
+            midiConnectedDevice = target.name;
             console.log(`[MIDI] Listening on ${target.name}`);
+            updateStatusHeader();   // refresh header with MIDI status
         }
     } catch (err) {
         console.error('[MIDI] Failed:', err);
@@ -211,7 +242,9 @@ window.connectSelectedMIDI = () => {
         midiInput = input;
         midiInput.onmidimessage = handleMIDIMessage;
         lastMidiDevice = input.name;
+        midiConnectedDevice = input.name;
         localStorage.setItem('lastMidiDevice', input.name);
+        updateStatusHeader();
     }
 };
 
