@@ -2,11 +2,11 @@
     auto_https disable_redirects
 }
 
-:{env.WEB_HTTP_PORT} {
-    redir https://{host}:{env.WEB_HTTPS_PORT}{uri} permanent
+:8085 {
+    redir https://{host}:9445{uri} permanent
 }
 
-:{env.WEB_HTTPS_PORT} {
+:9445 {
     tls internal
     reverse_proxy 127.0.0.1:{env.WEB_PORT}
 }
