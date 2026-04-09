@@ -48,4 +48,11 @@ ENV WEB_PORT=${WEB_PORT}
 
 EXPOSE ${WEB_PORT}
 
-CMD sh -c "uvicorn web.web_client:app --host 0.0.0.0 --port ${WEB_PORT} --log-level info"
+# Protect built assets for dev volume mounts
+COPY --from=tailwind-builder /build/web/static/style.css /static-assets/style.css
+
+COPY entrypoint.sh /app/
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+CMD ["sh", "-c", "uvicorn web.web_client:app --host 0.0.0.0 --port ${WEB_PORT} --log-level info"]
