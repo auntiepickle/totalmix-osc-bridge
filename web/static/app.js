@@ -6,9 +6,6 @@ let macros = {};
 // ==================== CLIENT-SIDE MIDI (M1) ====================
 let midiAccess = null;
 let midiInput = null;
-// ====================== GLOBAL MIDI STATE ======================
-let midiAccess = null;
-let midiInput = null;
 
 // ====================== HELPER: Update top-bar MIDI status ======================
 function updateMIDIBadge(text) {
