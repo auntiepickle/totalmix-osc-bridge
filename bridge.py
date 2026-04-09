@@ -53,30 +53,8 @@ except Exception as e:
 osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) if OSC_IP and OSC_PORT else None
 logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 
-# === WEBSOCKET HOOK FOR WEB CLIENT v1 ===
+# === WEBSOCKET CLIENTS (shared between bridge.py and web_client.py) ===
 ws_clients = []  # list of active FastAPI WebSocket connections
-
-async def broadcast_state(bridge_instance, macro_update=None):
-    """Broadcast state + rich macro_update (fully async, no more RuntimeWarning)"""
-    if not ws_clients:
-        return
-
-    payload = {
-        "type": "state",
-        "workspace": getattr(bridge_instance, "current_workspace", None),
-        "snapshot": getattr(bridge_instance, "current_snapshot", None),
-        "macros": getattr(bridge_instance, "macro_live_state", {})
-    }
-    if macro_update:
-        payload["macro_update"] = macro_update
-
-    for client in list(ws_clients):
-        try:
-            asyncio.create_task(client.send_text(json.dumps(payload)))
-        except Exception as e:
-            logger.warning(f"WS broadcast failed: {e}")
-            if client in ws_clients:
-                ws_clients.remove(client)
 
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
@@ -88,13 +66,43 @@ class TotalMixOSCBridge:
         self.current_workspace = None
         self.current_snapshot = None
         self.mqtt_client = None
-        # WebSocket hook (live UI updates)
-        self.broadcast_state = lambda macro_update=None: asyncio.create_task(
-            broadcast_state(self, macro_update=macro_update)
-        )
         self.macro_live_state = {}          # live macro state for polished cards
         self.channel_map = None             # loaded once for routing labels
         self._load_channel_map()
+
+        # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
+        self.broadcast_state = self._safe_broadcast_state
+
+    # ─────────────────────────────────────────────────────────────
+    # SAFE WEBSOCKET BROADCAST (works from MQTT thread OR async context)
+    # ─────────────────────────────────────────────────────────────
+    def _safe_broadcast_state(self, macro_update=None):
+        """Thread-safe broadcast that works from any thread (MQTT callbacks or FastAPI)."""
+        try:
+            # If we are already in an async context
+            asyncio.get_running_loop()
+            asyncio.create_task(self._do_broadcast(macro_update))
+        except RuntimeError:
+            # MQTT callback thread — no running loop
+            loop = asyncio.get_event_loop_policy().get_event_loop()
+            asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update), loop)
+
+    async def _do_broadcast(self, macro_update=None):
+        """Actual broadcast logic (always runs inside the asyncio event loop)."""
+        for client in list(ws_clients):
+            try:
+                state = {
+                    "current_snapshot": getattr(self, "current_snapshot", "unknown"),
+                    "current_workspace": getattr(self, "current_workspace", "unknown"),
+                    "macro_update": macro_update
+                }
+                await client.send_json(state)
+            except Exception:
+                # dead client
+                if client in ws_clients:
+                    ws_clients.remove(client)
+
+    # (rest of your class stays exactly the same — _load_channel_map, get_routing_label, update_workspace, etc.)
     
     def _load_channel_map(self):
         """Load ufx2_channel_map.json once for human-readable routing labels"""
