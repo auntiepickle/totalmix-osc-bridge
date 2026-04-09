@@ -56,8 +56,8 @@ logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 # === WEBSOCKET HOOK FOR WEB CLIENT v1 ===
 ws_clients = []  # list of active FastAPI WebSocket connections
 
-def broadcast_state(bridge_instance, macro_update=None):
-    """Broadcast current state + optional macro live data (still event-driven, non-chatty)"""
+async def broadcast_state(bridge_instance, macro_update=None):
+    """Broadcast state + rich macro_update (fully async, no more RuntimeWarning)"""
     if not ws_clients:
         return
 
@@ -65,16 +65,16 @@ def broadcast_state(bridge_instance, macro_update=None):
         "type": "state",
         "workspace": getattr(bridge_instance, "current_workspace", None),
         "snapshot": getattr(bridge_instance, "current_snapshot", None),
-        "macros": getattr(bridge_instance, "macro_live_state", {})   # rich per-macro data for cards
+        "macros": getattr(bridge_instance, "macro_live_state", {})
     }
-
     if macro_update:
         payload["macro_update"] = macro_update
 
     for client in list(ws_clients):
         try:
             asyncio.create_task(client.send_text(json.dumps(payload)))
-        except Exception:
+        except Exception as e:
+            logger.warning(f"WS broadcast failed: {e}")
             if client in ws_clients:
                 ws_clients.remove(client)
 
@@ -89,7 +89,9 @@ class TotalMixOSCBridge:
         self.current_snapshot = None
         self.mqtt_client = None
         # WebSocket hook (live UI updates)
-        self.broadcast_state = lambda macro_update=None: broadcast_state(self, macro_update=macro_update)
+        self.broadcast_state = lambda macro_update=None: asyncio.create_task(
+            broadcast_state(self, macro_update=macro_update)
+        )
         self.macro_live_state = {}          # live macro state for polished cards
         self.channel_map = None             # loaded once for routing labels
         self._load_channel_map()
