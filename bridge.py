@@ -89,7 +89,7 @@ class TotalMixOSCBridge:
         self.current_snapshot = None
         self.mqtt_client = None
         # WebSocket hook (live UI updates)
-        self.broadcast_state = lambda: broadcast_state(self)
+        self.broadcast_state = lambda macro_update=None: broadcast_state(self, macro_update=macro_update)
         self.macro_live_state = {}          # live macro state for polished cards
         self.channel_map = None             # loaded once for routing labels
         self._load_channel_map()
