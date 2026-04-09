@@ -20,3 +20,10 @@ Reliable single-slot OSC bridge for Cirklon (and any MQTT client) to control Tot
 
 **Deployment**  
 Docker / docker-compose or venv on always-on machine.
+
+### Web UI + Client-Side MIDI (M1 — April 2026)
+
+Modern dashboard at `https://192.168.1.41.nip.io:9445` with:
+- Live macro cards + per-card MIDI badges showing source device/channel/value
+- Manual MIDI device selector in top bar
+- Secure context required by Web MIDI API (Caddy + nip.io)

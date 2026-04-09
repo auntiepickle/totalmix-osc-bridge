@@ -11,24 +11,18 @@
 2. Dramatically improve the macro cards so they show MIDI assignments, channel names, OSC previews, live values, and status at a glance.
 3. Keep everything non-breaking and data-driven.
 
-## Phase 1: MIDI Support (High Priority – 2–3 hours to MVP)
-**Goal**: Cirklon (or any MIDI controller) plugs straight in → fires any macro instantly.
+### M1 (Client-Side Web MIDI MVP) — ✅ COMPLETE Apr 9 2026
 
-**Tasks**
-- [ ] Create `midi_handler.py` (clean, separate module using `mido`)
-  - Configurable input port via `config.py`/`.env` (with auto-list on startup)
-  - Background asyncio task listening for CC messages
-  - Match incoming CC/channel against every macro’s `midi_triggers` list
-  - Scale MIDI 0–127 → macro’s `param_range` (or 0.0–1.0 fallback)
-  - Call `self.run_macro(macro_name, scaled_value)`
-- [ ] Integrate into `bridge.py` (start handler in `__init__`, add status logging + WebSocket broadcast)
-- [ ] Update `MIDI_to_OSC_Mapping_System.md` with handler details + Cirklon setup example
-- [ ] Add `tests/test_midi.py` (unit + synthetic message tests)
-- [ ] Optional: MIDI output port for future feedback (Cirklon LEDs)
+- [x] Web MIDI listener + automatic/manual Cirklon detection in `web/static/app.js`
+- [x] CC/channel matching against `mappings.json` + `fireMacro()`
+- [x] Per-card dynamic CC badges (device name + CC + channel + value)
+- [x] Secure HTTPS + wss:// WebSocket context via Caddy + nip.io
+- [x] Working manual MIDI device selector + reconnect in top bar
+- [x] Tested live with simulator + real triggers
 
-**Success**: Send one CC from Cirklon → submix switches + Orville AES/AN fader ramps exactly as defined.
+**M1 Success**: Full client-side MIDI control with zero server changes. Cards, badges, and secure Web MIDI all working. ✅
 
-## Phase 2: Bulk Up the Macro Cards (Parallel – same sprint)
+## M2: Bulk Up the Macro Cards (Parallel – same sprint)
 **Goal**: Turn the current bare-bones cards into rich, informative control surfaces.
 
 **Tasks**
@@ -45,7 +39,7 @@
 
 **Success**: Open the web UI and instantly see exactly what every macro does, how to trigger it from Cirklon, and what it’s currently doing.
 
-## Phase 3: Documentation & Polish
+## M3: Documentation & Polish
 - [ ] Update `RME_UFX_II_TotalMix_OSC_Bridge_Project.md` with links to this plan
 - [ ] Add “Cirklon MIDI Quick-Start” section
 - [ ] Version bump + release notes
