@@ -74,21 +74,28 @@ class TotalMixOSCBridge:
         self.broadcast_state = self._safe_broadcast_state
 
     # ─────────────────────────────────────────────────────────────
-    # SAFE WEBSOCKET BROADCAST (works from MQTT thread OR async context)
+    # SAFE WEBSOCKET BROADCAST (FINAL VERSION — MQTT thread safe)
     # ─────────────────────────────────────────────────────────────
     def _safe_broadcast_state(self, macro_update=None):
-        """Thread-safe broadcast that works from any thread (MQTT callbacks or FastAPI)."""
+        """Thread-safe broadcast that works from ANY thread (MQTT callbacks OR FastAPI)."""
         try:
-            # If we are already in an async context
+            # FastAPI thread — already in async context
             asyncio.get_running_loop()
             asyncio.create_task(self._do_broadcast(macro_update))
         except RuntimeError:
-            # MQTT callback thread — no running loop
-            loop = asyncio.get_event_loop_policy().get_event_loop()
-            asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update), loop)
+            # MQTT thread — no event loop in this thread
+            try:
+                # Try to use main loop if web_client.py already registered it
+                if hasattr(self, 'main_loop') and self.main_loop is not None:
+                    asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update), self.main_loop)
+                else:
+                    # Ultimate fallback — don't crash the MQTT handler
+                    logger.debug("Broadcast skipped (no main_loop yet)")
+            except Exception as e:
+                logger.debug(f"Broadcast failed safely: {e}")
 
     async def _do_broadcast(self, macro_update=None):
-        """Actual broadcast logic (always runs inside the asyncio event loop)."""
+        """Actual broadcast logic (always runs inside asyncio)."""
         for client in list(ws_clients):
             try:
                 state = {
@@ -98,12 +105,10 @@ class TotalMixOSCBridge:
                 }
                 await client.send_json(state)
             except Exception:
-                # dead client
                 if client in ws_clients:
                     ws_clients.remove(client)
 
-    # (rest of your class stays exactly the same — _load_channel_map, get_routing_label, update_workspace, etc.)
-    
+   
     def _load_channel_map(self):
         """Load ufx2_channel_map.json once for human-readable routing labels"""
         try:

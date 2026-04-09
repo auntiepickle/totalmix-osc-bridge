@@ -89,4 +89,5 @@ async def startup_event():
     threading.Thread(target=start_bridge, daemon=True).start()
     # NEW: start MQTT in web mode too
     bridge.start_mqtt()
+    bridge.main_loop = asyncio.get_running_loop()
     print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT}) - MQTT ACTIVE")
