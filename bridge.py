@@ -56,18 +56,23 @@ logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
 # === WEBSOCKET HOOK FOR WEB CLIENT v1 ===
 ws_clients = []  # list of active FastAPI WebSocket connections
 
-def broadcast_state(bridge_instance):
-    """Broadcast current state to all connected web clients (async-safe)"""
+def broadcast_state(bridge_instance, macro_update=None):
+    """Broadcast current state + optional macro live data (still event-driven, non-chatty)"""
     if not ws_clients:
         return
+
     payload = {
         "type": "state",
         "workspace": getattr(bridge_instance, "current_workspace", None),
-        "snapshot": getattr(bridge_instance, "current_snapshot", None)
+        "snapshot": getattr(bridge_instance, "current_snapshot", None),
+        "macros": getattr(bridge_instance, "macro_live_state", {})   # rich per-macro data for cards
     }
+
+    if macro_update:
+        payload["macro_update"] = macro_update
+
     for client in list(ws_clients):
         try:
-            # Fire-and-forget async send from sync code (fixes RuntimeWarning)
             asyncio.create_task(client.send_text(json.dumps(payload)))
         except Exception:
             if client in ws_clients:
@@ -85,7 +90,32 @@ class TotalMixOSCBridge:
         self.mqtt_client = None
         # WebSocket hook (live UI updates)
         self.broadcast_state = lambda: broadcast_state(self)
+        self.macro_live_state = {}          # live macro state for polished cards
+        self.channel_map = None             # loaded once for routing labels
+        self._load_channel_map()
+    
+    def _load_channel_map(self):
+        """Load ufx2_channel_map.json once for human-readable routing labels"""
+        try:
+            with open("ufx2_channel_map.json", "r", encoding="utf-8") as f:
+                self.channel_map = json.load(f)
+            logger.info("✅ Loaded ufx2_channel_map.json for card routing labels")
+        except Exception as e:
+            logger.warning(f"Could not load ufx2_channel_map.json: {e}")
+            self.channel_map = {}
 
+    def get_routing_label(self, macro_name: str) -> str:
+        """Return human-readable routing line for UI cards"""
+        if not self.channel_map:
+            self._load_channel_map()
+        # Simple match against macro steps (expandable later)
+        for submix_name, submix_data in self.channel_map.get("submixes", {}).items():
+            for send_name, send_data in submix_data.get("sends", {}).items():
+                if any(step.get("osc") == send_data.get("osc_address")
+                       for step in self.mappings.get("macros", {}).get(macro_name, {}).get("steps", [])):
+                    return f"{send_name} → {submix_name} {send_data.get('description', '')}"
+        return "—"
+    
     def update_workspace(self, name: str = None, slot: int = None):
         if name:
             self.current_workspace = name
@@ -231,6 +261,22 @@ class TotalMixOSCBridge:
 
             logger.info(f"Macro '{macro_name}' complete")
             self.broadcast_state()  # ← live web update after macro runs
+            
+            # === RICH MACRO UPDATE FOR CARDS (still only once per trigger) ===
+            macro_data = self.mappings["macros"][macro_name]
+            live_data = {
+                "name": macro_name,
+                "description": macro_data.get("description", ""),
+                "value": float(value),
+                "progress": 100,
+                "lfo_active": False,
+                "last_trigger": time.time(),
+                "osc_preview": f"{macro_data.get('steps', [{}])[0].get('osc', '')} = {value:.3f}",
+                "routing_label": self.get_routing_label(macro_name),
+                "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None
+            }
+            self.macro_live_state[macro_name] = live_data
+            self.broadcast_state(self, macro_update=live_data)   # one clean broadcast
 
         finally:
             self._suppress_handler = False
