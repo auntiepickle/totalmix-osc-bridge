@@ -35,33 +35,12 @@ ws.onmessage = function (event) {
 };
 
 // ====================== STATUS HEADER ======================
+// ====================== STATUS HEADER (matches your index.html) ======================
 function updateStatusHeader() {
-  const header = document.getElementById('status-header');
-  if (!header) return;
-  header.innerHTML = `
-<div class="flex items-center justify-between bg-zinc-900 border-b border-zinc-700 px-6 py-4">
-    <div class="flex items-center gap-8">
-        <div>
-            <span class="text-xs uppercase tracking-widest text-zinc-500">Workspace</span>
-            <span id="workspace-name" class="ml-2 font-mono text-emerald-400">${currentWorkspace}</span>
-        </div>
-        <div>
-            <span class="text-xs uppercase tracking-widest text-zinc-500">Snapshot</span>
-            <span id="snapshot-name" class="ml-2 font-mono text-cyan-400">${currentSnapshot}</span>
-        </div>
-    </div>
-    
-    <div class="flex items-center gap-3">
-        <div class="flex items-center gap-2 text-sm font-medium">
-            <span class="text-emerald-400">●</span>
-            MIDI: <span class="font-mono">${midiConnectedDevice}</span>
-        </div>
-        <select id="midi-device-selector" onchange="connectSelectedMIDI()" 
-                class="bg-zinc-800 text-white text-sm px-3 py-1 rounded-xl border border-zinc-700"></select>
-    </div>
-</div>`;
-  // Re-init MIDI selector if needed
-  if (midiAccess) initWebMIDI();
+  const workspaceEl = document.getElementById('workspace');
+  const snapshotEl = document.getElementById('snapshot');
+  if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
+  if (snapshotEl) snapshotEl.textContent = `Snapshot: ${currentSnapshot || '—'}`;
 }
 
 // ====================== INITIAL LOAD ======================
@@ -183,22 +162,6 @@ function toggleDetail(name) {
     html += `</div>`;
     panel.innerHTML = html;
   }
-} const panel = document.getElementById(`detail-${name}`);
-const m = macros[name];
-if (!panel || !m) return;
-panel.classList.toggle('hidden');
-if (!panel.classList.contains('hidden')) {
-  let html = `<strong>Routing</strong><br>${m.routing_label || '—'}<br><br>`;
-  html += `<strong>OSC Preview</strong><br>${m.osc_preview || '—'}<br><br>`;
-
-  if (m.midi_triggers && m.midi_triggers.length) {
-    html += `<strong>MIDI Triggers</strong><br>`;
-    m.midi_triggers.forEach(t => {
-      html += `• CC${t.number} ch${t.channel} ${t.use_value_as_param ? '(value as param)' : ''}<br>`;
-    });
-  }
-  panel.innerHTML = html;
-}
 }
 
 // ====================== MIDI (with green badge) ======================
