@@ -1,23 +1,23 @@
 # =============================================
-# STAGE 1: Tailwind v4 Builder (fully automated)
+# STAGE 1: Tailwind v4 Builder (fully automated, no more npx errors)
 # =============================================
 FROM node:20 AS tailwind-builder
 
 WORKDIR /build
 
-# Copy everything Tailwind needs (exact structure from commit e12ddbad1dc8e764d7b22979124c774db9f7e7b2)
+# Copy web files + config (exact structure from commit e12ddbad1dc8e764d7b22979124c774db9f7e7b2)
 COPY web/static/ ./web/static/
 COPY web/ ./web/
 COPY tailwind.config.js ./
 
-# Setup + install Tailwind v4
+# Setup + install BOTH packages needed for v4
 RUN npm init -y
-RUN npm install -D tailwindcss@latest
+RUN npm install -D tailwindcss@latest @tailwindcss/cli
 
-# Build production CSS (v4 CLI)
-RUN npx tailwindcss -i ./web/static/input.css -o ./web/static/output.css --minify
+# Build with the CORRECT v4 CLI (this is the fix for the "could not determine executable" error)
+RUN npx @tailwindcss/cli -i ./web/static/input.css -o ./web/static/output.css --minify
 
-# Debug step so you can see output.css was created
+# Debug output so you can see the file was created
 RUN echo "=== TAILWIND v4 BUILD COMPLETE ===" && ls -la ./web/static/
 
 # =============================================
@@ -34,7 +34,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy built web folder (includes the new output.css) + Python backend
+# Copy built web folder (now includes output.css) + Python backend
 COPY --from=tailwind-builder /build/web ./web
 COPY --from=tailwind-builder /build/*.py ./
 
