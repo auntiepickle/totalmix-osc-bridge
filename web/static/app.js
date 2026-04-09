@@ -1,6 +1,6 @@
 /* =============================================
    TOTALMIX OSC BRIDGE - Web UI (M2 COMPLETE + FINAL FIXES)
-   Fixes: details panel, progress bar timing, workspace/snapshot header, MIDI status
+   Fixes: progress bar sync, status header, MIDI status, rich details panel, green MIDI badge
    ============================================= */
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -22,7 +22,6 @@ ws.onmessage = function(event) {
     const data = JSON.parse(event.data);
     console.log('[WS] Received:', data);
 
-    // Update live bridge state
     if (data.current_workspace) currentWorkspace = data.current_workspace;
     if (data.current_snapshot) currentSnapshot = data.current_snapshot;
 
@@ -32,10 +31,10 @@ ws.onmessage = function(event) {
     }
 
     updateStatusHeader();
-    renderCards();
+    renderCards();   // safe re-render (progress bars are preserved)
 };
 
-// ====================== STATUS HEADER (workspace + snapshot + MIDI) ======================
+// ====================== STATUS HEADER ======================
 function updateStatusHeader() {
     const header = document.getElementById('status-header');
     if (header) {
@@ -52,7 +51,7 @@ function updateStatusHeader() {
     }
 }
 
-// ====================== INITIAL MACRO LOAD ======================
+// ====================== INITIAL LOAD ======================
 async function loadMacros() {
     console.log("🚀 loadMacros() called — fetching /api/macros");
     try {
@@ -75,34 +74,39 @@ async function fireMacro(name, value = 1.0, ramp = false) {
 
     console.log(`[UI] Firing macro: ${name} (value=${value}, ramp=${ramp})`);
 
-    // Start progress bar immediately with correct duration
     const durationMs = macro.durationMs || (ramp ? 3500 : 500);
-    animateProgress(name, durationMs);
+    animateProgress(name, durationMs);   // start animation BEFORE HTTP call
 
     try {
-        const res = await fetch(`/api/trigger/${name}`, {
+        await fetch(`/api/trigger/${name}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ param: value })
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         console.log(`✅ Macro ${name} triggered via HTTP`);
     } catch (err) {
         console.error("❌ Trigger failed:", err);
     }
 }
 
-// ====================== PROGRESS ANIMATION (protected from WS re-render) ======================
+// ====================== PROGRESS ANIMATION (now survives re-render) ======================
 function animateProgress(name, durationMs) {
     const bar = document.getElementById(`progress-bar-${name}`);
     if (!bar) return;
 
+    // Reset instantly
     bar.style.transitionDuration = '0ms';
     bar.style.width = '0%';
-    void bar.offsetWidth; // force reflow
+    void bar.offsetWidth;   // force reflow
 
+    // Animate with correct timing
     bar.style.transitionDuration = `${durationMs}ms`;
     bar.style.width = '100%';
+
+    // Optional: clear after animation (so it can be retriggered)
+    setTimeout(() => {
+        if (bar) bar.style.width = '0%';
+    }, durationMs + 100);
 }
 
 // ====================== RENDER CARDS ======================
@@ -144,7 +148,7 @@ function renderCards() {
     });
 }
 
-// ====================== DETAILS PANEL (now shows MIDI + routing) ======================
+// ====================== RICH DETAILS PANEL ======================
 function toggleDetail(name) {
     const panel = document.getElementById(`detail-${name}`);
     const m = macros[name];
@@ -152,6 +156,8 @@ function toggleDetail(name) {
     panel.classList.toggle('hidden');
     if (!panel.classList.contains('hidden')) {
         let html = `<strong>Routing</strong><br>${m.routing_label || '—'}<br><br>`;
+        html += `<strong>OSC Preview</strong><br>${m.osc_preview || '—'}<br><br>`;
+
         if (m.midi_triggers && m.midi_triggers.length) {
             html += `<strong>MIDI Triggers</strong><br>`;
             m.midi_triggers.forEach(t => {
@@ -162,7 +168,7 @@ function toggleDetail(name) {
     }
 }
 
-// ====================== MIDI (fully restored + visual status) ======================
+// ====================== MIDI (with green badge) ======================
 let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
@@ -225,7 +231,7 @@ async function initWebMIDI() {
             midiInput.onmidimessage = handleMIDIMessage;
             midiConnectedDevice = target.name;
             console.log(`[MIDI] Listening on ${target.name}`);
-            updateStatusHeader();   // refresh header with MIDI status
+            updateStatusHeader();
         }
     } catch (err) {
         console.error('[MIDI] Failed:', err);
