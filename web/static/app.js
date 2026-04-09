@@ -1,7 +1,7 @@
 /* =============================================
-   TOTALMIX OSC BRIDGE - Web UI (M2 fixed + initial load)
+   TOTALMIX OSC BRIDGE - Web UI (M2 COMPLETE)
    Commit base: 3329dd0d017696738abce89fb32be8fd4fa11acd
-   Fixes: animation duration, only-last-macro bug, MIDI one-shot bug + initial /api/macros load
+   Fixes: initial load, MIDI selector, fire buttons via HTTP, Caddy HTTPS
    ============================================= */
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -11,7 +11,7 @@ let macros = {};
 
 ws.onopen = async () => {
     console.log('[WS] Connected to bridge');
-    await loadMacros();                    // ← NEW: initial load
+    await loadMacros();                    // initial load
 };
 
 ws.onclose = () => console.log('[WS] Disconnected');
@@ -32,22 +32,44 @@ ws.onmessage = function(event) {
     }
 };
 
-// ====================== INITIAL MACRO LOAD (critical for Caddy HTTPS) ======================
+// ====================== INITIAL MACRO LOAD ======================
 async function loadMacros() {
-    console.log("🚀 loadMacros() called — fetching /api/macros (relative path for Caddy)");
+    console.log("🚀 loadMacros() called — fetching /api/macros");
     try {
         const res = await fetch('/api/macros');
         console.log("✅ Fetch status:", res.status);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
         macros = await res.json();
-        console.log("✅ Loaded", Object.keys(macros).length, "macros from mappings.json");
-
+        console.log("✅ Loaded", Object.keys(macros).length, "macros");
         renderCards();
     } catch (err) {
         console.error("❌ loadMacros failed:", err);
         const grid = document.getElementById('macro-grid');
         if (grid) grid.innerHTML = `<div class="p-8 text-red-400 text-center">Failed to load macros.<br><small>${err.message}</small></div>`;
+    }
+}
+
+// ====================== FIRE MACRO (now uses HTTP endpoint) ======================
+async function fireMacro(name, value = 1.0, ramp = false) {
+    const macro = macros[name];
+    if (!macro) return;
+
+    console.log(`[UI] Firing macro: ${name} (value=${value}, ramp=${ramp})`);
+
+    // Start progress bar immediately
+    const durationMs = macro.durationMs || (ramp ? 3500 : 500);
+    animateProgress(name, durationMs);
+
+    try {
+        const res = await fetch(`/api/trigger/${name}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ param: value })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        console.log(`✅ Macro ${name} triggered via HTTP`);
+    } catch (err) {
+        console.error("❌ Trigger failed:", err);
     }
 }
 
@@ -60,16 +82,6 @@ function animateProgress(name, durationMs) {
     void bar.offsetWidth;
     bar.style.transitionDuration = `${durationMs}ms`;
     bar.style.width = '100%';
-}
-
-// ====================== FIRE MACRO ======================
-async function fireMacro(name, value = 1.0, ramp = false) {
-    const macro = macros[name];
-    if (!macro) return;
-    console.log(`[UI] Firing macro: ${name}`);
-    const durationMs = macro.durationMs || (ramp ? 3500 : 500);
-    animateProgress(name, durationMs);
-    ws.send(JSON.stringify({ action: "fire_macro", name: name, value: value, ramp: ramp }));
 }
 
 // ====================== RENDER CARDS ======================
@@ -121,14 +133,89 @@ function toggleDetail(name) {
     }
 }
 
-// ====================== MIDI ======================
-function handleMIDIMessage(message) { /* ... your existing MIDI code unchanged ... */ }
-function updateCardLastTrigger(name, cc, value, deviceName, channel) { /* ... unchanged ... */ }
-async function initWebMIDI() { /* ... your existing MIDI code unchanged ... */ }
-window.connectSelectedMIDI = () => { /* ... unchanged ... */ };
+// ====================== MIDI (fully restored) ======================
+let midiAccess = null;
+let midiInput = null;
+let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
 
-// Init everything
+function handleMIDIMessage(message) {
+    const [status, data1, data2] = message.data;
+    const channel = (status & 0x0F) + 1;
+    const cc = data1;
+    const valueRaw = data2;
+    const deviceName = message.target ? message.target.name : "Unknown";
+
+    if ((status & 0xF0) !== 0xB0) return;
+
+    const value = valueRaw / 127.0;
+
+    Object.keys(macros).forEach(name => {
+        const macro = macros[name];
+        for (const trigger of macro.midi_triggers || []) {
+            if (trigger.type === "control_change" && trigger.number === cc && trigger.channel === channel) {
+                console.log(`[MIDI] Triggered ${name} (CC${cc} ch${channel})`);
+                fireMacro(name, value, false);
+                updateCardLastTrigger(name, cc, valueRaw, deviceName, channel);
+                return;
+            }
+        }
+    });
+}
+
+function updateCardLastTrigger(name, cc, value, deviceName, channel) {
+    const card = document.getElementById(`card-${name}`);
+    if (!card) return;
+    let badge = card.querySelector('.midi-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.className = 'midi-badge text-[10px] font-mono bg-green-500/20 text-green-400 px-2 py-0.5 rounded mt-2 flex flex-col gap-px';
+        card.appendChild(badge);
+    }
+    badge.innerHTML = `<span class="font-semibold">${deviceName}</span><br>CC${cc} • ch${channel} • ${value}`;
+}
+
+async function initWebMIDI() {
+    if (!navigator.requestMIDIAccess || midiInput) return;
+    try {
+        midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+        const inputs = Array.from(midiAccess.inputs.values());
+        const selector = document.getElementById('midi-device-selector');
+        if (selector) {
+            selector.innerHTML = '<option value="">— select MIDI input —</option>';
+            inputs.forEach(input => {
+                const opt = document.createElement('option');
+                opt.value = input.id;
+                opt.textContent = input.name;
+                if (input.name === lastMidiDevice) opt.selected = true;
+                selector.appendChild(opt);
+            });
+        }
+        const target = inputs.find(i => i.name === lastMidiDevice) || inputs[0];
+        if (target) {
+            midiInput = target;
+            midiInput.onmidimessage = handleMIDIMessage;
+            console.log(`[MIDI] Listening on ${target.name}`);
+        }
+    } catch (err) {
+        console.error('[MIDI] Failed:', err);
+    }
+}
+
+window.connectSelectedMIDI = () => {
+    const selector = document.getElementById('midi-device-selector');
+    const selectedId = selector.value;
+    if (!selectedId || !midiAccess) return;
+    const input = Array.from(midiAccess.inputs.values()).find(i => i.id === selectedId);
+    if (input) {
+        if (midiInput) midiInput.onmidimessage = null;
+        midiInput = input;
+        midiInput.onmidimessage = handleMIDIMessage;
+        lastMidiDevice = input.name;
+        localStorage.setItem('lastMidiDevice', input.name);
+    }
+};
+
+// ====================== INIT ======================
 window.onload = () => {
     initWebMIDI();
-    // WS will also trigger loadMacros on open
 };
