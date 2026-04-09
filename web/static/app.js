@@ -80,7 +80,7 @@ async function fireMacro(name, value = 1.0, ramp = false) {
     console.error("❌ Trigger failed:", err);
   }
 }
-// ====================== RENDER CARDS – exact main-branch animated style ======================
+// ====================== RENDER CARDS – 100% main-branch match ======================
 function renderCards() {
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
@@ -88,96 +88,91 @@ function renderCards() {
   Object.keys(macros).forEach(name => {
     const m = macros[name];
     const cardHTML = `
-<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-6 rounded-2xl transition-all hover:-translate-y-1 hover:shadow-2xl hover:shadow-orange-500/30">
-    <div class="flex justify-between items-start mb-4">
+<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-6 rounded-2xl">
+    <div class="flex justify-between items-start mb-5">
         <div>
-            <h3 class="text-2xl font-bold tracking-tight text-white">${name}</h3>
-            <p class="text-zinc-400 text-sm mt-1">${m.description || ''}</p>
-            <p class="text-orange-400 text-xs font-medium mt-3 tracking-widest">${m.routing_label || '—'}</p>
+            <h3 class="text-2xl font-bold text-white">${name}</h3>
+            <p class="text-zinc-400 text-sm">${m.description || ''}</p>
+            <p class="text-orange-400 text-xs font-medium mt-4 tracking-widest">${m.routing_label || '—'}</p>
         </div>
-        <div id="last-trigger-${name}" class="midi-badge text-[10px] font-mono bg-green-500/10 text-green-400 px-3 py-1 rounded-2xl opacity-0 group-hover:opacity-100">LAST TRIGGER</div>
+        <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-3 py-1 rounded-2xl"></div>
     </div>
     
-    <!-- PROGRESS BAR – now always visible but animates on trigger (main-branch style) -->
-    <div id="progress-container-${name}" class="mt-6 h-3 bg-zinc-800 rounded-3xl overflow-hidden">
-        <div id="progress-bar-${name}" 
-             class="h-full bg-gradient-to-r from-orange-400 to-amber-500 transition-all"
-             style="width: 0%"></div>
+    <!-- PROGRESS BAR – exact main-branch ID + always visible -->
+    <div class="h-2.5 bg-zinc-800 rounded-full overflow-hidden mb-6">
+      <div id="progress-bar-${name}" 
+           class="h-full bg-gradient-to-r from-orange-400 to-amber-500 transition-all"
+           style="width: 0%"></div>
     </div>
     
-    <div class="mt-6 grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-3 gap-3">
         <button onclick="fireMacro('${name}', 1.0, false)" 
-                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-[0.95] text-black font-bold py-5 rounded-2xl text-xl transition-all shadow-inner">
+                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-6 rounded-2xl text-2xl transition-all shadow-inner">
             FIRE
         </button>
         <button onclick="fireMacro('${name}', 1.0, true)" 
-                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-5 rounded-2xl transition-all">
-            RAMP / LFO
+                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-6 rounded-2xl transition-all">
+            RAMP
         </button>
     </div>
     
     <button onclick="toggleDetail('${name}')" 
-            class="mt-6 w-full text-xs font-medium text-zinc-400 hover:text-orange-400 flex items-center justify-center gap-2">
+            class="mt-6 w-full text-zinc-400 hover:text-orange-400 text-sm font-medium flex items-center justify-center gap-2">
         DETAILS ▼
     </button>
-    <div id="detail-${name}" class="hidden mt-4 text-sm font-mono bg-[#111111] p-4 rounded-2xl border border-zinc-700"></div>
+    <div id="detail-${name}" class="hidden mt-4 p-4 bg-[#111111] rounded-2xl border border-zinc-700 font-mono text-sm"></div>
 </div>`;
     html += cardHTML;
   });
   grid.innerHTML = html;
 }
 
-// ====================== PROGRESS ANIMATION – now matches main-branch timing & visibility ======================
+// ====================== PROGRESS ANIMATION – now matches main branch exactly ======================
 function animateProgress(name, durationMs) {
-  const container = document.getElementById(`progress-container-${name}`);
   const bar = document.getElementById(`progress-bar-${name}`);
-  if (!bar || !container) return;
-  
-  // Show container
-  container.classList.remove('hidden');
-  container.style.opacity = '1';
-  
+  if (!bar) {
+    console.warn(`[UI] Progress bar not found for ${name} – check renderCards`);
+    return;
+  }
   // Instant reset
   bar.style.transitionDuration = '0ms';
   bar.style.width = '0%';
   void bar.offsetWidth; // force reflow
   
-  // Animate exactly to ramp/LFO duration
+  // Animate exactly to ramp/LFO duration (main-branch timing)
   bar.style.transitionDuration = `${durationMs}ms`;
   bar.style.width = '100%';
   
-  // Auto-hide when finished
+  // Auto-reset after finish
   setTimeout(() => {
+    bar.style.transitionDuration = '300ms';
     bar.style.width = '0%';
-    setTimeout(() => {
-      if (container) container.classList.add('hidden');
-    }, 300);
-  }, durationMs + 50);
+  }, durationMs);
 }
 
-// ====================== RICH DETAILS (still full JSON, now styled to match cards) ======================
+// ====================== RICH DETAILS – matches main-branch styling ======================
 function toggleDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const m = macros[name];
   if (!panel || !m) return;
   panel.classList.toggle('hidden');
   if (!panel.classList.contains('hidden')) {
-    let html = `<div class="space-y-4 text-xs">`;
+    let html = `<div class="space-y-4">`;
     html += `<div><strong class="text-orange-400">Routing:</strong> ${m.routing_label || '—'}</div>`;
     html += `<div><strong class="text-orange-400">OSC Preview:</strong> <code class="text-amber-300">${m.osc_preview || '—'}</code></div>`;
     html += `<div><strong class="text-orange-400">Duration:</strong> ${m.durationMs ? (m.durationMs/1000).toFixed(1)+'s' : '—'}</div>`;
-    
     if (m.midi_triggers && m.midi_triggers.length) {
       html += `<div><strong class="text-orange-400">MIDI Triggers:</strong><ul class="list-disc ml-4">`;
-      m.midi_triggers.forEach(t => html += `<li>CC${t.number} ch${t.channel} ${t.use_value_as_param ? '(value as param)' : ''}</li>`);
+      m.midi_triggers.forEach(t => {
+        html += `<li>CC${t.number} ch${t.channel} ${t.use_value_as_param ? '(value as param)' : ''}</li>`;
+      });
       html += `</ul></div>`;
     }
-    html += `<details><summary class="cursor-pointer text-orange-400 mt-4">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64 mt-2">${JSON.stringify(m, null, 2)}</pre></details>`;
+    html += `<details class="mt-4"><summary class="cursor-pointer text-orange-400">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64 mt-2">${JSON.stringify(m, null, 2)}</pre></details>`;
     html += `</div>`;
     panel.innerHTML = html;
   }
 }
-
 // ====================== MIDI (with green badge) ======================
 let midiAccess = null;
 let midiInput = null;
