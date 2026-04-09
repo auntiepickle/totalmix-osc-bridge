@@ -1,12 +1,4 @@
-{
-    auto_https disable_redirects
-}
-
-:8085 {
-    redir https://{host}:9445{uri} permanent
-}
-
-:9445 {
+192.168.1.41.nip.io:9445 {
     tls internal
-    reverse_proxy 127.0.0.1:{env.WEB_PORT}
+    reverse_proxy 127.0.0.1:8088
 }
