@@ -1,12 +1,16 @@
 import os
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import json
 import threading
 import uvicorn
+import logging
 from bridge import bridge, ws_clients, MAPPINGS
+
+# Setup logger so the M2 functions can log cleanly
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TotalMix OSC Bridge Web Client")
 
@@ -28,9 +32,29 @@ async def root():
 async def index_fallback():
     return RedirectResponse(url="/static/index.html")
 
+# ─────────────────────────────────────────────────────────────
+# M2: Macro Cards API (Web Client v1) – CLEAN VERSION
+# ─────────────────────────────────────────────────────────────
 @app.get("/api/macros")
 async def get_macros():
-    return MAPPINGS.get("macros", {})
+    """Return ALL macros from mappings.json so the web UI can render the card grid."""
+    macros = MAPPINGS.get("macros", {})
+    logger.info(f"✅ /api/macros → serving {len(macros)} macro cards to web client")
+    return macros
+
+
+@app.post("/api/trigger/{macro_name}")
+async def trigger_macro(macro_name: str, param: float = 0.5):
+    """Fire a macro when user clicks a card in the web UI.
+    Supports optional ?param=0.XX query parameter (matches bridge.run_macro signature)."""
+    if macro_name in MAPPINGS.get("macros", {}):
+        logger.info(f"Web UI clicked macro → {macro_name} (param={param:.3f})")
+        bridge.run_macro(macro_name, param)          # correct signature from bridge.py
+        return {"status": "success", "macro": macro_name, "param": param}
+    else:
+        logger.warning(f"Unknown macro from UI: {macro_name}")
+        raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
+
 
 @app.get("/api/test")
 async def test_api():
@@ -41,10 +65,6 @@ async def test_api():
         "web_port": WEB_PORT
     }
 
-@app.post("/api/trigger/{macro_name}")
-async def trigger_macro(macro_name: str, param: float = 1.0):
-    bridge.run_macro(macro_name, param)
-    return {"status": "fired", "macro": macro_name, "param": param}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -57,10 +77,12 @@ async def websocket_endpoint(websocket: WebSocket):
         if websocket in ws_clients:
             ws_clients.remove(websocket)
 
+
 def start_bridge():
     import time
     while True:
         time.sleep(60)
+
 
 @app.on_event("startup")
 async def startup_event():
