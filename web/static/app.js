@@ -15,7 +15,7 @@ let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
 let lastMidiChannel = parseInt(localStorage.getItem('lastMidiChannel')) || 1;
 
-// ====================== MIDI HELPERS (unchanged from your M1) ======================
+// ====================== MIDI HELPERS ======================
 function updateMIDIBadge(text) {
     let badge = document.getElementById('midi-status-badge');
     if (!badge) {
@@ -75,7 +75,7 @@ function handleMIDIMessage(message) {
     });
 }
 
-// ====================== MIDI INIT (now remembers last device) ======================
+// ====================== MIDI INIT ======================
 async function initWebMIDI() {
     if (!navigator.requestMIDIAccess) return;
     try {
@@ -83,19 +83,7 @@ async function initWebMIDI() {
         const inputs = Array.from(midiAccess.inputs.values());
 
         let selector = document.getElementById('midi-device-selector');
-        if (!selector) {
-            const topBar = document.querySelector('.flex.justify-between');
-            if (topBar) {
-                const div = document.createElement('div');
-                div.className = 'flex items-center gap-3';
-                div.innerHTML = `
-                    <select id="midi-device-selector" class="bg-[#1E1E1E] text-white text-sm px-3 py-1 rounded-2xl border border-gray-600"></select>
-                    <button onclick="connectSelectedMIDI()" class="px-4 py-1 bg-green-600 hover:bg-green-500 rounded-2xl text-sm font-medium">Connect</button>
-                `;
-                topBar.appendChild(div);
-                selector = document.getElementById('midi-device-selector');
-            }
-        }
+        if (!selector) return;   // defensive
 
         selector.innerHTML = '<option value="">— select MIDI input —</option>';
         inputs.forEach(input => {
@@ -106,7 +94,6 @@ async function initWebMIDI() {
             selector.appendChild(opt);
         });
 
-        // Auto-connect last used OR Cirklon-like device
         const target = inputs.find(i => i.name === lastMidiDevice) ||
                        inputs.find(i => i.name.toLowerCase().includes("midi"));
         if (target && !midiInput) {
@@ -130,14 +117,13 @@ window.connectSelectedMIDI = () => {
         midiInput = input;
         midiInput.onmidimessage = handleMIDIMessage;
         updateMIDIBadge(`Connected: ${input.name}`);
-        // Remember last used device + channel
         localStorage.setItem('lastMidiDevice', input.name);
         lastMidiDevice = input.name;
         localStorage.setItem('lastMidiChannel', lastMidiChannel);
     }
 };
 
-// ====================== RICH CARD RENDERING (new M2) ======================
+// ====================== RICH CARD RENDERING ======================
 function renderCards() {
     const grid = document.getElementById('macro-grid');
     if (!grid) return;
@@ -202,7 +188,7 @@ function toggleDetail(name) {
     if (panel) panel.classList.toggle('hidden');
 }
 
-// ====================== FIRE MACRO (your existing logic) ======================
+// ====================== FIRE MACRO ======================
 window.fireMacro = async (name, param, isLFO = false) => {
     const btns = document.querySelectorAll(`button[onclick^="fireMacro('${name}'"]`);
     btns.forEach(b => b.disabled = true);
@@ -212,28 +198,17 @@ window.fireMacro = async (name, param, isLFO = false) => {
     setTimeout(() => btns.forEach(b => b.disabled = false), 1500);
 };
 
-// ====================== WEBSOCKET (now rich + status bar live) ======================
+// ====================== WEBSOCKET ======================
 ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
 
     if (data.type === "state") {
-        // Live status bar (now reflects HA changes)
         if (data.workspace) document.getElementById("workspace").textContent = `Workspace: ${data.workspace}`;
         if (data.snapshot) document.getElementById("snapshot").textContent = `Snapshot: ${data.snapshot || '—'}`;
 
-        // Update rich macro data
         if (data.macros) {
             macros = data.macros;
             renderCards();
-        }
-
-        // Real-time highlight when a macro fires
-        if (data.macro_update) {
-            const card = document.getElementById(`card-${data.macro_update.name}`);
-            if (card) {
-                card.classList.add('ring-2', 'ring-orange-400');
-                setTimeout(() => card.classList.remove('ring-2', 'ring-orange-400'), 1200);
-            }
         }
     }
 };
