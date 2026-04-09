@@ -1,6 +1,6 @@
 /* =============================================
    TOTALMIX OSC BRIDGE - FINAL M2 app.js
-   Rich cards + live status + last MIDI memory
+   Fixes all 5 reported issues
    ============================================= */
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -11,7 +11,6 @@ let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
 
-// ====================== MIDI (your M1 code) ======================
 function updateMIDIBadge(text) {
     let badge = document.getElementById('midi-status-badge');
     if (!badge) {
@@ -104,7 +103,7 @@ window.connectSelectedMIDI = () => {
     }
 };
 
-// ====================== RICH CARDS (fixed merge + animation) ======================
+// ====================== RICH CARDS ======================
 function renderCards() {
     const grid = document.getElementById('macro-grid');
     if (!grid) return;
@@ -154,12 +153,8 @@ function toggleDetail(name) {
     html += `<div><strong>Routing</strong><br>${m.routing_label || '—'}</div>`;
     html += `<div><strong>Workspace / Snapshot</strong><br>${m.workspace || '—'} / ${m.snapshot || '—'}</div>`;
     html += `<div><strong>OSC Preview</strong><br>${m.osc_preview || '—'}</div>`;
-    if (m.steps) {
-        html += `<div><strong>Steps / Ramp Type</strong><br>${JSON.stringify(m.steps, null, 2)}</div>`;
-    }
-    if (m.midi_trigger) {
-        html += `<div><strong>MIDI Trigger</strong><br>CC${m.midi_trigger.number} ch${m.midi_trigger.channel}</div>`;
-    }
+    if (m.steps) html += `<div><strong>Steps / Ramp Type</strong><br>${JSON.stringify(m.steps, null, 2)}</div>`;
+    if (m.midi_trigger) html += `<div><strong>MIDI Trigger</strong><br>CC${m.midi_trigger.number} ch${m.midi_trigger.channel}</div>`;
     html += `</div>`;
     panel.innerHTML = html;
     panel.classList.toggle('hidden');
@@ -169,7 +164,6 @@ window.fireMacro = async (name, param, isLFO = false) => {
     const btns = document.querySelectorAll(`button[onclick^="fireMacro('${name}'"]`);
     btns.forEach(b => b.disabled = true);
 
-    // Client-side progress animation
     const bar = document.getElementById(`progress-bar-${name}`);
     if (bar) {
         bar.style.transitionDuration = '0ms';
@@ -197,14 +191,14 @@ ws.onmessage = (event) => {
             renderCards();
         }
         if (data.macro_update) {
-            macros[data.macro_update.name] = {...macros[data.macro_update.name], ...data.macro_update};
+            macros[data.macro_update.name] = { ...macros[data.macro_update.name], ...data.macro_update };
             renderCards();
         }
     }
 };
 
 ws.onopen = () => {
-    console.log("WebSocket connected — rich cards + live status active");
+    console.log("WebSocket connected — M2 cards active");
     loadMacros().then(() => initWebMIDI());
 };
 
