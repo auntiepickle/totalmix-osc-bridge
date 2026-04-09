@@ -72,3 +72,10 @@
 
 *Last updated: April 8, 2026*  
 *Reference commit: e367402fe6ad129b65a1fa38b4894cde37e2bb3f*
+
+
+## M2 Progress Checkpoint — April 09 2026
+**Branch**: `M2_branch`  
+**Action**: Created `M2_gaps_and_first_tasks.md` (source-of-truth gap list after full M1 audit).  
+All MIDI remains client-side in `app.js` (no Python changes).  
+Next: richer WS payloads + polished macro cards.
