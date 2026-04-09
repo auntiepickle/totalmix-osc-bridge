@@ -11,13 +11,16 @@
 2. Dramatically improve the macro cards so they show MIDI assignments, channel names, OSC previews, live values, and status at a glance.
 3. Keep everything non-breaking and data-driven.
 
-### M1 (Client-Side Web MIDI MVP) — UPDATED Apr 8 2026
-- [ ] Add Web MIDI listener + automatic Cirklon detection in `web/static/app.js`
-- [ ] Match incoming CC/channel against every macro’s `midi_triggers` array (re-use existing `param_range`)
-- [ ] On match → call existing `fireMacro(name, scaledValue)` (already does the server POST)
-- [ ] Add simple “MIDI Status” badge on each card (shows last CC that fired it)
-- [ ] Update this doc + MIDI_to_OSC_Mapping_System.md with browser setup instructions
-- Server-side `mido` handler moved to optional Phase 3 (hybrid support)
+### M1 (Client-Side Web MIDI MVP) — ✅ COMPLETE Apr 9 2026
+
+- [x] Web MIDI listener + automatic/manual Cirklon detection in `web/static/app.js`
+- [x] CC/channel matching against `mappings.json` + `fireMacro()`
+- [x] Per-card dynamic CC badges (device name + CC + channel + value)
+- [x] Secure HTTPS + wss:// WebSocket context via Caddy + nip.io
+- [x] Working manual MIDI device selector + reconnect in top bar
+- [x] Tested live with simulator + real triggers
+
+**M1 Success**: Full client-side MIDI control with zero server changes. Cards, badges, and secure Web MIDI all working. ✅
 
 ## M2: Bulk Up the Macro Cards (Parallel – same sprint)
 **Goal**: Turn the current bare-bones cards into rich, informative control surfaces.
