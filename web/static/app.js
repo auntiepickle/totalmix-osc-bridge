@@ -85,15 +85,12 @@ async function fireMacro(name, value = 1.0, ramp = false) {
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
-  // Reset instantly
-  bar.style.transitionDuration = '0ms';
+  bar.style.transitionDuration = '80ms';
   bar.style.width = '0%';
   void bar.offsetWidth; // force reflow
-  // Animate exactly to the ramp/LFO duration
   bar.style.transitionDuration = `${durationMs}ms`;
   bar.style.width = '100%';
-  // Auto-reset for next trigger
-  setTimeout(() => { if (bar) bar.style.width = '0%'; }, durationMs + 50);
+  setTimeout(() => { if (bar) bar.style.width = '0%'; }, durationMs + 100);
 }
 
 // ====================== RENDER CARDS (now includes progress bar + preserves animation) ======================
@@ -104,33 +101,39 @@ function renderCards() {
   Object.keys(macros).forEach(name => {
     const m = macros[name];
     const cardHTML = `
-<div id="card-${name}" class="macro-card border border-zinc-700 bg-zinc-900 rounded-xl p-4">
-    <div class="flex justify-between items-start">
-        <div>
-            <h3 class="text-lg font-mono">${name}</h3>
-            <p class="text-zinc-400 text-sm">${m.description || ''}</p>
-            <p class="text-emerald-400 text-xs mt-1">${m.routing_label || '—'}</p>
+<div id="card-${name}" class="macro-card group border border-zinc-700 bg-zinc-900 hover:bg-zinc-800/90 rounded-3xl p-6 transition-all duration-200 hover:shadow-2xl hover:-translate-y-0.5">
+    <div class="flex justify-between items-start mb-4">
+        <div class="flex-1">
+            <h3 class="text-xl font-mono tracking-tight text-white">${name}</h3>
+            <p class="text-zinc-400 text-sm mt-1">${m.description || ''}</p>
+            <p class="text-amber-400 text-xs font-medium mt-3 tracking-wider">${m.routing_label || '—'}</p>
         </div>
-        <div class="midi-badge text-[10px] font-mono bg-green-500/20 text-green-400 px-2 py-0.5 rounded">LAST TRIGGER</div>
+        <div id="last-trigger-${name}" class="midi-badge text-[10px] font-mono bg-orange-500/10 text-orange-400 px-3 py-1 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity">LAST TRIGGER</div>
     </div>
     
-    <!-- PROGRESS BAR -->
-    <div class="mt-4 h-2 bg-zinc-800 rounded-full overflow-hidden">
+    <!-- PROGRESS BAR – warm orange gradient -->
+    <div class="mt-2 h-2.5 bg-zinc-800 rounded-3xl overflow-hidden">
         <div id="progress-bar-${name}" 
-             class="h-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-all"
+             class="h-full bg-gradient-to-r from-orange-400 to-amber-500 transition-all duration-300"
              style="width: 0%"></div>
     </div>
     
-    <div class="mt-3 flex gap-2">
+    <div class="mt-6 grid grid-cols-3 gap-3">
         <button onclick="fireMacro('${name}', 1.0, false)" 
-                class="flex-1 bg-white text-black font-medium py-3 rounded-xl">FIRE</button>
+                class="col-span-1 bg-orange-500 hover:bg-orange-600 text-white font-medium py-4 rounded-2xl transition-colors text-sm">
+            FIRE
+        </button>
         <button onclick="fireMacro('${name}', 1.0, true)" 
-                class="flex-1 border border-white text-white font-medium py-3 rounded-xl">RAMP / LFO</button>
+                class="col-span-1 border border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-4 rounded-2xl transition-colors text-sm">
+            RAMP / LFO
+        </button>
         <button onclick="toggleDetail('${name}')" 
-                class="px-6 border border-white text-white font-medium rounded-xl">DETAILS ▼</button>
+                class="col-span-1 border border-zinc-600 hover:border-amber-400 text-white font-medium py-4 rounded-2xl transition-colors text-sm">
+            DETAILS
+        </button>
     </div>
     
-    <div id="detail-${name}" class="hidden mt-4 text-xs font-mono bg-zinc-950 p-3 rounded-xl"></div>
+    <div id="detail-${name}" class="hidden mt-6 text-sm font-mono bg-zinc-950 border border-zinc-700 p-5 rounded-2xl"></div>
 </div>`;
     html += cardHTML;
   });
@@ -144,21 +147,20 @@ function toggleDetail(name) {
   if (!panel || !m) return;
   panel.classList.toggle('hidden');
   if (!panel.classList.contains('hidden')) {
-    let html = `<div class="space-y-3">`;
-    html += `<div><strong>Routing:</strong> ${m.routing_label || '—'}</div>`;
-    html += `<div><strong>OSC Preview:</strong> <code>${m.osc_preview || '—'}</code></div>`;
-    html += `<div><strong>Duration:</strong> ${m.durationMs ? (m.durationMs / 1000).toFixed(1) + 's' : '—'}</div>`;
-
+    let html = `<div class="space-y-4">`;
+    html += `<div><strong class="text-amber-400">Routing:</strong> ${m.routing_label || '—'}</div>`;
+    html += `<div><strong class="text-amber-400">OSC Preview:</strong> <code class="text-orange-300">${m.osc_preview || '—'}</code></div>`;
+    html += `<div><strong class="text-amber-400">Duration:</strong> ${m.durationMs ? (m.durationMs/1000).toFixed(1)+'s' : '—'}</div>`;
+    
     if (m.midi_triggers && m.midi_triggers.length) {
-      html += `<div><strong>MIDI Triggers:</strong><ul>`;
+      html += `<div><strong class="text-amber-400">MIDI Triggers:</strong><ul class="list-disc ml-4 text-zinc-300">`;
       m.midi_triggers.forEach(t => {
-        html += `<li class="ml-4">• CC${t.number} ch${t.channel} ${t.use_value_as_param ? '(value as param)' : ''}</li>`;
+        html += `<li>CC${t.number} ch${t.channel} ${t.use_value_as_param ? '(value as param)' : ''}</li>`;
       });
       html += `</ul></div>`;
     }
-
-    // Full steps + raw JSON
-    html += `<details><summary class="cursor-pointer">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64">${JSON.stringify(m, null, 2)}</pre></details>`;
+    
+    html += `<details class="mt-4"><summary class="cursor-pointer text-orange-400">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64 mt-2 text-zinc-400">${JSON.stringify(m, null, 2)}</pre></details>`;
     html += `</div>`;
     panel.innerHTML = html;
   }
