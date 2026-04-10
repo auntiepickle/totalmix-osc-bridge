@@ -1,15 +1,4 @@
-/* ui.js - CONSERVATIVE FIXED VERSION (April 2026) — researched + tested layout + reliable width animation */
-
-function calculateDurationMs(macro, isRamp) {
-  if (macro.durationMs) return macro.durationMs;
-  const step = macro.steps ? macro.steps.find(s => s.operation) : null;
-  if (!step || !step.operation) return isRamp ? 3500 : 2000;
-  const op = step.operation;
-  const bars = op.bars || 2;
-  const bpm = op.bpm || 140;
-  const msPerBar = 240000 / bpm;
-  return Math.round(bars * msPerBar);
-}
+/* ui.js - FINAL CLEAN VERSION (M2_branch) */
 
 function createMacroCardHTML(name, m) {
   return `
@@ -23,11 +12,11 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — thicker, reliable width animation -->
-    <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8">
+    <!-- PROGRESS BAR — thick, always visible, exact macro timing -->
+    <div class="h-3 bg-zinc-800 rounded-full overflow-hidden mb-8">
       <div id="progress-bar-${name}" 
-           class="h-full bg-gradient-to-r from-orange-400 to-amber-500"
-           style="width: 0%; transition: none;"></div>
+           class="h-full bg-gradient-to-r from-orange-400 to-amber-500 origin-left"
+           style="height: 12px; width: 100%; transform: scaleX(0);"></div>
     </div>
     
     <div class="grid grid-cols-3 gap-3">
@@ -50,7 +39,7 @@ function createMacroCardHTML(name, m) {
 }
 
 function renderCards() {
-  console.log("🔄 renderCards() — clean moderate layout");
+  console.log("🔄 renderCards() — should only run once on load");
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
   let html = '';
@@ -63,33 +52,31 @@ function renderCards() {
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
-  console.log(`[ANIM] Starting ${name} — ${durationMs}ms (width-based)`);
-  
-  // Force reset
-  bar.style.transition = 'none';
-  bar.style.width = '0%';
-  bar.offsetHeight; // reflow
-  
-  // Animate
-  bar.style.transition = `width ${durationMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
-  bar.style.width = '100%';
-  
-  // Reliable reset after finish
-  setTimeout(() => {
-    bar.style.transition = 'width 300ms cubic-bezier(0.4, 0, 0.2, 1)';
-    bar.style.width = '0%';
-    console.log(`[ANIM] Reset complete for ${name}`);
-  }, durationMs);
+  console.log(`[ANIM] Starting for ${name} — ${durationMs}ms`);
+  bar.style.willChange = 'transform';
+  bar.style.transformOrigin = 'left';
+  bar.style.transform = 'scaleX(0)';
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const animation = bar.animate(
+        [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }],
+        { duration: durationMs, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' }
+      );
+      animation.onfinish = () => {
+        bar.style.transform = 'scaleX(0)';
+        console.log(`[ANIM] Finished and reset for ${name}`);
+      };
+    });
+  });
 }
 
 async function fireMacro(name, value = 1.0, ramp = false) {
   const macro = macros[name];
   if (!macro) return;
   console.log(`[UI] Firing macro: ${name}`);
-  
-  const durationMs = calculateDurationMs(macro, ramp);
+  // EXACT macro.durationMs (original goal)
+  const durationMs = macro.durationMs || (ramp ? 3500 : 2000);
   animateProgress(name, durationMs);
-  
   try {
     await fetch(`/api/trigger/${name}`, {
       method: 'POST',
@@ -97,6 +84,10 @@ async function fireMacro(name, value = 1.0, ramp = false) {
       body: JSON.stringify({ param: value })
     });
   } catch (err) { console.error(err); }
+}
+
+function updateMacroCard(name) {
+  console.log(`[UI] Incremental update for ${name}`);
 }
 
 function toggleDetail(name) {
@@ -108,7 +99,7 @@ function toggleDetail(name) {
     let html = `<div class="space-y-4">`;
     html += `<div><strong class="text-orange-400">Routing:</strong> ${m.routing_label || '—'}</div>`;
     html += `<div><strong class="text-orange-400">OSC Preview:</strong> <code class="text-amber-300">${m.osc_preview || '—'}</code></div>`;
-    html += `<div><strong class="text-orange-400">Duration:</strong> ${(calculateDurationMs(m, false)/1000).toFixed(1)}s</div>`;
+    html += `<div><strong class="text-orange-400">Duration:</strong> ${m.durationMs ? (m.durationMs/1000).toFixed(1)+'s' : '—'}</div>`;
     if (m.midi_triggers && m.midi_triggers.length) {
       html += `<div><strong class="text-orange-400">MIDI Triggers:</strong><ul class="list-disc ml-4">`;
       m.midi_triggers.forEach(t => html += `<li>CC${t.number} ch${t.channel}</li>`);
