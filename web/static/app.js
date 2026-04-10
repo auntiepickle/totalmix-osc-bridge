@@ -1,6 +1,6 @@
 /* =============================================
-   TOTALMIX OSC BRIDGE - Web UI (M2 COMPLETE + FINAL FIXES)
-   Fixes: progress bar animation (incremental render), MIDI connected badge
+   TOTALMIX OSC BRIDGE - Web UI (M2 FINAL + MAIN-STYLE RENDER)
+   Fixes: progress animation (3500ms default + incremental), buttons thicker + main shadows
    ============================================= */
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -29,41 +29,35 @@ ws.onmessage = function (event) {
   if (data.macro_update) {
     const mu = data.macro_update;
     macros[mu.name] = { ...(macros[mu.name] || {}), ...mu };
-    updateMacroCard(mu.name);   // ← incremental = animation survives
+    updateMacroCard(mu.name);        // ← incremental ONLY → animation survives
   } else {
-    renderCards();              // full render only when truly needed
+    renderCards();                   // full render ONLY on initial load / rare full state
   }
 
   updateStatusHeader();
 };
 
-// ====================== ENSURE MIDI UI EXISTS (dynamic) ======================
+// ====================== ENSURE MIDI UI ======================
 function ensureMIDIControls() {
   if (document.getElementById('midi-device-selector')) return;
-
   const header = document.querySelector('header') || document.querySelector('.flex.justify-between') || document.querySelector('.flex');
   if (!header) return;
-
   const midiDiv = document.createElement('div');
   midiDiv.className = 'flex items-center gap-3 ml-auto';
   midiDiv.innerHTML = `
     <select id="midi-device-selector" class="bg-[#1E1E1E] text-white px-4 py-2 rounded-2xl border border-zinc-700 focus:outline-none text-sm"></select>
-    <button onclick="connectSelectedMIDI()" 
-            class="px-5 py-2 bg-green-600 hover:bg-green-500 rounded-2xl text-sm font-medium transition-colors">
-      Connect MIDI
-    </button>
+    <button onclick="connectSelectedMIDI()" class="px-5 py-2 bg-green-600 hover:bg-green-500 rounded-2xl text-sm font-medium transition-colors">Connect MIDI</button>
   `;
   header.appendChild(midiDiv);
 }
 
-// ====================== STATUS HEADER + VISIBLE MIDI BADGE ======================
+// ====================== STATUS HEADER + MIDI BADGE ======================
 function updateStatusHeader() {
   const workspaceEl = document.getElementById('workspace');
   const snapshotEl = document.getElementById('snapshot');
   if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
   if (snapshotEl) snapshotEl.textContent = `Snapshot: ${currentSnapshot || '—'}`;
 
-  // MIDI Connected Badge (the one you were missing)
   let midiBadge = document.getElementById('midi-connected-badge');
   if (midiConnectedDevice && midiConnectedDevice !== '—') {
     if (!midiBadge) {
@@ -95,11 +89,11 @@ async function loadMacros() {
   }
 }
 
-// ====================== INCREMENTAL CARD UPDATE (fixes animation reset) ======================
+// ====================== INCREMENTAL CARD UPDATE ======================
 function updateMacroCard(name) {
   const card = document.getElementById(`card-${name}`);
   if (!card) return;
-  // Future-proof spot for value / routing live updates if you ever add them
+  // Future live updates (value, routing, etc.) can go here
 }
 
 // ====================== FIRE MACRO ======================
@@ -109,8 +103,9 @@ async function fireMacro(name, value = 1.0, ramp = false) {
 
   console.log(`[UI] Firing macro: ${name} (value=${value}, ramp=${ramp})`);
 
-  const durationMs = macro.durationMs || (ramp ? 3500 : 500);
-  animateProgress(name, durationMs);   // start animation BEFORE HTTP call
+  // MATCH MAIN: long visible sweep on FIRE (3500ms) and RAMP
+  const durationMs = macro.durationMs || (ramp ? 3500 : 3500);
+  animateProgress(name, durationMs);
 
   try {
     await fetch(`/api/trigger/${name}`, {
@@ -124,7 +119,7 @@ async function fireMacro(name, value = 1.0, ramp = false) {
   }
 }
 
-// ====================== RENDER CARDS ======================
+// ====================== RENDER CARDS – EXACT MAIN BUTTON THICKNESS + SHADOWS ======================
 function renderCards() {
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
@@ -142,7 +137,7 @@ function renderCards() {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-3 py-1 rounded-2xl"></div>
     </div>
     
-    <!-- PROGRESS BAR – exact main-branch ID + always visible -->
+    <!-- PROGRESS BAR -->
     <div class="h-2.5 bg-zinc-800 rounded-full overflow-hidden mb-6">
       <div id="progress-bar-${name}" 
            class="h-full bg-gradient-to-r from-orange-400 to-amber-500 transition-all"
@@ -155,7 +150,7 @@ function renderCards() {
             FIRE
         </button>
         <button onclick="fireMacro('${name}', 1.0, true)" 
-                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-6 rounded-2xl transition-all">
+                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-6 rounded-2xl transition-all active:scale-95 shadow-inner">
             RAMP
         </button>
     </div>
@@ -171,28 +166,25 @@ function renderCards() {
   grid.innerHTML = html;
 }
 
-// ====================== PROGRESS ANIMATION – robust (matches main) ======================
+// ====================== PROGRESS ANIMATION – ROBUST ======================
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
 
-  // Instant reset
   bar.style.transitionDuration = '0ms';
   bar.style.width = '0%';
   void bar.offsetWidth; // force reflow
   
-  // Animate exactly to ramp/LFO duration
   bar.style.transitionDuration = `${durationMs}ms`;
   bar.style.width = '100%';
   
-  // Auto-reset after finish
   setTimeout(() => {
     bar.style.transitionDuration = '400ms';
     bar.style.width = '0%';
   }, durationMs);
 }
 
-// ====================== RICH DETAILS ======================
+// ====================== RICH DETAILS (unchanged) ======================
 function toggleDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const m = macros[name];
@@ -216,7 +208,7 @@ function toggleDetail(name) {
   }
 }
 
-// ====================== MIDI ======================
+// ====================== MIDI (unchanged) ======================
 let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
