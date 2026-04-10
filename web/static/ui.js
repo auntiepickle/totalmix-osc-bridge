@@ -12,11 +12,11 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — thick, always visible height, beautiful gradient -->
+    <!-- PROGRESS BAR — EXPLICIT HEIGHT + h-full so it can NEVER be 0px -->
     <div class="h-3 bg-zinc-800 rounded-full overflow-hidden mb-8">
       <div id="progress-bar-${name}" 
            class="h-full bg-gradient-to-r from-orange-400 to-amber-500 origin-left"
-           style="width: 100%; transform: scaleX(0);"></div>
+           style="height: 12px; width: 100%; transform: scaleX(0);"></div>
     </div>
     
     <div class="grid grid-cols-3 gap-3">
