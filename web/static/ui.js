@@ -12,7 +12,7 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — thick, always visible, respects macro timing -->
+    <!-- PROGRESS BAR — thick, always visible height -->
     <div class="h-3 bg-zinc-800 rounded-full overflow-hidden mb-8">
       <div id="progress-bar-${name}" 
            class="h-full bg-gradient-to-r from-orange-400 to-amber-500 origin-left"
@@ -74,7 +74,7 @@ async function fireMacro(name, value = 1.0, ramp = false) {
   const macro = macros[name];
   if (!macro) return;
   console.log(`[UI] Firing macro: ${name}`);
-  // Use exact macro.durationMs (original goal) — fallback only if missing
+  // Use EXACT macro.durationMs (original goal)
   const durationMs = macro.durationMs || (ramp ? 3500 : 2000);
   animateProgress(name, durationMs);
   try {
