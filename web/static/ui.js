@@ -1,4 +1,4 @@
-/* ui.js - SAFER VERSION (April 2026) — console-proven width animation + guaranteed height */
+/* ui.js - FINAL POLISHED VERSION (April 2026) — reversed gradient + border/shadow + proven width animation */
 
 function calculateDurationMs(macro, isRamp) {
   if (macro.durationMs) return macro.durationMs;
@@ -23,10 +23,10 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — proven height + width animation -->
-    <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8">
+    <!-- PROGRESS BAR — reversed gradient + border + shadow for crisp definition -->
+    <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8 shadow-inner">
       <div id="progress-bar-${name}" 
-           class="h-full bg-orange-500"
+           class="h-full bg-gradient-to-r from-orange-400 to-amber-500 border border-orange-300/30 shadow-[0_0_6px_rgb(249,115,22)]"
            style="height: 16px; width: 0%; transition: none;"></div>
     </div>
     
@@ -50,7 +50,7 @@ function createMacroCardHTML(name, m) {
 }
 
 function renderCards() {
-  console.log("🔄 renderCards() — safe moderate layout");
+  console.log("🔄 renderCards() — polished moderate layout");
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
   let html = '';
