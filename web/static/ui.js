@@ -1,4 +1,4 @@
-/* ui.js - FINAL POLISHED VERSION (April 2026) — gradient reversed + border on outer only */
+/* ui.js - FINAL FIXED VERSION (April 2026) — explicit inline gradient (bypasses Tailwind var bug) + border on outer only */
 
 function calculateDurationMs(macro, isRamp) {
   if (macro.durationMs) return macro.durationMs;
@@ -23,11 +23,11 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — reversed gradient + border ONLY on outer track -->
+    <!-- PROGRESS BAR — outer track has border + shadow, inner fill uses EXPLICIT gradient (fixes invisible bg) -->
     <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8 border border-zinc-700 shadow-inner">
       <div id="progress-bar-${name}" 
-           class="h-full bg-gradient-to-r from-amber-400 to-orange-500"
-           style="height: 16px; width: 0%; transition: none;"></div>
+           class="h-full"
+           style="height: 16px; width: 0%; transition: none; background-image: linear-gradient(to right, #f59e0b, #f97316);"></div>
     </div>
     
     <div class="grid grid-cols-3 gap-3">
@@ -50,7 +50,7 @@ function createMacroCardHTML(name, m) {
 }
 
 function renderCards() {
-  console.log("🔄 renderCards() — polished moderate layout");
+  console.log("🔄 renderCards() — gradient fixed");
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
   let html = '';
