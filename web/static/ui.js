@@ -1,4 +1,4 @@
-/* ui.js - FINAL POLISHED VERSION (April 2026) — reversed gradient + border/shadow + proven width animation */
+/* ui.js - FINAL POLISHED VERSION (April 2026) — gradient reversed + border on outer only */
 
 function calculateDurationMs(macro, isRamp) {
   if (macro.durationMs) return macro.durationMs;
@@ -23,10 +23,10 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — reversed gradient + border + shadow for crisp definition -->
-    <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8 shadow-inner">
+    <!-- PROGRESS BAR — reversed gradient + border ONLY on outer track -->
+    <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8 border border-zinc-700 shadow-inner">
       <div id="progress-bar-${name}" 
-           class="h-full bg-gradient-to-r from-orange-400 to-amber-500 border border-orange-300/30 shadow-[0_0_6px_rgb(249,115,22)]"
+           class="h-full bg-gradient-to-r from-amber-400 to-orange-500"
            style="height: 16px; width: 0%; transition: none;"></div>
     </div>
     
