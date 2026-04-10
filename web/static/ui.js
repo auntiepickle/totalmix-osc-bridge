@@ -1,4 +1,5 @@
-/* ui.js - FINAL POLISHED VERSION (April 2026) — gradient reversed + border on outer only */
+/* ui.js - FINAL FIXED VERSION (April 2026) — explicit inline gradient (bypasses Tailwind var bug) + border on outer only */
+
 function calculateDurationMs(macro, isRamp) {
   if (macro.durationMs) return macro.durationMs;
   const step = macro.steps ? macro.steps.find(s => s.operation) : null;
@@ -9,6 +10,7 @@ function calculateDurationMs(macro, isRamp) {
   const msPerBar = 240000 / bpm;
   return Math.round(bars * msPerBar);
 }
+
 function createMacroCardHTML(name, m) {
   return `
 <div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-6 rounded-3xl">
@@ -20,34 +22,35 @@ function createMacroCardHTML(name, m) {
         </div>
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
-   
-    <!-- PROGRESS BAR — reversed gradient + border ONLY on outer track -->
+    
+    <!-- PROGRESS BAR — outer track has border + shadow, inner fill uses EXPLICIT gradient (fixes invisible bg) -->
     <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8 border border-zinc-700 shadow-inner">
-      <div id="progress-bar-${name}"
-           class="h-full bg-gradient-to-r from-amber-400 to-orange-500"
-           style="height: 16px; width: 0%; transition: none;"></div>
+      <div id="progress-bar-${name}" 
+           class="h-full"
+           style="height: 16px; width: 0%; transition: none; background-image: linear-gradient(to right, #f59e0b, #f97316);"></div>
     </div>
-   
+    
     <div class="grid grid-cols-3 gap-3">
-        <button onclick="fireMacro('${name}', 1.0, false)"
+        <button onclick="fireMacro('${name}', 1.0, false)" 
                 class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-7 rounded-3xl text-2xl transition-all shadow-inner">
             FIRE
         </button>
-        <button onclick="fireMacro('${name}', 1.0, true)"
+        <button onclick="fireMacro('${name}', 1.0, true)" 
                 class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-7 rounded-3xl transition-all active:scale-95 shadow-inner">
             RAMP
         </button>
     </div>
-   
-    <button onclick="toggleDetail('${name}')"
+    
+    <button onclick="toggleDetail('${name}')" 
             class="mt-8 w-full text-zinc-400 hover:text-orange-400 text-sm font-medium flex items-center justify-center gap-2">
         DETAILS ▼
     </button>
     <div id="detail-${name}" class="hidden mt-4 p-4 bg-[#111111] rounded-3xl border border-zinc-700 font-mono text-sm"></div>
 </div>`;
 }
+
 function renderCards() {
-  console.log("🔄 renderCards() — polished moderate layout");
+  console.log("🔄 renderCards() — gradient fixed");
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
   let html = '';
@@ -56,32 +59,34 @@ function renderCards() {
   });
   grid.innerHTML = html;
 }
+
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
   console.log(`[ANIM] Starting ${name} — ${durationMs}ms`);
- 
+  
   bar.style.transition = 'none';
   bar.style.width = '0%';
   bar.offsetHeight; // force repaint
- 
+  
   bar.style.transition = `width ${durationMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
   bar.style.width = '100%';
- 
+  
   setTimeout(() => {
     bar.style.transition = 'width 300ms cubic-bezier(0.4, 0, 0.2, 1)';
     bar.style.width = '0%';
     console.log(`[ANIM] Finished + reset for ${name}`);
   }, durationMs);
 }
+
 async function fireMacro(name, value = 1.0, ramp = false) {
   const macro = macros[name];
   if (!macro) return;
   console.log(`[UI] Firing macro: ${name} (ramp=${ramp})`);
- 
+  
   const durationMs = calculateDurationMs(macro, ramp);
   animateProgress(name, durationMs);
- 
+  
   try {
     await fetch(`/api/trigger/${name}`, {
       method: 'POST',
@@ -90,6 +95,7 @@ async function fireMacro(name, value = 1.0, ramp = false) {
     });
   } catch (err) { console.error(err); }
 }
+
 function toggleDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const m = macros[name];
