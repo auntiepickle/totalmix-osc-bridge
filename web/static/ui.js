@@ -1,4 +1,4 @@
-/* ui.js - UI rendering, cards, animation, fireMacro, toggleDetail */
+/* ui.js - FINAL CLEAN VERSION (M2_branch) */
 
 function createMacroCardHTML(name, m) {
   return `
@@ -12,7 +12,7 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — thick, always visible height -->
+    <!-- PROGRESS BAR — thick, always visible, exact macro timing -->
     <div class="h-3 bg-zinc-800 rounded-full overflow-hidden mb-8">
       <div id="progress-bar-${name}" 
            class="h-full bg-gradient-to-r from-orange-400 to-amber-500 origin-left"
@@ -52,7 +52,7 @@ function renderCards() {
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
-  console.log(`[ANIM] Starting scaleX for ${name} — ${durationMs}ms`);
+  console.log(`[ANIM] Starting for ${name} — ${durationMs}ms`);
   bar.style.willChange = 'transform';
   bar.style.transformOrigin = 'left';
   bar.style.transform = 'scaleX(0)';
@@ -74,7 +74,7 @@ async function fireMacro(name, value = 1.0, ramp = false) {
   const macro = macros[name];
   if (!macro) return;
   console.log(`[UI] Firing macro: ${name}`);
-  // Use EXACT macro.durationMs (original goal)
+  // EXACT macro.durationMs (original goal)
   const durationMs = macro.durationMs || (ramp ? 3500 : 2000);
   animateProgress(name, durationMs);
   try {
