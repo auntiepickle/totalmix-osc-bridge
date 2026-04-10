@@ -12,7 +12,7 @@ function createMacroCardHTML(name, m) {
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — EXPLICIT HEIGHT + h-full so it can NEVER be 0px -->
+    <!-- PROGRESS BAR — thick, always visible, respects macro timing -->
     <div class="h-3 bg-zinc-800 rounded-full overflow-hidden mb-8">
       <div id="progress-bar-${name}" 
            class="h-full bg-gradient-to-r from-orange-400 to-amber-500 origin-left"
@@ -21,11 +21,11 @@ function createMacroCardHTML(name, m) {
     
     <div class="grid grid-cols-3 gap-3">
         <button onclick="fireMacro('${name}', 1.0, false)" 
-                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-6 rounded-3xl text-2xl transition-all shadow-inner">
+                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-7 rounded-3xl text-2xl transition-all shadow-inner">
             FIRE
         </button>
         <button onclick="fireMacro('${name}', 1.0, true)" 
-                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-6 rounded-3xl transition-all active:scale-95 shadow-inner">
+                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-7 rounded-3xl transition-all active:scale-95 shadow-inner">
             RAMP
         </button>
     </div>
@@ -74,6 +74,7 @@ async function fireMacro(name, value = 1.0, ramp = false) {
   const macro = macros[name];
   if (!macro) return;
   console.log(`[UI] Firing macro: ${name}`);
+  // Use exact macro.durationMs (original goal) — fallback only if missing
   const durationMs = macro.durationMs || (ramp ? 3500 : 2000);
   animateProgress(name, durationMs);
   try {
