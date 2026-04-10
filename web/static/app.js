@@ -1,6 +1,6 @@
 /* =============================================
    TOTALMIX OSC BRIDGE - Web UI (M2 COMPLETE + FINAL FIXES)
-   Fixes: progress bar sync, status header, MIDI status, rich details panel, green MIDI badge
+   Fixes: progress bar animation (incremental render), MIDI connected badge
    ============================================= */
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -14,6 +14,7 @@ let midiConnectedDevice = '—';
 ws.onopen = async () => {
   console.log('[WS] Connected to bridge');
   await loadMacros();
+  ensureMIDIControls();
 };
 
 ws.onclose = () => console.log('[WS] Disconnected');
@@ -28,19 +29,54 @@ ws.onmessage = function (event) {
   if (data.macro_update) {
     const mu = data.macro_update;
     macros[mu.name] = { ...(macros[mu.name] || {}), ...mu };
+    updateMacroCard(mu.name);   // ← incremental = animation survives
+  } else {
+    renderCards();              // full render only when truly needed
   }
 
   updateStatusHeader();
-  renderCards();   // safe re-render (progress bars are preserved)
 };
 
-// ====================== STATUS HEADER ======================
-// ====================== STATUS HEADER (matches your index.html) ======================
+// ====================== ENSURE MIDI UI EXISTS (dynamic) ======================
+function ensureMIDIControls() {
+  if (document.getElementById('midi-device-selector')) return;
+
+  const header = document.querySelector('header') || document.querySelector('.flex.justify-between') || document.querySelector('.flex');
+  if (!header) return;
+
+  const midiDiv = document.createElement('div');
+  midiDiv.className = 'flex items-center gap-3 ml-auto';
+  midiDiv.innerHTML = `
+    <select id="midi-device-selector" class="bg-[#1E1E1E] text-white px-4 py-2 rounded-2xl border border-zinc-700 focus:outline-none text-sm"></select>
+    <button onclick="connectSelectedMIDI()" 
+            class="px-5 py-2 bg-green-600 hover:bg-green-500 rounded-2xl text-sm font-medium transition-colors">
+      Connect MIDI
+    </button>
+  `;
+  header.appendChild(midiDiv);
+}
+
+// ====================== STATUS HEADER + VISIBLE MIDI BADGE ======================
 function updateStatusHeader() {
   const workspaceEl = document.getElementById('workspace');
   const snapshotEl = document.getElementById('snapshot');
   if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
   if (snapshotEl) snapshotEl.textContent = `Snapshot: ${currentSnapshot || '—'}`;
+
+  // MIDI Connected Badge (the one you were missing)
+  let midiBadge = document.getElementById('midi-connected-badge');
+  if (midiConnectedDevice && midiConnectedDevice !== '—') {
+    if (!midiBadge) {
+      midiBadge = document.createElement('div');
+      midiBadge.id = 'midi-connected-badge';
+      midiBadge.className = 'px-4 py-1 bg-green-600 text-white text-sm font-medium rounded-2xl flex items-center gap-2';
+      const header = document.querySelector('header') || document.querySelector('.flex.justify-between') || document.querySelector('.flex');
+      if (header) header.appendChild(midiBadge);
+    }
+    midiBadge.innerHTML = `🎹 ${midiConnectedDevice}`;
+  } else if (midiBadge) {
+    midiBadge.remove();
+  }
 }
 
 // ====================== INITIAL LOAD ======================
@@ -57,6 +93,13 @@ async function loadMacros() {
   } catch (err) {
     console.error("❌ loadMacros failed:", err);
   }
+}
+
+// ====================== INCREMENTAL CARD UPDATE (fixes animation reset) ======================
+function updateMacroCard(name) {
+  const card = document.getElementById(`card-${name}`);
+  if (!card) return;
+  // Future-proof spot for value / routing live updates if you ever add them
 }
 
 // ====================== FIRE MACRO ======================
@@ -80,7 +123,8 @@ async function fireMacro(name, value = 1.0, ramp = false) {
     console.error("❌ Trigger failed:", err);
   }
 }
-// ====================== RENDER CARDS – 100% main-branch match ======================
+
+// ====================== RENDER CARDS ======================
 function renderCards() {
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
@@ -127,30 +171,28 @@ function renderCards() {
   grid.innerHTML = html;
 }
 
-// ====================== PROGRESS ANIMATION – now matches main branch exactly ======================
+// ====================== PROGRESS ANIMATION – robust (matches main) ======================
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
-  if (!bar) {
-    console.warn(`[UI] Progress bar not found for ${name} – check renderCards`);
-    return;
-  }
+  if (!bar) return;
+
   // Instant reset
   bar.style.transitionDuration = '0ms';
   bar.style.width = '0%';
   void bar.offsetWidth; // force reflow
   
-  // Animate exactly to ramp/LFO duration (main-branch timing)
+  // Animate exactly to ramp/LFO duration
   bar.style.transitionDuration = `${durationMs}ms`;
   bar.style.width = '100%';
   
   // Auto-reset after finish
   setTimeout(() => {
-    bar.style.transitionDuration = '300ms';
+    bar.style.transitionDuration = '400ms';
     bar.style.width = '0%';
   }, durationMs);
 }
 
-// ====================== RICH DETAILS – matches main-branch styling ======================
+// ====================== RICH DETAILS ======================
 function toggleDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const m = macros[name];
@@ -173,7 +215,8 @@ function toggleDetail(name) {
     panel.innerHTML = html;
   }
 }
-// ====================== MIDI (with green badge) ======================
+
+// ====================== MIDI ======================
 let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
@@ -203,15 +246,11 @@ function handleMIDIMessage(message) {
 }
 
 function updateCardLastTrigger(name, cc, value, deviceName, channel) {
-  const card = document.getElementById(`card-${name}`);
-  if (!card) return;
-  let badge = card.querySelector('.midi-badge');
-  if (!badge) {
-    badge = document.createElement('div');
-    badge.className = 'midi-badge text-[10px] font-mono bg-green-500/20 text-green-400 px-2 py-0.5 rounded mt-2 flex flex-col gap-px';
-    card.appendChild(badge);
+  const badgeContainer = document.getElementById(`last-trigger-${name}`);
+  if (badgeContainer) {
+    badgeContainer.innerHTML = `<span class="font-semibold">${deviceName}</span><br>CC${cc} • ch${channel}`;
+    badgeContainer.classList.add('bg-green-500/20');
   }
-  badge.innerHTML = `<span class="font-semibold">${deviceName}</span><br>CC${cc} • ch${channel} • ${value}`;
 }
 
 async function initWebMIDI() {
@@ -232,10 +271,11 @@ async function initWebMIDI() {
     }
     const target = inputs.find(i => i.name === lastMidiDevice) || inputs[0];
     if (target) {
+      if (midiInput) midiInput.onmidimessage = null;
       midiInput = target;
       midiInput.onmidimessage = handleMIDIMessage;
       midiConnectedDevice = target.name;
-      console.log(`[MIDI] Listening on ${target.name}`);
+      console.log(`[MIDI] Auto-connected to ${target.name}`);
       updateStatusHeader();
     }
   } catch (err) {
@@ -245,8 +285,8 @@ async function initWebMIDI() {
 
 window.connectSelectedMIDI = () => {
   const selector = document.getElementById('midi-device-selector');
+  if (!selector || !midiAccess) return;
   const selectedId = selector.value;
-  if (!selectedId || !midiAccess) return;
   const input = Array.from(midiAccess.inputs.values()).find(i => i.id === selectedId);
   if (input) {
     if (midiInput) midiInput.onmidimessage = null;
@@ -256,6 +296,7 @@ window.connectSelectedMIDI = () => {
     midiConnectedDevice = input.name;
     localStorage.setItem('lastMidiDevice', input.name);
     updateStatusHeader();
+    console.log(`[MIDI] Connected to ${input.name}`);
   }
 };
 
