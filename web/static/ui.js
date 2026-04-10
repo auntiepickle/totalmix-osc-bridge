@@ -2,17 +2,17 @@
 
 function createMacroCardHTML(name, m) {
   return `
-<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-6 rounded-2xl">
+<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-6 rounded-3xl">
     <div class="flex justify-between items-start mb-6">
-        <div>
+        <div class="flex-1">
             <h3 class="text-2xl font-bold text-white">${name}</h3>
-            <p class="text-zinc-400 text-sm">${m.description || ''}</p>
+            <p class="text-zinc-400 text-sm mt-1">${m.description || ''}</p>
             <p class="text-orange-400 text-xs font-medium mt-3 tracking-widest">${m.routing_label || '—'}</p>
         </div>
-        <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-3 py-1 rounded-2xl"></div>
+        <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
     
-    <!-- PROGRESS BAR — thick, spaced, never collapses -->
+    <!-- PROGRESS BAR — thick, always visible height, beautiful gradient -->
     <div class="h-3 bg-zinc-800 rounded-full overflow-hidden mb-8">
       <div id="progress-bar-${name}" 
            class="h-full bg-gradient-to-r from-orange-400 to-amber-500 origin-left"
@@ -21,11 +21,11 @@ function createMacroCardHTML(name, m) {
     
     <div class="grid grid-cols-3 gap-3">
         <button onclick="fireMacro('${name}', 1.0, false)" 
-                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-6 rounded-2xl text-2xl transition-all shadow-inner">
+                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-6 rounded-3xl text-2xl transition-all shadow-inner">
             FIRE
         </button>
         <button onclick="fireMacro('${name}', 1.0, true)" 
-                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-6 rounded-2xl transition-all active:scale-95 shadow-inner">
+                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-6 rounded-3xl transition-all active:scale-95 shadow-inner">
             RAMP
         </button>
     </div>
@@ -34,7 +34,7 @@ function createMacroCardHTML(name, m) {
             class="mt-8 w-full text-zinc-400 hover:text-orange-400 text-sm font-medium flex items-center justify-center gap-2">
         DETAILS ▼
     </button>
-    <div id="detail-${name}" class="hidden mt-4 p-4 bg-[#111111] rounded-2xl border border-zinc-700 font-mono text-sm"></div>
+    <div id="detail-${name}" class="hidden mt-4 p-4 bg-[#111111] rounded-3xl border border-zinc-700 font-mono text-sm"></div>
 </div>`;
 }
 
@@ -104,7 +104,7 @@ function toggleDetail(name) {
       m.midi_triggers.forEach(t => html += `<li>CC${t.number} ch${t.channel}</li>`);
       html += `</ul></div>`;
     }
-    html += `<details class="mt-4"><summary class="cursor-pointer text-orange-400">Full macro JSON</summary><pre>${JSON.stringify(m, null, 2)}</pre></details>`;
+    html += `<details class="mt-4"><summary class="cursor-pointer text-orange-400">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64 mt-2">${JSON.stringify(m, null, 2)}</pre></details>`;
     html += `</div>`;
     panel.innerHTML = html;
   }

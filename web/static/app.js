@@ -29,7 +29,6 @@ ws.onmessage = function (event) {
   updateStatusHeader();
 };
 
-// ====================== ENSURE MIDI UI ======================
 function ensureMIDIControls() {
   if (document.getElementById('midi-device-selector')) return;
   const header = document.querySelector('header') || document.querySelector('.flex');
@@ -43,7 +42,6 @@ function ensureMIDIControls() {
   header.appendChild(midiDiv);
 }
 
-// ====================== STATUS HEADER ======================
 function updateStatusHeader() {
   const workspaceEl = document.getElementById('workspace');
   const snapshotEl = document.getElementById('snapshot');
@@ -51,7 +49,6 @@ function updateStatusHeader() {
   if (snapshotEl) snapshotEl.textContent = `Snapshot: ${currentSnapshot || '—'}`;
 }
 
-// ====================== INITIAL LOAD ======================
 async function loadMacros() {
   console.log("🚀 loadMacros() called — fetching /api/macros");
   try {
@@ -66,7 +63,6 @@ async function loadMacros() {
   }
 }
 
-// ====================== INIT ======================
 window.onload = () => {
   initWebMIDI();
 };
