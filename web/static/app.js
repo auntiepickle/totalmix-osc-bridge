@@ -168,30 +168,31 @@ function renderCards() {
   grid.innerHTML = html;
 }
 
-// ====================== PROGRESS ANIMATION — PURE JS (no Tailwind conflict) ======================
+// ====================== PROGRESS ANIMATION — PURE JS (matches main smoothness) ======================
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) {
-    console.warn(`[UI] Progress bar element not found for ${name}`);
+    console.warn(`[UI] Progress bar not found for ${name}`);
     return;
   }
 
-  console.log(`🎬 STARTING ANIMATION for ${name} — ${durationMs}ms`);
+  console.log(`[ANIM] Starting for ${name} — ${durationMs}ms`);
 
-  // Force reset
+  // Reset
   bar.style.transition = 'none';
   bar.style.width = '0%';
-  void bar.offsetWidth;   // critical reflow
 
-  // Now animate
-  bar.style.transition = `width ${durationMs}ms ease-out`;
+  // Force reflow (this is the magic main uses)
+  void bar.offsetWidth;
+
+  // Animate
+  bar.style.transition = `width ${durationMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
   bar.style.width = '100%';
 
-  // Auto-reset when done
+  // Auto-reset after animation (matches main behavior)
   setTimeout(() => {
-    bar.style.transition = 'width 400ms ease-out';
+    bar.style.transition = 'none';
     bar.style.width = '0%';
-    console.log(`🎬 Animation complete for ${name}`);
   }, durationMs);
 }
 
@@ -285,20 +286,47 @@ async function initWebMIDI() {
     console.error('[MIDI] Failed:', err);
   }
 }
+// ====================== MIDI CONNECT HELPER (exact pattern from main) ======================
+function updateMIDIBadge(deviceName) {
+  let badge = document.getElementById('midi-connected-badge');
+  if (!badge) {
+    const header = document.querySelector('header') || document.querySelector('.flex.justify-between') || document.querySelector('.flex');
+    if (!header) return;
+    badge = document.createElement('div');
+    badge.id = 'midi-connected-badge';
+    badge.className = 'px-4 py-1 bg-green-600 text-white text-sm font-medium rounded-2xl flex items-center gap-2 ml-auto';
+    header.appendChild(badge);
+  }
+  badge.innerHTML = `MIDI ${deviceName}`;
+  midiConnectedDevice = deviceName;
+  updateStatusHeader();
+}
 
-window.connectSelectedMIDI = () => {
+window.connectSelectedMIDI = async () => {
   const selector = document.getElementById('midi-device-selector');
   if (!selector || !midiAccess) return;
+
   const selectedId = selector.value;
   const input = Array.from(midiAccess.inputs.values()).find(i => i.id === selectedId);
+
   if (input) {
+    // disconnect any previous input (exact pattern from main)
     if (midiInput) midiInput.onmidimessage = null;
+
     midiInput = input;
     midiInput.onmidimessage = handleMIDIMessage;
+
+    // === your M2 persistence logic (kept 100% intact) ===
     lastMidiDevice = input.name;
     midiConnectedDevice = input.name;
     localStorage.setItem('lastMidiDevice', input.name);
+
+    // === the fix that makes the connected badge appear instantly (from main) ===
+    updateMIDIBadge(`Connected: ${input.name}`);
+
+    // keep your existing status update too
     updateStatusHeader();
+
     console.log(`[MIDI] Connected to ${input.name}`);
   }
 };
