@@ -1,33 +1,31 @@
-/* midi.js - all MIDI functions (M2_branch — verbose logging added for real-hardware debug) */
+/* midi.js - cleaned up for production (M2_branch — April 2026) */
+/* Removed verbose [MIDI RAW] logging; clock signals now silently ignored */
 
 let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
+let midiConnectedDevice = '';
 
 function handleMIDIMessage(message) {
   const [status, data1, data2] = message.data;
   const channel = (status & 0x0F) + 1;
   const cc = data1;
-  const valueRaw = data2;
-
-  /* === VERBOSE LOGGING (this is the new debug part) === */
-  console.log(`[MIDI RAW] status=0x${status.toString(16)} data1=${data1} data2=${data2} → channel=${channel} CC=${cc} value=${valueRaw}`);
 
   if ((status & 0xF0) !== 0xB0) {
-    console.log(`[MIDI] Ignored non-CC message (status 0x${status.toString(16)})`);
+    // Silent ignore for non-CC (includes MIDI clock 0xF8, active sensing, etc.)
     return;
   }
 
-  const value = valueRaw / 127.0;
+  const value = data2 / 127.0;
 
   let triggered = false;
   Object.keys(macros).forEach(name => {
     const macro = macros[name];
     for (const trigger of macro.midi_triggers || []) {
       if (trigger.type === "control_change" && trigger.number === cc && trigger.channel === channel) {
-        console.log(`[MIDI] ✅ Triggered ${name} (CC${cc} ch${channel} value=${valueRaw})`);
+        console.log(`[MIDI] ✅ Triggered ${name} (CC${cc} ch${channel})`);
         fireMacro(name, value, false);
-        updateCardLastTrigger(name, cc, valueRaw, message.target ? message.target.name : "Unknown", channel);
+        updateCardLastTrigger(name, cc, data2, message.target ? message.target.name : "U6MIDI Pro", channel);
         triggered = true;
         return;
       }
@@ -35,7 +33,8 @@ function handleMIDIMessage(message) {
   });
 
   if (!triggered) {
-    console.log(`[MIDI] No matching macro for CC${cc} ch${channel}`);
+    // Optional: keep this only if you want to see unmatched CCs during testing
+    // console.log(`[MIDI] No matching macro for CC${cc} ch${channel}`);
   }
 }
 
@@ -43,7 +42,7 @@ function updateCardLastTrigger(name, cc, value, deviceName, channel) {
   const badge = document.getElementById(`last-trigger-${name}`);
   if (badge) {
     badge.innerHTML = `<span class="font-semibold">${deviceName}</span><br>CC${cc} • ch${channel}`;
-    badge.classList.add('bg-green-500/20');
+    badge.classList.add('bg-green-500/20', 'text-green-400');
   }
 }
 
