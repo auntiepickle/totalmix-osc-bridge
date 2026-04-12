@@ -1,4 +1,4 @@
-/* midi.js - all MIDI functions */
+/* midi.js - all MIDI functions (M2_branch — verbose logging added for real-hardware debug) */
 
 let midiAccess = null;
 let midiInput = null;
@@ -9,19 +9,34 @@ function handleMIDIMessage(message) {
   const channel = (status & 0x0F) + 1;
   const cc = data1;
   const valueRaw = data2;
-  if ((status & 0xF0) !== 0xB0) return;
+
+  /* === VERBOSE LOGGING (this is the new debug part) === */
+  console.log(`[MIDI RAW] status=0x${status.toString(16)} data1=${data1} data2=${data2} → channel=${channel} CC=${cc} value=${valueRaw}`);
+
+  if ((status & 0xF0) !== 0xB0) {
+    console.log(`[MIDI] Ignored non-CC message (status 0x${status.toString(16)})`);
+    return;
+  }
+
   const value = valueRaw / 127.0;
+
+  let triggered = false;
   Object.keys(macros).forEach(name => {
     const macro = macros[name];
     for (const trigger of macro.midi_triggers || []) {
       if (trigger.type === "control_change" && trigger.number === cc && trigger.channel === channel) {
-        console.log(`[MIDI] Triggered ${name}`);
+        console.log(`[MIDI] ✅ Triggered ${name} (CC${cc} ch${channel} value=${valueRaw})`);
         fireMacro(name, value, false);
         updateCardLastTrigger(name, cc, valueRaw, message.target ? message.target.name : "Unknown", channel);
+        triggered = true;
         return;
       }
     }
   });
+
+  if (!triggered) {
+    console.log(`[MIDI] No matching macro for CC${cc} ch${channel}`);
+  }
 }
 
 function updateCardLastTrigger(name, cc, value, deviceName, channel) {
