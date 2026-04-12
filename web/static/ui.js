@@ -1,5 +1,4 @@
-/* ui.js - M2 PHASE 2 COMPLETE (April 2026) — safe progress bar + full card redesign per MD checklist */
-/* Items 2-5 knocked out: better spacing, glanceable info, badge alignment, polished buttons */
+/* ui.js - FINAL FIXED VERSION (April 2026) — explicit inline gradient (bypasses Tailwind var bug) + border on outer only */
 
 function calculateDurationMs(macro, isRamp) {
   if (macro.durationMs) return macro.durationMs;
@@ -14,42 +13,35 @@ function calculateDurationMs(macro, isRamp) {
 
 function createMacroCardHTML(name, m) {
   return `
-<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-8 rounded-3xl shadow-xl">
+<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-6 rounded-3xl">
     <div class="flex justify-between items-start mb-6">
-        <div class="flex-1 min-w-0">
-            <h3 class="text-2xl font-bold text-white truncate">${name}</h3>
-            <p class="text-zinc-400 text-sm mt-1 line-clamp-2">${m.description || ''}</p>
+        <div class="flex-1">
+            <h3 class="text-2xl font-bold text-white">${name}</h3>
+            <p class="text-zinc-400 text-sm mt-1">${m.description || ''}</p>
             <p class="text-orange-400 text-xs font-medium mt-3 tracking-widest">${m.routing_label || '—'}</p>
         </div>
-        <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1 flex-shrink-0 ml-6"></div>
+        <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
-
-    <!-- PROGRESS BAR — safe, no conflicting inline height (outer border only, reversed gradient) -->
+    
+    <!-- PROGRESS BAR — outer track has border + shadow, inner fill uses EXPLICIT gradient (fixes invisible bg) -->
     <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8 border border-zinc-700 shadow-inner">
-      <div id="progress-bar-${name}"
-           class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all"
-           style="width: 0%;"></div>
+      <div id="progress-bar-${name}" 
+           class="h-full"
+           style="height: 16px; width: 0%; transition: none; background-image: linear-gradient(to right, #f59e0b, #f97316);"></div>
     </div>
-
-    <!-- Glanceable info row (MD item 3) -->
-    <div class="grid grid-cols-3 text-xs mb-8 text-zinc-400 font-mono">
-        <div><span class="text-orange-400">OSC</span> ${m.osc_preview || '—'}</div>
-        <div><span class="text-orange-400">DUR</span> ${(calculateDurationMs(m, false)/1000).toFixed(1)}s</div>
-        <div><span class="text-orange-400">BPM</span> ${m.steps?.[0]?.operation?.bpm || 140}</div>
-    </div>
-
+    
     <div class="grid grid-cols-3 gap-3">
-        <button onclick="fireMacro('${name}', 1.0, false)"
-                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-[0.97] text-black font-bold py-7 rounded-3xl text-2xl transition-all shadow-inner flex items-center justify-center gap-3">
-            🔥 FIRE
+        <button onclick="fireMacro('${name}', 1.0, false)" 
+                class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-7 rounded-3xl text-2xl transition-all shadow-inner">
+            FIRE
         </button>
-        <button onclick="fireMacro('${name}', 1.0, true)"
-                class="border-2 border-amber-400 hover:bg-amber-400/10 hover:text-amber-300 text-amber-400 font-medium py-7 rounded-3xl transition-all active:scale-[0.97] shadow-inner">
+        <button onclick="fireMacro('${name}', 1.0, true)" 
+                class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-7 rounded-3xl transition-all active:scale-95 shadow-inner">
             RAMP
         </button>
     </div>
-
-    <button onclick="toggleDetail('${name}')"
+    
+    <button onclick="toggleDetail('${name}')" 
             class="mt-8 w-full text-zinc-400 hover:text-orange-400 text-sm font-medium flex items-center justify-center gap-2">
         DETAILS ▼
     </button>
@@ -58,7 +50,7 @@ function createMacroCardHTML(name, m) {
 }
 
 function renderCards() {
-  console.log("🔄 renderCards() — M2 Phase 2 complete");
+  console.log("🔄 renderCards() — gradient fixed");
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
   let html = '';
@@ -72,14 +64,14 @@ function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
   console.log(`[ANIM] Starting ${name} — ${durationMs}ms`);
-
+  
   bar.style.transition = 'none';
   bar.style.width = '0%';
-  void bar.offsetHeight; // force repaint
-
+  bar.offsetHeight; // force repaint
+  
   bar.style.transition = `width ${durationMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
   bar.style.width = '100%';
-
+  
   setTimeout(() => {
     bar.style.transition = 'width 300ms cubic-bezier(0.4, 0, 0.2, 1)';
     bar.style.width = '0%';
@@ -91,11 +83,10 @@ async function fireMacro(name, value = 1.0, ramp = false) {
   const macro = macros[name];
   if (!macro) return;
   console.log(`[UI] Firing macro: ${name} (ramp=${ramp})`);
-
+  
   const durationMs = calculateDurationMs(macro, ramp);
   animateProgress(name, durationMs);
-
-  // TODO (item 6): add loading spinner here in next patch
+  
   try {
     await fetch(`/api/trigger/${name}`, {
       method: 'POST',
