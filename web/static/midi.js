@@ -1,6 +1,4 @@
-/* midi.js - cleaned up for production (M2_branch — April 2026) */
-/* Duplicate declaration of midiConnectedDevice REMOVED (already in app.js) */
-/* Clock / non-CC messages remain silently ignored */
+/* midi.js - all MIDI functions (M2_branch — verbose logging added for real-hardware debug) */
 
 let midiAccess = null;
 let midiInput = null;
@@ -10,22 +8,26 @@ function handleMIDIMessage(message) {
   const [status, data1, data2] = message.data;
   const channel = (status & 0x0F) + 1;
   const cc = data1;
+  const valueRaw = data2;
+
+  /* === VERBOSE LOGGING (this is the new debug part) === */
+  console.log(`[MIDI RAW] status=0x${status.toString(16)} data1=${data1} data2=${data2} → channel=${channel} CC=${cc} value=${valueRaw}`);
 
   if ((status & 0xF0) !== 0xB0) {
-    // Silent ignore for non-CC (MIDI clock 0xF8, active sensing, etc.)
+    console.log(`[MIDI] Ignored non-CC message (status 0x${status.toString(16)})`);
     return;
   }
 
-  const value = data2 / 127.0;
+  const value = valueRaw / 127.0;
 
   let triggered = false;
   Object.keys(macros).forEach(name => {
     const macro = macros[name];
     for (const trigger of macro.midi_triggers || []) {
       if (trigger.type === "control_change" && trigger.number === cc && trigger.channel === channel) {
-        console.log(`[MIDI] ✅ Triggered ${name} (CC${cc} ch${channel})`);
+        console.log(`[MIDI] ✅ Triggered ${name} (CC${cc} ch${channel} value=${valueRaw})`);
         fireMacro(name, value, false);
-        updateCardLastTrigger(name, cc, data2, message.target ? message.target.name : "U6MIDI Pro", channel);
+        updateCardLastTrigger(name, cc, valueRaw, message.target ? message.target.name : "Unknown", channel);
         triggered = true;
         return;
       }
@@ -33,8 +35,7 @@ function handleMIDIMessage(message) {
   });
 
   if (!triggered) {
-    // Optional: uncomment only if you want to see unmatched CCs
-    // console.log(`[MIDI] No matching macro for CC${cc} ch${channel}`);
+    console.log(`[MIDI] No matching macro for CC${cc} ch${channel}`);
   }
 }
 
@@ -42,7 +43,7 @@ function updateCardLastTrigger(name, cc, value, deviceName, channel) {
   const badge = document.getElementById(`last-trigger-${name}`);
   if (badge) {
     badge.innerHTML = `<span class="font-semibold">${deviceName}</span><br>CC${cc} • ch${channel}`;
-    badge.classList.add('bg-green-500/20', 'text-green-400');
+    badge.classList.add('bg-green-500/20');
   }
 }
 
@@ -67,7 +68,7 @@ async function initWebMIDI() {
       if (midiInput) midiInput.onmidimessage = null;
       midiInput = target;
       midiInput.onmidimessage = handleMIDIMessage;
-      midiConnectedDevice = target.name;           // ← uses global from app.js
+      midiConnectedDevice = target.name;
       console.log(`[MIDI] Auto-connected to ${target.name}`);
       updateStatusHeader();
     }
@@ -87,7 +88,7 @@ function updateMIDIBadge(deviceName) {
     header.appendChild(badge);
   }
   badge.innerHTML = `MIDI ${deviceName}`;
-  midiConnectedDevice = deviceName;                // ← uses global from app.js
+  midiConnectedDevice = deviceName;
   updateStatusHeader();
 }
 
@@ -101,7 +102,7 @@ window.connectSelectedMIDI = async () => {
     midiInput = input;
     midiInput.onmidimessage = handleMIDIMessage;
     lastMidiDevice = input.name;
-    midiConnectedDevice = input.name;              // ← uses global from app.js
+    midiConnectedDevice = input.name;
     localStorage.setItem('lastMidiDevice', input.name);
     updateMIDIBadge(`Connected: ${input.name}`);
     updateStatusHeader();
