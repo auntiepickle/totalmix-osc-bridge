@@ -1,10 +1,10 @@
 /* midi.js - cleaned up for production (M2_branch — April 2026) */
-/* Removed verbose [MIDI RAW] logging; clock signals now silently ignored */
+/* Duplicate declaration of midiConnectedDevice REMOVED (already in app.js) */
+/* Clock / non-CC messages remain silently ignored */
 
 let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
-let midiConnectedDevice = '';
 
 function handleMIDIMessage(message) {
   const [status, data1, data2] = message.data;
@@ -12,7 +12,7 @@ function handleMIDIMessage(message) {
   const cc = data1;
 
   if ((status & 0xF0) !== 0xB0) {
-    // Silent ignore for non-CC (includes MIDI clock 0xF8, active sensing, etc.)
+    // Silent ignore for non-CC (MIDI clock 0xF8, active sensing, etc.)
     return;
   }
 
@@ -33,7 +33,7 @@ function handleMIDIMessage(message) {
   });
 
   if (!triggered) {
-    // Optional: keep this only if you want to see unmatched CCs during testing
+    // Optional: uncomment only if you want to see unmatched CCs
     // console.log(`[MIDI] No matching macro for CC${cc} ch${channel}`);
   }
 }
@@ -67,7 +67,7 @@ async function initWebMIDI() {
       if (midiInput) midiInput.onmidimessage = null;
       midiInput = target;
       midiInput.onmidimessage = handleMIDIMessage;
-      midiConnectedDevice = target.name;
+      midiConnectedDevice = target.name;           // ← uses global from app.js
       console.log(`[MIDI] Auto-connected to ${target.name}`);
       updateStatusHeader();
     }
@@ -87,7 +87,7 @@ function updateMIDIBadge(deviceName) {
     header.appendChild(badge);
   }
   badge.innerHTML = `MIDI ${deviceName}`;
-  midiConnectedDevice = deviceName;
+  midiConnectedDevice = deviceName;                // ← uses global from app.js
   updateStatusHeader();
 }
 
@@ -101,7 +101,7 @@ window.connectSelectedMIDI = async () => {
     midiInput = input;
     midiInput.onmidimessage = handleMIDIMessage;
     lastMidiDevice = input.name;
-    midiConnectedDevice = input.name;
+    midiConnectedDevice = input.name;              // ← uses global from app.js
     localStorage.setItem('lastMidiDevice', input.name);
     updateMIDIBadge(`Connected: ${input.name}`);
     updateStatusHeader();
