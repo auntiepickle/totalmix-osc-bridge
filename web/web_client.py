@@ -301,3 +301,71 @@ async def reload():
     except Exception as e:
         logger.error(f"Reload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ────── UI UPLOAD + AUTO-BACKUP (April 12 2026) ──────
+import shutil
+import datetime
+from fastapi import UploadFile, File, HTTPException
+
+def backup_json_files():
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = os.path.join(os.path.dirname(__file__), "../backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    for fn in ["mappings.json", "ufx2_channel_map.json"]:
+        src = os.path.join(os.path.dirname(__file__), "../" + fn)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(backup_dir, f"{fn}.{timestamp}"))
+            logger.info(f"✅ Auto-backup: {fn}.{timestamp}")
+
+@app.post("/api/upload/mappings")
+async def upload_mappings(file: UploadFile = File(...)):
+    if not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json files allowed")
+    try:
+        backup_json_files()
+        contents = await file.read()
+        data = json.loads(contents)
+        if "macros" not in data:
+            raise HTTPException(status_code=400, detail="Invalid mappings.json format")
+        
+        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        with open(target, "w") as f:
+            json.dump(data, f, indent=2)
+        
+        bridge.mappings = data
+        logger.info(f"✅ mappings.json uploaded + reloaded ({len(data.get('macros', {}))} macros)")
+        return {"status": "success", "message": "mappings.json updated and reloaded"}
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/upload/channel_map")
+async def upload_channel_map(file: UploadFile = File(...)):
+    if not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json files allowed")
+    try:
+        backup_json_files()
+        contents = await file.read()
+        data = json.loads(contents)
+        if "submixes" not in data:
+            raise HTTPException(status_code=400, detail="Invalid ufx2_channel_map.json format")
+        
+        target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
+        with open(target, "w") as f:
+            json.dump(data, f, indent=2)
+        
+        bridge._load_channel_map()
+        logger.info("✅ ufx2_channel_map.json uploaded + reloaded")
+        return {"status": "success", "message": "channel map updated and reloaded"}
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/reload")
+async def reload():
+    try:
+        bridge.load_data()
+        return {"status": "success", "macros": len(bridge.mappings.get("macros", {}))}
+    except Exception as e:
+        logger.error(f"Reload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

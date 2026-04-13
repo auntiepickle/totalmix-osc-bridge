@@ -4,3 +4,6 @@ python-multipart>=0.0.6
 paho-mqtt
 python-dotenv
 requests
+
+# UI Upload dependency (added April 12 2026)
+python-multipart>=0.0.6
