@@ -1,7 +1,19 @@
 {
   "submixes": {
+    "ADAT 1": {
+      "index": 1,
+      "name": "ADAT 1",
+      "sends": {
+        "AN 3": {
+          "row": 1,
+          "channel": 2,
+          "osc_address": "/1/volume2",
+          "description": "AN 3 send to ADAT 1 output"
+        }
+      }
+    },
     "AES": {
-      "index": 12,                               
+      "index": 12,
       "name": "AES",
       "sends": {
         "AN 1/2": {

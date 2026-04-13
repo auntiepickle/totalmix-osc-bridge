@@ -1,5 +1,27 @@
 {
   "macros": {
+    "an3_to_adat1_send": {
+      "description": "Hardware Input AN 3 → ADAT 1 output send (native ramp)",
+      "workspace": "Pill_setup",
+      "snapshot": "Reset",
+      "force_switch": false,
+      "steps": [
+        { "osc": "/setSubmix", "value": 1.0 },
+        {
+          "osc": "/1/volume2",
+          "value": "{{param}}",
+          "operation": {
+            "type": "ramp",
+            "bars": 2,
+            "bpm": 140
+          }
+        }
+      ],
+      "midi_triggers": [
+        { "type": "control_change", "number": 44, "channel": 1, "use_value_as_param": true }
+      ],
+      "routing_label": "AN 3 → ADAT 1"
+    },
     "an12_to_aes_send": {
       "description": "Hardware Input AN 1/2 → AES Hardware Output send (native ramp)",
       "workspace": "Pill_setup",
@@ -13,15 +35,14 @@
           "operation": {
             "type": "ramp",
             "bars": 2,
-            "bpm": 140,
-            "curve": "triangle"
+            "bpm": 140
           }
         }
       ],
       "midi_triggers": [
         { "type": "control_change", "number": 42, "channel": 1, "use_value_as_param": true }
       ],
-      "param_range": [0.0, 1.0]
+      "routing_label": "AN 1/2 → AES"
     },
     "an12_lfo_test": {
       "description": "AN 1/2 send LFO test",
@@ -36,15 +57,14 @@
           "operation": {
             "type": "lfo",
             "bars": 4,
-            "bpm": 140,
-            "depth": 0.8
+            "bpm": 140
           }
         }
       ],
       "midi_triggers": [
         { "type": "control_change", "number": 43, "channel": 1, "use_value_as_param": true }
       ],
-      "param_range": [0.0, 1.0]
+      "routing_label": "AN 1/2 LFO test"
     }
   }
 }
