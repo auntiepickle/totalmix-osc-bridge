@@ -16,14 +16,11 @@
                     <i class="fas fa-upload"></i> mappings.json
                     <input type="file" id="upload-mappings" accept=".json" class="hidden" onchange="uploadFile(this, 'mappings')">
                 </label>
-
                 <label class="cursor-pointer px-5 py-3 bg-amber-400 hover:bg-amber-500 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
                     <i class="fas fa-upload"></i> channel map
                     <input type="file" id="upload-channel" accept=".json" class="hidden" onchange="uploadFile(this, 'channel_map')">
                 </label>
-
-                <button onclick="reloadServer()" 
-                        class="px-6 py-3 bg-green-500 hover:bg-green-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
+                <button onclick="reloadServer()" class="px-6 py-3 bg-green-500 hover:bg-green-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
                     <i class="fas fa-sync"></i> Reload
                 </button>
             </div>
