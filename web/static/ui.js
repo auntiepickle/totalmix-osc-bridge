@@ -1,4 +1,4 @@
-/* ui.js - M2_branch FULL STABLE (April 2026) — MIDI + JSON details + snapshot caching restored */
+/* ui.js - M2_branch STABLE (April 2026) — full MIDI + JSON + snapshot caching */
 
 let macros = {};
 
@@ -88,11 +88,10 @@ async function loadMacros() {
     const res = await fetch('/api/macros');
     macros = await res.json();
     renderCards();
-    console.log('✅ Macros auto-reloaded');
+    console.log('✅ Macros reloaded');
   } catch(e) { console.error(e); }
 }
 
-/* WebSocket for live MIDI triggers */
 let ws = null;
 function initWebSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -116,5 +115,5 @@ window.addEventListener('load', () => {
   loadMacros();
   initWebSocket();
   if (typeof initWebMIDI === 'function') initWebMIDI();
-  console.log('🚀 UI fully restored — MIDI + snapshot caching + JSON details active');
+  console.log('🚀 UI restored — MIDI + snapshot caching + JSON details active');
 });
