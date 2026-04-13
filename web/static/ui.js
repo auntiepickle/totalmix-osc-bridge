@@ -1,4 +1,4 @@
-/* ui.js - M2_branch FULL STABLE (April 2026) — JSON details + MIDI UI + snapshot cache restored */
+/* ui.js - M2_branch FULL STABLE (April 2026) — MIDI + JSON details + snapshot caching restored */
 
 let macros = {};
 
@@ -92,7 +92,7 @@ async function loadMacros() {
   } catch(e) { console.error(e); }
 }
 
-/* WebSocket + MIDI (full stable version) */
+/* WebSocket for live MIDI triggers */
 let ws = null;
 function initWebSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -116,5 +116,5 @@ window.addEventListener('load', () => {
   loadMacros();
   initWebSocket();
   if (typeof initWebMIDI === 'function') initWebMIDI();
-  console.log('🚀 UI fully restored — MIDI + JSON details + snapshot caching active');
+  console.log('🚀 UI fully restored — MIDI + snapshot caching + JSON details active');
 });
