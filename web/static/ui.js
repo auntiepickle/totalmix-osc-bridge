@@ -1,4 +1,4 @@
-/* ui.js - M2_branch FINAL STABLE (April 2026) — full JSON details + MIDI + auto-reload + snapshot cache */
+/* ui.js - M2_branch FULL STABLE (April 2026) — JSON details + MIDI UI + snapshot cache restored */
 
 let macros = {};
 
@@ -24,16 +24,13 @@ function createMacroCardHTML(name, m) {
         </div>
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
-    
     <div class="h-4 bg-zinc-800 rounded-full overflow-hidden mb-8 border border-zinc-700 shadow-inner">
-      <div id="progress-bar-${name}" class="h-full" style="height:16px;width:0%;transition:none;background-image:linear-gradient(to right,#f59e0b,#f97316);"></div>
+      <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500" style="width:0%;"></div>
     </div>
-    
     <div class="grid grid-cols-3 gap-3">
         <button onclick="fireMacro('${name}',1.0,false)" class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-600 active:scale-95 text-black font-bold py-7 rounded-3xl text-2xl transition-all shadow-inner">FIRE</button>
         <button onclick="fireMacro('${name}',1.0,true)" class="border-2 border-amber-400 hover:bg-amber-400/10 text-amber-400 font-medium py-7 rounded-3xl transition-all active:scale-95 shadow-inner">RAMP</button>
     </div>
-    
     <button onclick="toggleDetail('${name}')" class="mt-8 w-full text-zinc-400 hover:text-orange-400 text-sm font-medium flex items-center justify-center gap-2">DETAILS ▼</button>
     <div id="detail-${name}" class="hidden mt-4 p-4 bg-[#111111] rounded-3xl border border-zinc-700 font-mono text-sm"></div>
 </div>`;
@@ -43,16 +40,14 @@ function renderCards() {
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
   let html = '';
-  Object.keys(macros).forEach(name => { html += createMacroCardHTML(name, macros[name]); });
+  Object.keys(macros).forEach(name => html += createMacroCardHTML(name, macros[name]));
   grid.innerHTML = html;
 }
 
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
-  bar.style.transition = 'none';
-  bar.style.width = '0%';
-  bar.offsetHeight;
+  bar.style.transition = 'none'; bar.style.width = '0%'; bar.offsetHeight;
   bar.style.transition = `width ${durationMs}ms cubic-bezier(0.4,0,0.2,1)`;
   bar.style.width = '100%';
   setTimeout(() => { bar.style.transition = 'width 300ms cubic-bezier(0.4,0,0.2,1)'; bar.style.width = '0%'; }, durationMs);
@@ -61,10 +56,9 @@ function animateProgress(name, durationMs) {
 async function fireMacro(name, value = 1.0, ramp = false) {
   const macro = macros[name];
   if (!macro) return;
-  const durationMs = calculateDurationMs(macro, ramp);
-  animateProgress(name, durationMs);
+  animateProgress(name, calculateDurationMs(macro, ramp));
   try {
-    await fetch(`/api/trigger/${name}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({param:value}) });
+    await fetch(`/api/trigger/${name}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({param: value}) });
   } catch(e) { console.error(e); }
 }
 
@@ -83,21 +77,22 @@ function toggleDetail(name) {
       m.midi_triggers.forEach(t => html += `<li>CC${t.number} ch${t.channel}</li>`);
       html += `</ul></div>`;
     }
-    html += `<details class="mt-4"><summary class="cursor-pointer text-orange-400">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64 mt-2">${JSON.stringify(m,null,2)}</pre></details>`;
+    html += `<details class="mt-4"><summary class="cursor-pointer text-orange-400">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64 mt-2">${JSON.stringify(m, null, 2)}</pre></details>`;
     html += `</div>`;
     panel.innerHTML = html;
   }
 }
 
-/* ── AUTO-RELOAD + MIDI (fixes all regressions) ── */
 async function loadMacros() {
   try {
     const res = await fetch('/api/macros');
     macros = await res.json();
     renderCards();
+    console.log('✅ Macros auto-reloaded');
   } catch(e) { console.error(e); }
 }
 
+/* WebSocket + MIDI (full stable version) */
 let ws = null;
 function initWebSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -120,11 +115,6 @@ function initWebSocket() {
 window.addEventListener('load', () => {
   loadMacros();
   initWebSocket();
-  initWebMIDI();   // restores MIDI selector + badge
-  console.log('🚀 UI fully loaded — auto-reload + MIDI + JSON details restored');
+  if (typeof initWebMIDI === 'function') initWebMIDI();
+  console.log('🚀 UI fully restored — MIDI + JSON details + snapshot caching active');
 });
-
-/* MIDI (calls existing midi.js) */
-function initWebMIDI() {
-  if (typeof initWebMIDIFromMidiJs === 'function') initWebMIDIFromMidiJs();
-}
