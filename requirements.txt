@@ -1,5 +1,6 @@
-paho-mqtt
-python-osc
-mido[rtmidi]
 fastapi
-uvicorn[standard]python-multipart>=0.0.6
+uvicorn[standard]
+python-multipart>=0.0.6
+paho-mqtt
+python-dotenv
+requests

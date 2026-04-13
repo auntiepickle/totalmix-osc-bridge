@@ -153,3 +153,40 @@ async function reloadServer() {
     alert('Reload failed — check console');
   }
 }
+
+/* ────── UI Upload + Reload (April 2026) ────── */
+async function uploadFile(input, type) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const url = type === 'mappings' ? '/api/upload/mappings' : '/api/upload/channel_map';
+
+  try {
+    const res = await fetch(url, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.status === 'success') {
+      alert(`✅ ${data.message}`);
+      loadMacros();
+    } else {
+      alert(`❌ ${data.detail || data.message || 'Upload failed'}`);
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Upload error — check console');
+  }
+  input.value = '';
+}
+
+async function reloadServer() {
+  try {
+    const res = await fetch('/api/reload', { method: 'POST' });
+    const data = await res.json();
+    alert(`✅ Reloaded — ${data.macros || '?'} macros`);
+    loadMacros();
+  } catch (err) {
+    alert('Reload failed — check console');
+  }
+}
