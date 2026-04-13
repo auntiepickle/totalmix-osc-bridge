@@ -301,3 +301,44 @@ async function reloadServer() {
     alert('Reload failed — check console');
   }
 }
+
+/* ────── UI Upload + Reload Fix (April 12 2026) ────── */
+/* This defines loadMacros so the upload button works without error */
+
+async function loadMacros() {
+  try {
+    const res = await fetch('/api/macros');
+    const data = await res.json();
+    macros = data.macros || data || {};
+    renderCards();
+    console.log(`✅ Loaded ${Object.keys(macros).length} macros after upload/reload`);
+  } catch (err) {
+    console.error('Failed to reload macros after upload:', err);
+  }
+}
+
+/* Make sure uploadFile calls the now-defined loadMacros */
+async function uploadFile(input, type) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const url = type === 'mappings' ? '/api/upload/mappings' : '/api/upload/channel_map';
+
+  try {
+    const res = await fetch(url, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.status === 'success') {
+      alert(`✅ ${data.message}`);
+      await loadMacros();          // ← now defined, no more error
+    } else {
+      alert(`❌ ${data.detail || data.message || 'Upload failed'}`);
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Upload error — check console');
+  }
+  input.value = '';
+}
