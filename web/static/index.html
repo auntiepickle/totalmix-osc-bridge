@@ -2,26 +2,48 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TotalMix OSC Bridge</title>
-    <!-- Tailwind CDN removed for production (see project README for Tailwind CLI / PostCSS setup) -->
-    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="ui.js">
 </head>
-<body class="bg-zinc-950 text-white font-sans">
+<body class="bg-zinc-950 text-white">
     <div class="max-w-7xl mx-auto p-6">
-        <div class="flex justify-between items-center mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-800">
-            <div class="flex items-center gap-8">
-                <div id="workspace" class="text-lg font-medium">Workspace: —</div>
-                <div id="snapshot" class="text-lg font-medium">Snapshot: —</div>
-            </div>
+        <!-- Top Bar with Upload Buttons -->
+        <div class="flex items-center justify-between mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-700">
+            <h1 class="text-3xl font-bold flex items-center gap-3">
+                <span>TotalMix OSC Bridge</span>
+            </h1>
+
             <div class="flex items-center gap-3">
-                <label class="text-sm font-medium text-zinc-400">MIDI Device:</label>
-                <select id="midi-device-selector" class="bg-zinc-800 text-white px-4 py-2 rounded-2xl border border-zinc-700 focus:outline-none"></select>
-                <button onclick="connectSelectedMIDI()" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium">Connect</button>
+                <!-- Upload mappings -->
+                <label class="cursor-pointer px-5 py-3 bg-orange-500 hover:bg-orange-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
+                    <i class="fas fa-upload"></i>
+                    mappings.json
+                    <input type="file" id="upload-mappings" accept=".json" class="hidden" onchange="uploadFile(this, 'mappings')">
+                </label>
+
+                <!-- Upload channel map -->
+                <label class="cursor-pointer px-5 py-3 bg-amber-400 hover:bg-amber-500 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
+                    <i class="fas fa-upload"></i>
+                    channel map
+                    <input type="file" id="upload-channel" accept=".json" class="hidden" onchange="uploadFile(this, 'channel_map')">
+                </label>
+
+                <!-- Manual reload -->
+                <button onclick="reloadServer()" 
+                        class="px-6 py-3 bg-green-500 hover:bg-green-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
+                    <i class="fas fa-sync"></i> Reload
+                </button>
             </div>
+
+            <div id="midi-status" class="bg-green-900 text-green-400 px-6 py-3 rounded-3xl text-sm font-medium flex items-center gap-2"></div>
         </div>
+
+        <!-- Macro Grid -->
         <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
     </div>
-    <script src="app.js"></script>
+
+    <script src="ui.js"></script>
 </body>
 </html>
