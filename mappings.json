@@ -3,7 +3,7 @@
     "an3_to_adat1_send": {
       "description": "Hardware Input AN 3 → ADAT 1 output send (native ramp)",
       "workspace": "Pill_setup",
-      "snapshot": "lastthingidid",
+      "snapshot": "lastthingdid",
       "force_switch": false,
       "steps": [
         { "osc": "/setSubmix", "value": 14.0 },
