@@ -6,7 +6,7 @@
       "snapshot": "Reset",
       "force_switch": false,
       "steps": [
-        { "osc": "/setSubmix", "value": 13.0 },
+        { "osc": "/setSubmix", "value": 14.0 },
         {
           "osc": "/1/volume2",
           "value": "{{param}}",
