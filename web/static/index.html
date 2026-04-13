@@ -8,10 +8,19 @@
 </head>
 <body class="bg-zinc-950 text-white">
     <div class="max-w-7xl mx-auto p-6">
+        <!-- NAV BAR WITH MIDI STATUS -->
         <div class="flex items-center justify-between mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-700">
             <h1 class="text-3xl font-bold">TotalMix OSC Bridge</h1>
 
             <div class="flex items-center gap-3">
+                <!-- MIDI Device Selector + Connect -->
+                <select id="midi-device-selector" class="bg-zinc-800 text-white border border-zinc-700 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:border-orange-400"></select>
+                <button onclick="connectSelectedMIDI()" 
+                        class="px-6 py-2 bg-green-500 hover:bg-green-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
+                    <i class="fas fa-plug"></i> Connect MIDI
+                </button>
+
+                <!-- Upload buttons -->
                 <label class="cursor-pointer px-5 py-3 bg-orange-500 hover:bg-orange-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
                     <i class="fas fa-upload"></i> mappings.json
                     <input type="file" id="upload-mappings" accept=".json" class="hidden" onchange="uploadFile(this, 'mappings')">
@@ -20,17 +29,22 @@
                     <i class="fas fa-upload"></i> channel map
                     <input type="file" id="upload-channel" accept=".json" class="hidden" onchange="uploadFile(this, 'channel_map')">
                 </label>
+
                 <button onclick="reloadServer()" class="px-6 py-3 bg-green-500 hover:bg-green-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
                     <i class="fas fa-sync"></i> Reload
                 </button>
             </div>
 
-            <div id="midi-status" class="bg-green-900 text-green-400 px-6 py-3 rounded-3xl text-sm font-medium flex items-center gap-2"></div>
+            <!-- MIDI Status in nav bar (as requested) -->
+            <div id="midi-status" class="bg-green-900 text-green-400 px-6 py-3 rounded-3xl text-sm font-medium flex items-center gap-2">
+                MIDI Disconnected
+            </div>
         </div>
 
         <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
     </div>
 
     <script src="ui.js"></script>
+    <script src="midi.js"></script>
 </body>
 </html>
