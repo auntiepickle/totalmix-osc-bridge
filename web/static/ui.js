@@ -115,3 +115,23 @@ async function loadMacros() {
     renderCards();
   } catch(e) { console.error(e); }
 }
+
+/* ── MISSING FUNCTIONS ADDED (minimal fix for commit 0b44617) ── */
+function updateStatusHeader() {
+  const statusEl = document.getElementById('midi-status');
+  if (!statusEl) return;
+  if (typeof midiConnectedDevice !== 'undefined' && midiConnectedDevice) {
+    statusEl.innerHTML = `MIDI Connected: ${midiConnectedDevice}`;
+    statusEl.classList.remove('bg-zinc-800', 'text-zinc-400');
+    statusEl.classList.add('bg-green-600', 'text-white');
+  } else {
+    statusEl.innerHTML = 'MIDI Disconnected';
+    statusEl.classList.remove('bg-green-600', 'text-white');
+    statusEl.classList.add('bg-zinc-800', 'text-zinc-400');
+  }
+}
+
+function updateMIDIBadge(deviceName) {
+  updateStatusHeader();   // reuse the single status element
+}
+
