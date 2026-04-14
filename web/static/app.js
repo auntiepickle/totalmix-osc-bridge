@@ -5,6 +5,7 @@ let macros = {};
 let currentWorkspace = '—';
 let currentSnapshot = '—';
 let midiConnectedDevice = '';
+let lastFiredMacro = null;  // { name, ts }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -22,17 +23,19 @@ ws.onmessage = function (event) {
   if (data.current_workspace) currentWorkspace = data.current_workspace;
   if (data.current_snapshot) currentSnapshot = data.current_snapshot;
 
-  // macro_event drives the progress bar (server-side timing)
   if (data.macro_event) {
     const ev = data.macro_event;
     if (ev.type === 'macro_start') {
       animateProgress(ev.name, ev.duration_ms);
     } else if (ev.type === 'macro_complete') {
       snapProgressToZero(ev.name);
+      lastFiredMacro = { name: ev.name, ts: Date.now() };
+      updateLastFired();
+    } else if (ev.type === 'macro_skipped') {
+      flashLEDSkipped(ev.name);
     }
   }
 
-  // macro_update carries the rich card data after completion
   if (data.macro_update) {
     const mu = data.macro_update;
     macros[mu.name] = { ...(macros[mu.name] || {}), ...mu };
@@ -56,31 +59,42 @@ async function loadMacros() {
   }
 }
 
-// ── Status header (workspace + snapshot + MIDI pill) ─────────────────────────
+// ── Status header ─────────────────────────────────────────────────────────────
 function updateStatusHeader() {
   const workspaceEl = document.getElementById('workspace');
-  const snapshotEl = document.getElementById('snapshot');
+  const snapshotEl  = document.getElementById('snapshot');
   if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
-  if (snapshotEl) snapshotEl.textContent = `Snapshot: ${currentSnapshot || '—'}`;
+  if (snapshotEl)  snapshotEl.textContent  = `Snapshot: ${currentSnapshot || '—'}`;
 
-  const pill    = document.getElementById('midi-status');
-  const dot     = document.getElementById('midi-status-dot');
-  const label   = document.getElementById('midi-status-text');
+  const pill  = document.getElementById('midi-status');
+  const dot   = document.getElementById('midi-status-dot');
+  const label = document.getElementById('midi-status-text');
   if (!pill || !dot || !label) return;
 
   if (midiConnectedDevice) {
     label.textContent = midiConnectedDevice;
     dot.classList.remove('bg-zinc-600');
-    dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
-    pill.classList.remove('bg-zinc-800', 'text-zinc-400', 'border-zinc-700');
-    pill.classList.add('bg-zinc-800', 'text-white', 'border-green-700');
+    dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    pill.classList.remove('text-zinc-400', 'border-zinc-700');
+    pill.classList.add('text-white', 'border-green-700');
   } else {
     label.textContent = 'No MIDI';
-    dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
+    dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
     dot.classList.add('bg-zinc-600');
     pill.classList.remove('text-white', 'border-green-700');
     pill.classList.add('text-zinc-400', 'border-zinc-700');
   }
+}
+
+// ── Last fired display ────────────────────────────────────────────────────────
+function updateLastFired() {
+  const el = document.getElementById('last-fired-label');
+  if (!el || !lastFiredMacro) return;
+  const ts = new Date(lastFiredMacro.ts).toLocaleTimeString([], {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  el.textContent = `⚡ ${lastFiredMacro.name} · ${ts}`;
+  el.classList.remove('hidden');
 }
 
 // ── Live card update from WebSocket macro_update payload ─────────────────────
@@ -94,24 +108,36 @@ function updateMacroCard(name) {
   if (m.last_trigger) pulseLED(name, m.last_trigger);
 }
 
-// LED indicator — lights up green on trigger, fades to dim after 3s
-// Also pulses the workspace-group header LED (defined in ui.js as window.pulseGroupLED)
+// ── LED: brief signal flash (green = signal received, not "running") ──────────
 function pulseLED(name, triggerTimestamp) {
   const dot = document.getElementById(`led-dot-${name}`);
   if (!dot) return;
 
-  dot.classList.remove('bg-zinc-700');
+  dot.classList.remove('bg-zinc-700', 'bg-red-500');
   dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
+  // Short flash — green means signal received, not "executing"
   setTimeout(() => {
     dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
     dot.classList.add('bg-zinc-700');
-  }, 3000);
+  }, 500);
 
-  // Bubble up to workspace group header
   const m = macros[name];
   if (m && m.workspace && typeof window.pulseGroupLED === 'function') {
     window.pulseGroupLED(m.workspace, name, triggerTimestamp);
   }
+}
+
+// ── LED: skipped flash (red = macro was dropped) ──────────────────────────────
+function flashLEDSkipped(name) {
+  const dot = document.getElementById(`led-dot-${name}`);
+  if (!dot) return;
+
+  dot.classList.remove('bg-zinc-700', 'bg-green-400');
+  dot.classList.add('bg-red-500', 'shadow-[0_0_8px_#ef4444]');
+  setTimeout(() => {
+    dot.classList.remove('bg-red-500', 'shadow-[0_0_8px_#ef4444]');
+    dot.classList.add('bg-zinc-700');
+  }, 800);
 }
 
 // ── Snapshot map — fetched once on load for detail panel validation ───────────

@@ -268,6 +268,21 @@ class TotalMixOSCBridge:
                 ws_name is not None and snap_name is not None
             )
 
+            # Block WS/SS switch if another macro is mid-execution and force_switch is off.
+            # Avoids tearing the mixer state while a ramp is running.
+            other_running = len(self._running_macros) > 1  # this macro already in set
+            if not already_on_target and not force_switch and other_running:
+                logger.info(
+                    f"   → '{macro_name}' skipped: WS/SS switch needed but "
+                    f"{len(self._running_macros)-1} other macro(s) running (force_switch=False)"
+                )
+                self.broadcast_state(macro_event={
+                    "type": "macro_skipped",
+                    "name": macro_name,
+                    "reason": "ws_ss_blocked",
+                })
+                return
+
             if force_switch or not already_on_target:
                 logger.info(f"   → Need to switch (force={force_switch} or state mismatch)")
 

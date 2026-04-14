@@ -66,8 +66,8 @@ function createMacroCardHTML(name, m) {
   return `
 <div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-5 rounded-2xl">
     <div class="flex items-start gap-3 mb-3">
-        <!-- LED dot — top left, larger -->
-        <span id="led-dot-${name}" class="w-4 h-4 rounded-full bg-zinc-700 transition-all duration-150 shrink-0 mt-0.5"></span>
+        <!-- LED dot — top left, larger, aligned to title baseline -->
+        <span id="led-dot-${name}" class="w-4 h-4 rounded-full bg-zinc-700 transition-all duration-150 shrink-0 mt-1"></span>
         <!-- Title + meta -->
         <div class="flex-1 min-w-0">
             <h3 class="text-lg font-bold text-white truncate">${name}</h3>
@@ -279,20 +279,17 @@ function toggleDetail(name) {
     html += `</div></div>`;
   }
 
-  // Workspace / Snapshot
-  html += `<div class="flex items-center gap-1.5 border-t border-zinc-800 pt-2">`;
-  html += wsResolved
-    ? `<span class="text-xs text-zinc-500 font-mono">${m.workspace || '—'} / ${m.snapshot || '—'}</span>`
-    : `<span class="text-xs text-red-500/70 font-mono">${m.workspace || '—'} / ${m.snapshot || '—'}</span>`;
-  if (wsEntry) {
-    const slot = wsEntry.slot;
-    const snapEntry = Object.entries(wsEntry.snapshots || {}).find(
-      ([, v]) => String(v).toLowerCase() === String(m.snapshot || '').toLowerCase()
-    );
-    if (slot !== undefined) html += `<span class="text-xs text-zinc-700 font-mono">· WS slot ${slot}</span>`;
-    if (snapEntry) html += `<span class="text-xs text-zinc-700 font-mono">· SS index ${snapEntry[0]}</span>`;
-  }
-  html += `</div>`;
+  // Workspace / Snapshot — names only, no raw indices
+  const wsColor  = wsResolved  ? 'text-zinc-400' : 'text-red-400/70';
+  const ssColor  = ssResolved  ? 'text-zinc-400' : 'text-red-400/70';
+  const wsLabel  = m.workspace || '—';
+  const ssLabel  = m.snapshot  || '—';
+  html += `<div class="flex items-center gap-1.5 border-t border-zinc-800 pt-2 font-mono text-xs flex-wrap">
+    <span class="${wsColor}">${wsLabel}</span>
+    <span class="text-zinc-700">/</span>
+    <span class="${ssColor}">${ssLabel}</span>
+    ${!wsResolved || !ssResolved ? `<span class="text-red-500/60 text-[10px]">(not in snapshot map)</span>` : ''}
+  </div>`;
 
   // Full JSON — collapsible
   html += `<details class="group">
