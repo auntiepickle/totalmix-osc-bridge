@@ -40,6 +40,12 @@
                     <span id="midi-cc-age" class="text-zinc-500">—</span>
                 </div>
 
+                <!-- MIDI clock BPM — populated from 0xF8 clock messages -->
+                <div id="midi-bpm-badge" class="hidden flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-2xl text-[10px] font-mono whitespace-nowrap">
+                    <i class="fas fa-music text-orange-400/70 text-[9px]"></i>
+                    <span id="midi-bpm" class="text-zinc-300">— BPM</span>
+                </div>
+
                 <!-- Settings gear — uploads + reload + editor -->
                 <div class="relative">
                     <button onclick="toggleSettingsMenu()" data-settings-toggle
@@ -99,6 +105,16 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- Example-mappings warning banner (hidden unless server loaded the fallback) -->
+        <div id="example-mappings-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
+            <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
+            <span class="flex-1">No <code class="font-mono text-amber-200 bg-amber-900/40 px-1 rounded">mappings.json</code> found — running from the example file. Changes won't persist until you initialize your own.</span>
+            <button id="example-mappings-btn" onclick="initMappingsFromExample()"
+                class="shrink-0 bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-xs px-4 py-2 rounded-xl transition-all">
+                Use as my mappings.json
+            </button>
         </div>
 
         <!-- MACRO GRID -->

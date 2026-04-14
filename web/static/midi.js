@@ -5,9 +5,30 @@ let midiAccess = null;
 let midiInput  = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
 
-// ── Last-CC tracking (replaces CC/s rate — "when did something last arrive?") ─
+// ── Last-CC tracking ──────────────────────────────────────────────────────────
 let _lastCCInfo = null;   // { cc, channel, value }
 let _lastCCTime = null;   // epoch ms
+
+// ── MIDI clock BPM detection ──────────────────────────────────────────────────
+// Cirklon (and most DAWs) sends 0xF8 timing clock at 24 pulses per quarter note
+let _clockTicks = [];     // timestamps of recent clock ticks
+
+function _processMIDIClock() {
+  const now = Date.now();
+  _clockTicks.push(now);
+  if (_clockTicks.length > 25) _clockTicks.shift();
+  if (_clockTicks.length < 4) return;
+
+  // Average interval between adjacent ticks → BPM
+  let sum = 0;
+  for (let i = 1; i < _clockTicks.length; i++) sum += _clockTicks[i] - _clockTicks[i - 1];
+  const avgMs = sum / (_clockTicks.length - 1);
+  const bpm   = Math.round(60000 / (24 * avgMs));
+  if (bpm < 20 || bpm > 400) return;
+
+  const el = document.getElementById('midi-bpm');
+  if (el) el.textContent = `${bpm} BPM`;
+}
 
 // Live age display: updates every 100ms so you can see recency at a glance
 setInterval(() => {
@@ -37,6 +58,10 @@ function flashMIDIActivity() {
 // ── MIDI message handler ──────────────────────────────────────────────────────
 function handleMIDIMessage(message) {
   const [status, data1, data2] = message.data;
+
+  // MIDI Clock (0xF8) — detect BPM from Cirklon/DAW timing clock
+  if (status === 0xF8) { _processMIDIClock(); return; }
+
   if ((status & 0xF0) !== 0xB0) return;   // CC only
 
   const channel = (status & 0x0F) + 1;
@@ -94,8 +119,8 @@ function _connectInput(input) {
   lastMidiDevice = input.name;
   localStorage.setItem('lastMidiDevice', input.name);
   console.log(`[MIDI] Connected to ${input.name}`);
-  const statsEl = document.getElementById('midi-cc-stats');
-  if (statsEl) statsEl.classList.remove('hidden');
+  document.getElementById('midi-cc-stats')?.classList.remove('hidden');
+  document.getElementById('midi-bpm-badge')?.classList.remove('hidden');
   updateStatusHeader();
 }
 
@@ -110,8 +135,9 @@ window.disconnectMIDI = () => {
   if (midiInput) midiInput.onmidimessage = null;
   midiInput = null;
   midiConnectedDevice = '';
-  const statsEl = document.getElementById('midi-cc-stats');
-  if (statsEl) statsEl.classList.add('hidden');
+  _clockTicks = [];
+  document.getElementById('midi-cc-stats')?.classList.add('hidden');
+  document.getElementById('midi-bpm-badge')?.classList.add('hidden');
   console.log('[MIDI] Disconnected');
   updateStatusHeader();
 };

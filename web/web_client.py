@@ -78,6 +78,8 @@ async def get_status():
         "snapshot_map_workspaces": len(snap_map),
         "workspace": bridge.current_workspace,
         "snapshot": bridge.current_snapshot,
+        "mappings_is_example": bridge.mappings_is_example,
+        "mappings_source": bridge.mappings_source,
     }
 
 
@@ -128,6 +130,8 @@ async def save_config_mappings(request: Request):
         with open(target, "w") as f:
             json.dump(data, f, indent=2)
         bridge.mappings = data
+        bridge.mappings_is_example = False
+        bridge.mappings_source = "mappings.json"
         logger.info(f"✅ mappings.json saved via live editor ({len(data.get('macros', {}))} macros)")
         return {"status": "success", "macros": len(data.get("macros", {}))}
     except HTTPException:
@@ -276,13 +280,41 @@ async def upload_channel_map(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/config/mappings/init-from-example")
+async def init_mappings_from_example():
+    """Copy mappings.example.json → mappings.json and reload into the bridge.
+    Called from the UI when no mappings.json exists on the server."""
+    base = os.path.dirname(__file__)
+    example = os.path.join(base, "../mappings.example.json")
+    target  = os.path.join(base, "../mappings.json")
+    try:
+        if not os.path.exists(example):
+            raise HTTPException(status_code=404, detail="mappings.example.json not found")
+        shutil.copy2(example, target)
+        with open(target, "r") as f:
+            data = json.load(f)
+        bridge.mappings = data
+        bridge.mappings_is_example = False
+        bridge.mappings_source = "mappings.json"
+        logger.info(f"✅ mappings.json initialized from example ({len(data.get('macros', {}))} macros)")
+        return {"status": "success", "macros": len(data.get("macros", {}))}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Init from example failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/reload")
 async def reload_bridge():
     """Reload mappings.json from disk into the running bridge."""
     try:
-        with open(os.path.join(os.path.dirname(__file__), "../mappings.json"), "r") as f:
+        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        with open(target, "r") as f:
             data = json.load(f)
         bridge.mappings = data
+        bridge.mappings_is_example = False
+        bridge.mappings_source = "mappings.json"
         logger.info(f"✅ Bridge reloaded — {len(data.get('macros', {}))} macros")
         return {"status": "success", "macros": len(data.get("macros", {}))}
     except Exception as e:

@@ -52,14 +52,31 @@ for _p in _SNAPSHOT_MAP_PATHS:
 if not SNAPSHOT_MAP:
     logger.warning("No snapshot map loaded — WS/SS switching will be disabled until map is available")
 
-# Load mappings
-try:
-    with open("mappings.json", "r", encoding="utf-8") as f:
-        MAPPINGS = json.load(f)
-    logger.info("Loaded mappings.json — macros fully data-driven")
-except Exception as e:
-    logger.error(f"Failed to load mappings.json: {e}")
-    MAPPINGS = {"macros": {}}
+# Load mappings — prefer mappings.json (user config), fall back to example
+_MAPPINGS_PATHS = ["mappings.json", "mappings.example.json"]
+MAPPINGS = {"macros": {}}
+MAPPINGS_SOURCE = None
+MAPPINGS_IS_EXAMPLE = False
+
+for _mp in _MAPPINGS_PATHS:
+    try:
+        with open(_mp, "r", encoding="utf-8") as f:
+            MAPPINGS = json.load(f)
+        MAPPINGS_SOURCE = _mp
+        MAPPINGS_IS_EXAMPLE = _mp != "mappings.json"
+        if MAPPINGS_IS_EXAMPLE:
+            logger.warning(
+                f"mappings.json not found — loaded fallback {_mp}. "
+                "Create mappings.json to override."
+            )
+        else:
+            logger.info(f"Loaded mappings.json — {len(MAPPINGS.get('macros', {}))} macros")
+        break
+    except FileNotFoundError:
+        continue
+    except Exception as e:
+        logger.error(f"Failed to load {_mp}: {e}")
+        break
 
 # OSC client
 osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) if OSC_IP and OSC_PORT else None
@@ -74,6 +91,8 @@ class TotalMixOSCBridge:
         self._last_macro_end_time = 0.0
         self.osc_client = osc_client
         self.mappings = mappings
+        self.mappings_is_example = MAPPINGS_IS_EXAMPLE
+        self.mappings_source = MAPPINGS_SOURCE
         self.snapshot_map = snapshot_map
         self.current_workspace = None
         self.current_snapshot = None

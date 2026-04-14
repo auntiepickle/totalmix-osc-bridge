@@ -27,10 +27,12 @@ ws.onmessage = function (event) {
     const ev = data.macro_event;
     if (ev.type === 'macro_start') {
       animateProgress(ev.name, ev.duration_ms);
+      setLEDRunning(ev.name);
       lastFiredMacro = { name: ev.name, ts: Date.now() };
       updateLastFired();
     } else if (ev.type === 'macro_complete') {
       snapProgressToZero(ev.name);
+      flashLEDComplete(ev.name);
       lastFiredMacro = { name: ev.name, ts: Date.now() };
       updateLastFired();
     } else if (ev.type === 'macro_skipped') {
@@ -58,6 +60,39 @@ async function loadMacros() {
     updateStatusHeader();
   } catch (err) {
     console.error('[UI] loadMacros failed:', err);
+  }
+}
+
+// ── Example-mappings banner ───────────────────────────────────────────────────
+async function checkMappingsSource() {
+  try {
+    const s = await fetch('/api/status').then(r => r.json());
+    const banner = document.getElementById('example-mappings-banner');
+    if (!banner) return;
+    if (s.mappings_is_example) {
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+  } catch (_) {}
+}
+
+async function initMappingsFromExample() {
+  const btn = document.getElementById('example-mappings-btn');
+  if (btn) { btn.textContent = 'Initializing…'; btn.disabled = true; }
+  try {
+    const res = await fetch('/api/config/mappings/init-from-example', { method: 'POST' });
+    if (res.ok) {
+      document.getElementById('example-mappings-banner').classList.add('hidden');
+      await loadMacros();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(`Init failed: ${err.detail || 'unknown error'}`);
+      if (btn) { btn.textContent = 'Use as my mappings.json'; btn.disabled = false; }
+    }
+  } catch (e) {
+    alert(`Init error: ${e.message}`);
+    if (btn) { btn.textContent = 'Use as my mappings.json'; btn.disabled = false; }
   }
 }
 
@@ -110,18 +145,28 @@ function updateMacroCard(name) {
   if (m.last_trigger) pulseLED(name, m.last_trigger);
 }
 
-// ── LED: brief signal flash (green = signal received, not "running") ──────────
+// ── LED helpers ───────────────────────────────────────────────────────────────
+const _LED_ALL = ['bg-zinc-700','bg-white','bg-amber-400','bg-green-400','bg-red-500',
+                  'shadow-[0_0_8px_#fff]','shadow-[0_0_8px_#fbbf24]',
+                  'shadow-[0_0_10px_#4ade80]','shadow-[0_0_8px_#ef4444]'];
+
+function _ledSet(dot, color, shadow, durationMs) {
+  if (!dot) return;
+  dot.classList.remove(..._LED_ALL);
+  dot.classList.add(color);
+  if (shadow) dot.classList.add(shadow);
+  if (durationMs) {
+    setTimeout(() => {
+      dot.classList.remove(color, shadow);
+      dot.classList.add('bg-zinc-700');
+    }, durationMs);
+  }
+}
+
+// White flash — MIDI signal received (very brief, before macro fires)
 function pulseLED(name, triggerTimestamp) {
   const dot = document.getElementById(`led-dot-${name}`);
-  if (!dot) return;
-
-  dot.classList.remove('bg-zinc-700', 'bg-red-500');
-  dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
-  // Short flash — green means signal received, not "executing"
-  setTimeout(() => {
-    dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
-    dot.classList.add('bg-zinc-700');
-  }, 500);
+  _ledSet(dot, 'bg-white', 'shadow-[0_0_8px_#fff]', 150);
 
   const m = macros[name];
   if (m && m.workspace && typeof window.pulseGroupLED === 'function') {
@@ -129,17 +174,22 @@ function pulseLED(name, triggerTimestamp) {
   }
 }
 
-// ── LED: skipped flash (red = macro was dropped) ──────────────────────────────
+// Amber solid — macro is executing
+function setLEDRunning(name) {
+  const dot = document.getElementById(`led-dot-${name}`);
+  _ledSet(dot, 'bg-amber-400', 'shadow-[0_0_8px_#fbbf24]', 0);
+}
+
+// Green flash — macro finished
+function flashLEDComplete(name) {
+  const dot = document.getElementById(`led-dot-${name}`);
+  _ledSet(dot, 'bg-green-400', 'shadow-[0_0_10px_#4ade80]', 600);
+}
+
+// Red flash — macro was skipped/dropped
 function flashLEDSkipped(name) {
   const dot = document.getElementById(`led-dot-${name}`);
-  if (!dot) return;
-
-  dot.classList.remove('bg-zinc-700', 'bg-green-400');
-  dot.classList.add('bg-red-500', 'shadow-[0_0_8px_#ef4444]');
-  setTimeout(() => {
-    dot.classList.remove('bg-red-500', 'shadow-[0_0_8px_#ef4444]');
-    dot.classList.add('bg-zinc-700');
-  }, 800);
+  _ledSet(dot, 'bg-red-500', 'shadow-[0_0_8px_#ef4444]', 800);
 }
 
 // ── Snapshot map — fetched once on load for detail panel validation ───────────
@@ -158,4 +208,5 @@ async function loadSnapshotMap() {
 window.addEventListener('load', () => {
   initWebMIDI();
   loadSnapshotMap();
+  checkMappingsSource();
 });
