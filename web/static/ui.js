@@ -1,29 +1,40 @@
 /* ui.js — card rendering, animation, fire/ramp, file upload, server reload, live editor */
 /* Globals (macros, midiConnectedDevice, etc.) live in app.js — loaded first             */
 
-// ── Group collapse state (persisted in localStorage) ─────────────────────────
-const _collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
+// ── Collapse state (persisted in localStorage) ───────────────────────────────
+const _collapsedGroups    = new Set(JSON.parse(localStorage.getItem('collapsedGroups')    || '[]'));
+const _collapsedSnapshots = new Set(JSON.parse(localStorage.getItem('collapsedSnapshots') || '[]'));
 
 function _saveCollapsed() {
-  localStorage.setItem('collapsedGroups', JSON.stringify([..._collapsedGroups]));
+  localStorage.setItem('collapsedGroups',    JSON.stringify([..._collapsedGroups]));
+  localStorage.setItem('collapsedSnapshots', JSON.stringify([..._collapsedSnapshots]));
 }
 
 function _safeId(str) {
   return String(str).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+function _ssKey(ws, ss) { return `${ws}::${ss}`; }
+
 function toggleGroup(ws) {
   const wsId = _safeId(ws);
-  if (_collapsedGroups.has(ws)) {
-    _collapsedGroups.delete(ws);
-  } else {
-    _collapsedGroups.add(ws);
-  }
+  _collapsedGroups.has(ws) ? _collapsedGroups.delete(ws) : _collapsedGroups.add(ws);
   _saveCollapsed();
-  const body = document.getElementById(`group-body-${wsId}`);
+  const body  = document.getElementById(`group-body-${wsId}`);
   const arrow = document.getElementById(`group-arrow-${wsId}`);
-  if (body) body.style.display = _collapsedGroups.has(ws) ? 'none' : 'contents';
+  if (body)  body.style.display = _collapsedGroups.has(ws) ? 'none' : 'contents';
   if (arrow) arrow.style.transform = _collapsedGroups.has(ws) ? 'rotate(-90deg)' : '';
+}
+
+function toggleSnapshotGroup(ws, ss) {
+  const key  = _ssKey(ws, ss);
+  const ssId = _safeId(key);
+  _collapsedSnapshots.has(key) ? _collapsedSnapshots.delete(key) : _collapsedSnapshots.add(key);
+  _saveCollapsed();
+  const body  = document.getElementById(`ss-body-${ssId}`);
+  const arrow = document.getElementById(`ss-arrow-${ssId}`);
+  if (body)  body.style.display = _collapsedSnapshots.has(key) ? 'none' : 'contents';
+  if (arrow) arrow.style.transform = _collapsedSnapshots.has(key) ? 'rotate(-90deg)' : '';
 }
 
 // ── Group-level LED (workspace level) ────────────────────────────────────────
@@ -137,11 +148,25 @@ function renderCards() {
 
     Object.entries(snapshots).forEach(([ss, names]) => {
       if (ss !== '—') {
+        const ssKey        = _ssKey(ws, ss);
+        const ssId         = _safeId(ssKey);
+        const ssCollapsed  = _collapsedSnapshots.has(ssKey);
+        const ssBodyDisp   = ssCollapsed ? 'none' : 'contents';
+        const ssArrowStyle = ssCollapsed ? 'style="transform:rotate(-90deg)"' : '';
+
         html += `<div class="col-span-full mb-1 ml-1">
-          <span class="text-[10px] text-zinc-600 uppercase tracking-widest">↳ ${ss}</span>
+          <button onclick="toggleSnapshotGroup('${ws}','${ss}')"
+              class="flex items-center gap-2 group text-left py-0.5">
+            <span class="text-[10px] text-zinc-600 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">↳ ${ss}</span>
+            <i id="ss-arrow-${ssId}" class="fas fa-chevron-down text-[8px] text-zinc-700 group-hover:text-zinc-500 transition-transform duration-150" ${ssArrowStyle}></i>
+          </button>
         </div>`;
+        html += `<div id="ss-body-${ssId}" style="display:${ssBodyDisp}">`;
+        names.forEach(name => { html += createMacroCardHTML(name, macros[name]); });
+        html += `</div>`;
+      } else {
+        names.forEach(name => { html += createMacroCardHTML(name, macros[name]); });
       }
-      names.forEach(name => { html += createMacroCardHTML(name, macros[name]); });
     });
 
     html += `</div>`; // close group-body
