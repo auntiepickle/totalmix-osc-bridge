@@ -8,7 +8,7 @@
       "steps": [
         {
           "osc": "/setSubmix",
-          "value": 14
+          "value": "14"
         },
         {
           "osc": "/1/volume2",
@@ -28,7 +28,8 @@
           "use_value_as_param": true
         }
       ],
-      "routing_label": "AN 3 \u2192 ADAT 1"
+      "routing_label": "AN 3 \u2192 ADAT 1",
+      "fire_mode": "restart"
     },
     "an12_to_aes_send": {
       "description": "Hardware Input AN 1/2 \u2192 AES Hardware Output send (native ramp)",
@@ -38,7 +39,7 @@
       "steps": [
         {
           "osc": "/setSubmix",
-          "value": 12
+          "value": "12"
         },
         {
           "osc": "/1/volume1",
@@ -58,7 +59,8 @@
           "use_value_as_param": true
         }
       ],
-      "routing_label": "AN 1/2 \u2192 AES"
+      "routing_label": "AN 1/2 \u2192 AES",
+      "fire_mode": "ignore"
     },
     "an12_lfo_test": {
       "description": "AN 1/2 send LFO test",
