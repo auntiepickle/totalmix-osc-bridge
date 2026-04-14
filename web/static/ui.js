@@ -93,6 +93,21 @@ function toggleDetail(name) {
   }
 }
 
+function toggleSettingsMenu() {
+  const menu = document.getElementById('settings-menu');
+  if (!menu) return;
+  menu.classList.toggle('hidden');
+}
+
+// Close settings menu when clicking outside it
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('settings-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  if (!menu.contains(e.target) && !e.target.closest('button[onclick="toggleSettingsMenu()"]')) {
+    menu.classList.add('hidden');
+  }
+});
+
 async function reloadServer() {
   if (confirm('Reload bridge server?')) {
     await fetch('/api/reload', { method: 'POST' });

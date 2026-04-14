@@ -8,31 +8,44 @@
 </head>
 <body class="bg-zinc-950 text-white">
     <div class="max-w-7xl mx-auto p-6">
-        <!-- NAV BAR WITH MIDI STATUS -->
+        <!-- NAV BAR -->
         <div class="flex items-center justify-between mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-700">
-            <h1 class="text-3xl font-bold">TotalMix OSC Bridge</h1>
+            <h1 class="text-2xl font-bold tracking-tight">TotalMix OSC Bridge</h1>
 
             <div class="flex items-center gap-3">
-                <select id="midi-device-selector" class="bg-zinc-800 text-white border border-zinc-700 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:border-orange-400"></select>
-                <button onclick="connectSelectedMIDI()" class="px-6 py-2 bg-green-500 hover:bg-green-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
-                    <i class="fas fa-plug"></i> Connect MIDI
-                </button>
-                <label class="cursor-pointer px-5 py-3 bg-orange-500 hover:bg-orange-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
-                    <i class="fas fa-upload"></i> mappings.json
-                    <input type="file" id="upload-mappings" accept=".json" class="hidden" onchange="uploadFile(this, 'mappings')">
-                </label>
-                <label class="cursor-pointer px-5 py-3 bg-amber-400 hover:bg-amber-500 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
-                    <i class="fas fa-upload"></i> channel map
-                    <input type="file" id="upload-channel" accept=".json" class="hidden" onchange="uploadFile(this, 'channel_map')">
-                </label>
-                <button onclick="reloadServer()" class="px-6 py-3 bg-green-500 hover:bg-green-600 text-black font-medium rounded-2xl flex items-center gap-2 transition-all active:scale-95">
-                    <i class="fas fa-sync"></i> Reload
-                </button>
-            </div>
+                <!-- MIDI selector — auto-connects on change -->
+                <select id="midi-device-selector" onchange="connectSelectedMIDI()"
+                    class="bg-zinc-800 text-white border border-zinc-700 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:border-orange-400 min-w-[160px]">
+                </select>
 
-            <!-- MIDI Status in nav bar -->
-            <div id="midi-status" class="bg-zinc-800 text-zinc-400 px-6 py-3 rounded-3xl text-sm font-medium flex items-center gap-2">
-                MIDI Disconnected
+                <!-- MIDI status pill -->
+                <div id="midi-status" class="bg-zinc-800 text-zinc-400 px-5 py-2 rounded-2xl text-sm font-medium whitespace-nowrap">
+                    MIDI Disconnected
+                </div>
+
+                <!-- Settings gear — uploads + reload -->
+                <div class="relative">
+                    <button onclick="toggleSettingsMenu()"
+                        class="w-10 h-10 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-zinc-400 hover:text-white transition-all active:scale-95"
+                        title="Settings">
+                        <i class="fas fa-gear"></i>
+                    </button>
+                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-2 z-50 min-w-[200px] shadow-xl">
+                        <label class="cursor-pointer flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all">
+                            <i class="fas fa-upload text-orange-400 w-4"></i> Upload mappings.json
+                            <input type="file" accept=".json" class="hidden" onchange="uploadFile(this, 'mappings')">
+                        </label>
+                        <label class="cursor-pointer flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all">
+                            <i class="fas fa-upload text-amber-400 w-4"></i> Upload channel map
+                            <input type="file" accept=".json" class="hidden" onchange="uploadFile(this, 'channel_map')">
+                        </label>
+                        <div class="border-t border-zinc-700 my-1"></div>
+                        <button onclick="reloadServer(); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-sync text-green-400 w-4"></i> Reload bridge
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
