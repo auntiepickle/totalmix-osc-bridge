@@ -71,12 +71,12 @@ function updateStatusHeader() {
   if (midiConnectedDevice) {
     label.textContent = midiConnectedDevice;
     dot.classList.remove('bg-zinc-600');
-    dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
     pill.classList.remove('bg-zinc-800', 'text-zinc-400', 'border-zinc-700');
     pill.classList.add('bg-zinc-800', 'text-white', 'border-green-700');
   } else {
     label.textContent = 'No MIDI';
-    dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
     dot.classList.add('bg-zinc-600');
     pill.classList.remove('text-white', 'border-green-700');
     pill.classList.add('text-zinc-400', 'border-zinc-700');
@@ -101,9 +101,9 @@ function pulseLED(name, triggerTimestamp) {
   if (!dot) return;
 
   dot.classList.remove('bg-zinc-700');
-  dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+  dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
   setTimeout(() => {
-    dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
     dot.classList.add('bg-zinc-700');
   }, 3000);
 

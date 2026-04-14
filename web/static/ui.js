@@ -65,19 +65,17 @@ function createMacroCardHTML(name, m) {
   const midiLabel = getMidiTriggerLabel(m);
   return `
 <div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-5 rounded-2xl">
-    <div class="flex justify-between items-start mb-3">
-        <div class="flex-1 min-w-0 pr-3">
+    <div class="flex items-start gap-3 mb-3">
+        <!-- LED dot — top left, larger -->
+        <span id="led-dot-${name}" class="w-4 h-4 rounded-full bg-zinc-700 transition-all duration-150 shrink-0 mt-0.5"></span>
+        <!-- Title + meta -->
+        <div class="flex-1 min-w-0">
             <h3 class="text-lg font-bold text-white truncate">${name}</h3>
             <p class="text-zinc-400 text-xs mt-0.5">${m.description || ''}</p>
             <p class="routing-label text-orange-400 text-xs font-medium mt-1.5 tracking-wider">${m.routing_label || '—'}</p>
         </div>
-        <div class="flex flex-col items-end gap-1.5 shrink-0">
-            ${midiLabel ? `<div class="text-xs font-mono bg-zinc-800/80 text-zinc-400 px-2.5 py-1 rounded-lg">${midiLabel}</div>` : ''}
-            <!-- LED dot only — timestamp moved to group header -->
-            <div class="flex items-center gap-1.5 px-2 py-1">
-              <span id="led-dot-${name}" class="w-2 h-2 rounded-full bg-zinc-700 transition-all duration-150"></span>
-            </div>
-        </div>
+        <!-- MIDI badge -->
+        ${midiLabel ? `<div class="text-xs font-mono bg-zinc-800/80 text-zinc-400 px-2.5 py-1 rounded-lg shrink-0">${midiLabel}</div>` : ''}
     </div>
     <div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden mb-4">
       <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500" style="width:0%;"></div>
@@ -231,7 +229,7 @@ function toggleDetail(name) {
   html += `<div class="flex items-center justify-between gap-2">
     <span class="text-xs font-bold px-2.5 py-1 rounded-lg tracking-widest ${fireModeClass}">${fireMode}</span>
     <span class="text-zinc-500 text-xs font-mono">⏱ ${durationSec}s</span>
-    <button onclick="openEditor('mappings')"
+    <button onclick="editDetail('${name}')"
         class="ml-auto text-xs text-zinc-500 hover:text-orange-400 flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
       <i class="fas fa-pen text-[10px]"></i> Edit
     </button>
@@ -306,6 +304,176 @@ function toggleDetail(name) {
 
   html += `</div>`;
   panel.innerHTML = html;
+}
+
+// ── Inline card editor ────────────────────────────────────────────────────────
+
+// Escape value for use in HTML attribute (double-quote safe)
+function _esc(v) {
+  return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+function editDetail(name) {
+  const panel = document.getElementById(`detail-${name}`);
+  const arrow = document.getElementById(`detail-arrow-${name}`);
+  const m = macros[name];
+  if (!panel || !m) return;
+
+  panel.classList.remove('hidden');
+  if (arrow) arrow.style.transform = 'rotate(180deg)';
+
+  // Shared input CSS classes
+  const ic  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-full';
+  const sc  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none';
+  const nc  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-20 text-center';
+
+  // Steps
+  const stepsHtml = (m.steps || []).map((step, i) => {
+    const addr = _esc(step.osc || '');
+    if (step.operation) {
+      const op = step.operation;
+      return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
+        <div class="flex gap-2">
+          <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="OSC address">
+          <select data-field="steps.${i}.operation.type" class="${sc} shrink-0">
+            <option value="ramp"${op.type==='ramp'?' selected':''}>RAMP</option>
+            <option value="lfo"${op.type==='lfo'?' selected':''}>LFO</option>
+          </select>
+        </div>
+        <div class="flex gap-2 items-center">
+          <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
+          <span class="text-zinc-500 text-xs shrink-0">bars @</span>
+          <input data-field="steps.${i}.operation.bpm" type="number" min="1" value="${_esc(op.bpm??140)}" class="${nc}">
+          <span class="text-zinc-500 text-xs shrink-0">BPM</span>
+        </div>
+      </div>`;
+    } else {
+      const val = _esc(step.value ?? '');
+      return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl flex gap-2">
+        <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="OSC address">
+        <input data-field="steps.${i}.value" value="${val}" class="${nc}" placeholder="value">
+      </div>`;
+    }
+  }).join('');
+
+  // MIDI triggers
+  const midiHtml = (m.midi_triggers || []).map((t, i) => `
+    <div class="flex gap-2 items-center bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
+      <span class="text-zinc-500 text-xs shrink-0">CC</span>
+      <input data-field="midi_triggers.${i}.number" type="number" min="0" max="127" value="${_esc(t.number)}" class="${nc}">
+      <span class="text-zinc-500 text-xs shrink-0">ch</span>
+      <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
+    </div>`).join('');
+
+  panel.innerHTML = `<div class="space-y-3 text-sm">
+
+    <input data-field="description" value="${_esc(m.description)}"
+        class="${ic}" placeholder="Description">
+
+    <div class="flex gap-2 items-center flex-wrap">
+      <select data-field="fire_mode" class="${sc}">
+        <option value="ignore"${(m.fire_mode||'ignore')==='ignore'?' selected':''}>IGNORE</option>
+        <option value="queue"${m.fire_mode==='queue'?' selected':''}>QUEUE</option>
+        <option value="restart"${m.fire_mode==='restart'?' selected':''}>RESTART</option>
+      </select>
+      <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none ml-1">
+        <input type="checkbox" data-field="force_switch" class="w-3.5 h-3.5 accent-orange-500"${m.force_switch?' checked':''}>
+        force switch
+      </label>
+    </div>
+
+    <div class="flex gap-2">
+      <div class="flex-1">
+        <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Workspace</div>
+        <input data-field="workspace" value="${_esc(m.workspace)}" class="${ic}">
+      </div>
+      <div class="flex-1">
+        <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Snapshot</div>
+        <input data-field="snapshot" value="${_esc(m.snapshot)}" class="${ic}">
+      </div>
+    </div>
+
+    ${stepsHtml ? `<div>
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Steps</div>
+      <div class="space-y-2">${stepsHtml}</div>
+    </div>` : ''}
+
+    ${midiHtml ? `<div>
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">MIDI Triggers</div>
+      <div class="space-y-1.5">${midiHtml}</div>
+    </div>` : ''}
+
+    <div class="flex gap-2 pt-2 border-t border-zinc-800">
+      <button id="edit-save-${name}" onclick="saveInlineEdit('${name}')"
+          class="flex-1 bg-orange-500 hover:bg-orange-400 active:scale-95 text-black font-bold py-2 rounded-xl text-sm transition-all">
+        Save
+      </button>
+      <button onclick="cancelInlineEdit('${name}')"
+          class="px-5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-xl text-sm transition-all">
+        Cancel
+      </button>
+    </div>
+
+  </div>`;
+}
+
+async function saveInlineEdit(name) {
+  const panel = document.getElementById(`detail-${name}`);
+  const btn   = document.getElementById(`edit-save-${name}`);
+  if (!panel) return;
+
+  // Deep-clone so we don't mutate macros[name] until confirmed
+  const m = JSON.parse(JSON.stringify(macros[name]));
+
+  panel.querySelectorAll('[data-field]').forEach(el => {
+    const parts = el.dataset.field.split('.');
+    let obj = m;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const k = isNaN(parts[i]) ? parts[i] : Number(parts[i]);
+      if (obj[k] === undefined || obj[k] === null) return;
+      obj = obj[k];
+    }
+    const lastRaw = parts[parts.length - 1];
+    const last = isNaN(lastRaw) ? lastRaw : Number(lastRaw);
+    if (el.type === 'checkbox') {
+      obj[last] = el.checked;
+    } else if (el.type === 'number') {
+      obj[last] = el.value === '' ? 0 : parseFloat(el.value);
+    } else {
+      obj[last] = el.value;
+    }
+  });
+
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+
+  try {
+    const res = await fetch(`/api/config/macros/${name}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(m),
+    });
+    if (res.ok) {
+      macros[name] = m;
+      cancelInlineEdit(name);
+      // Reopen in read-only mode to show the saved state
+      setTimeout(() => toggleDetail(name), 30);
+    } else {
+      const err = await res.json().catch(() => ({ detail: 'unknown error' }));
+      alert(`Save failed: ${err.detail}`);
+      if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+    }
+  } catch (e) {
+    alert(`Save error: ${e.message}`);
+    if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+  }
+}
+
+function cancelInlineEdit(name) {
+  const panel = document.getElementById(`detail-${name}`);
+  const arrow = document.getElementById(`detail-arrow-${name}`);
+  if (!panel) return;
+  panel.classList.add('hidden');
+  if (arrow) arrow.style.transform = '';
 }
 
 // ── Settings menu ─────────────────────────────────────────────────────────────

@@ -26,10 +26,10 @@ function _updateMIDIStats() {
   const statsEl = document.getElementById('midi-cc-stats');
   if (rateEl) {
     const rate = (_ccTimestamps.length / (CC_RATE_WINDOW_MS / 1000)).toFixed(1);
-    rateEl.textContent = `${rate}/s`;
+    rateEl.textContent = rate; // "CC/s" label is static in HTML
   }
   if (lastEl && _lastCCInfo) {
-    lastEl.textContent = `CC${_lastCCInfo.cc} ch${_lastCCInfo.channel}`;
+    lastEl.textContent = `CC${_lastCCInfo.cc}`;
   }
   if (statsEl) statsEl.classList.remove('hidden');
 }
@@ -42,7 +42,7 @@ setInterval(() => {
   const rateEl = document.getElementById('midi-cc-rate');
   if (rateEl) {
     const rate = (_ccTimestamps.length / (CC_RATE_WINDOW_MS / 1000)).toFixed(1);
-    rateEl.textContent = `${rate}/s`;
+    rateEl.textContent = rate;
   }
 }, 500);
 

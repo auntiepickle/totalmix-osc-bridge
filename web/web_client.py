@@ -89,6 +89,27 @@ async def get_snapshot_map():
 
 # ── Live Config Editor ────────────────────────────────────────────────────────
 
+@app.patch("/api/config/macros/{macro_name}")
+async def patch_macro(macro_name: str, request: Request):
+    """Update a single macro in-place — used by the card inline editor."""
+    try:
+        data = await request.json()
+        if macro_name not in bridge.mappings.get("macros", {}):
+            raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
+        backup_json_files()
+        bridge.mappings["macros"][macro_name] = data
+        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        with open(target, "w") as f:
+            json.dump(bridge.mappings, f, indent=2)
+        logger.info(f"✅ Macro '{macro_name}' updated via inline editor")
+        return {"status": "success", "macro": macro_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Inline macro save failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/config/mappings")
 async def get_config_mappings():
     """Return full mappings.json content for the live editor."""

@@ -33,10 +33,11 @@
                 </div>
 
                 <!-- CC stats badge — hidden until MIDI connected -->
-                <div id="midi-cc-stats" class="hidden flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 text-zinc-500 px-3 py-2 rounded-2xl text-[10px] font-mono whitespace-nowrap">
-                    <span id="midi-cc-rate">0/s</span>
-                    <span class="text-zinc-700">|</span>
-                    <span id="midi-cc-last">—</span>
+                <div id="midi-cc-stats" class="hidden flex items-center gap-2 bg-zinc-900 border border-zinc-800 text-zinc-500 px-3 py-2 rounded-2xl text-[10px] font-mono whitespace-nowrap">
+                    <span id="midi-cc-rate" class="text-zinc-300">0</span><span class="text-zinc-600">CC/s</span>
+                    <span class="text-zinc-800 mx-0.5">·</span>
+                    <span class="text-zinc-600">last</span>
+                    <span id="midi-cc-last" class="text-zinc-300">—</span>
                 </div>
 
                 <!-- Settings gear — uploads + reload + editor -->
