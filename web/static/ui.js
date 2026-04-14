@@ -310,6 +310,49 @@ function _esc(v) {
   return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 }
 
+// Build <option> list for workspace select from loaded snapshot map
+function _buildWorkspaceOptions(current) {
+  const snapMap = window._snapshotMap || {};
+  const workspaces = Object.keys(snapMap);
+  if (!workspaces.length) {
+    return `<option value="${_esc(current)}">${_esc(current) || '—'}</option>`;
+  }
+  let html = '';
+  if (current && !workspaces.includes(current)) {
+    html += `<option value="${_esc(current)}" selected>${_esc(current)} (custom)</option>`;
+  }
+  workspaces.forEach(ws => {
+    html += `<option value="${_esc(ws)}"${ws === current ? ' selected' : ''}>${_esc(ws)}</option>`;
+  });
+  return html;
+}
+
+// Build <option> list for snapshot select given a workspace
+function _buildSnapshotOptions(workspace, current) {
+  const snapMap = window._snapshotMap || {};
+  const wsEntry = snapMap[workspace];
+  const snapshots = wsEntry ? Object.values(wsEntry.snapshots || {}) : [];
+  if (!snapshots.length) {
+    return `<option value="${_esc(current)}">${_esc(current) || '—'}</option>`;
+  }
+  let html = '';
+  if (current && !snapshots.includes(current)) {
+    html += `<option value="${_esc(current)}" selected>${_esc(current)} (custom)</option>`;
+  }
+  snapshots.forEach(s => {
+    html += `<option value="${_esc(s)}"${s === current ? ' selected' : ''}>${_esc(s)}</option>`;
+  });
+  return html;
+}
+
+// Called when workspace dropdown changes — refreshes snapshot options for that workspace
+window.updateSnapshotOptions = function(name, workspace) {
+  const sel = document.getElementById(`snapshot-select-${name}`);
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = _buildSnapshotOptions(workspace, current);
+};
+
 function editDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
@@ -382,11 +425,15 @@ function editDetail(name) {
     <div class="flex gap-2">
       <div class="flex-1">
         <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Workspace</div>
-        <input data-field="workspace" value="${_esc(m.workspace)}" class="${ic}">
+        <select data-field="workspace" class="${ic}" onchange="updateSnapshotOptions('${name}', this.value)">
+          ${_buildWorkspaceOptions(m.workspace)}
+        </select>
       </div>
       <div class="flex-1">
         <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Snapshot</div>
-        <input data-field="snapshot" value="${_esc(m.snapshot)}" class="${ic}">
+        <select id="snapshot-select-${name}" data-field="snapshot" class="${ic}">
+          ${_buildSnapshotOptions(m.workspace, m.snapshot)}
+        </select>
       </div>
     </div>
 

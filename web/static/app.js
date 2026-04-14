@@ -27,6 +27,8 @@ ws.onmessage = function (event) {
     const ev = data.macro_event;
     if (ev.type === 'macro_start') {
       animateProgress(ev.name, ev.duration_ms);
+      lastFiredMacro = { name: ev.name, ts: Date.now() };
+      updateLastFired();
     } else if (ev.type === 'macro_complete') {
       snapProgressToZero(ev.name);
       lastFiredMacro = { name: ev.name, ts: Date.now() };
