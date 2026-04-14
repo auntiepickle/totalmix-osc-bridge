@@ -22,62 +22,95 @@ function getMidiTriggerLabel(m) {
 function createMacroCardHTML(name, m) {
   const midiLabel = getMidiTriggerLabel(m);
   return `
-<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-6 rounded-3xl">
-    <div class="flex justify-between items-start mb-4">
+<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-5 rounded-2xl">
+    <div class="flex justify-between items-start mb-3">
         <div class="flex-1 min-w-0 pr-3">
-            <h3 class="text-2xl font-bold text-white truncate">${name}</h3>
-            <p class="text-zinc-400 text-sm mt-1">${m.description || ''}</p>
-            <p class="routing-label text-orange-400 text-xs font-medium mt-2 tracking-widest">${m.routing_label || '—'}</p>
+            <h3 class="text-lg font-bold text-white truncate">${name}</h3>
+            <p class="text-zinc-400 text-xs mt-0.5">${m.description || ''}</p>
+            <p class="routing-label text-orange-400 text-xs font-medium mt-1.5 tracking-wider">${m.routing_label || '—'}</p>
         </div>
-        <div class="flex flex-col items-end gap-1 shrink-0">
-            ${midiLabel ? `<div class="text-xs font-mono bg-zinc-800 text-zinc-400 px-3 py-1 rounded-xl">${midiLabel}</div>` : ''}
-            <div id="last-trigger-${name}" class="text-xs font-mono text-zinc-600 px-3 py-1 rounded-xl"></div>
+        <div class="flex flex-col items-end gap-1.5 shrink-0">
+            ${midiLabel ? `<div class="text-xs font-mono bg-zinc-800/80 text-zinc-400 px-2.5 py-1 rounded-lg">${midiLabel}</div>` : ''}
+            <!-- LED indicator: dim by default, lights up on trigger -->
+            <div id="led-${name}" class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all duration-150"
+                 title="Last trigger time">
+              <span id="led-dot-${name}" class="w-2 h-2 rounded-full bg-zinc-700 transition-all duration-150"></span>
+              <span id="led-label-${name}" class="text-[10px] font-mono text-zinc-600"></span>
+            </div>
         </div>
     </div>
-    <div class="h-2 bg-zinc-800 rounded-full overflow-hidden mb-6 border border-zinc-700/50">
+    <div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden mb-4">
       <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500" style="width:0%;"></div>
     </div>
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-3 gap-2">
         <button onclick="fireMacro('${name}',1.0,false)"
-            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-5 rounded-2xl text-xl transition-all">
+            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-4 rounded-xl text-lg transition-all">
             FIRE
         </button>
         <button onclick="fireMacro('${name}',1.0,true)"
-            class="bg-zinc-800 hover:bg-amber-400/20 border border-amber-400/50 hover:border-amber-400 text-amber-400 font-semibold py-5 rounded-2xl transition-all active:scale-95 text-sm">
+            class="bg-zinc-800 hover:bg-amber-400/20 border border-amber-400/40 hover:border-amber-400 text-amber-400 font-semibold py-4 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
             RAMP
         </button>
     </div>
-    <button onclick="toggleDetail('${name}')" class="mt-5 w-full text-zinc-500 hover:text-orange-400 text-xs font-medium flex items-center justify-center gap-1 transition-colors">
-        ADVANCED <i class="fas fa-chevron-down text-[10px]"></i>
+    <button onclick="toggleDetail('${name}')" class="mt-4 w-full text-zinc-600 hover:text-orange-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
+        ADVANCED <i class="fas fa-chevron-down text-[9px]"></i>
     </button>
-    <div id="detail-${name}" class="hidden mt-3 p-4 bg-[#111111] rounded-2xl border border-zinc-700/50 font-mono text-xs"></div>
+    <div id="detail-${name}" class="hidden mt-2 p-3 bg-[#111111] rounded-xl border border-zinc-700/50 font-mono text-xs"></div>
 </div>`;
 }
 
+// Build cards grouped by workspace → snapshot
 function renderCards() {
   const grid = document.getElementById('macro-grid');
   if (!grid) return;
+
+  // Group macros: { workspace: { snapshot: [name, ...] } }
+  const groups = {};
+  Object.entries(macros).forEach(([name, m]) => {
+    const ws = m.workspace || '—';
+    const ss = m.snapshot || '—';
+    if (!groups[ws]) groups[ws] = {};
+    if (!groups[ws][ss]) groups[ws][ss] = [];
+    groups[ws][ss].push(name);
+  });
+
   let html = '';
-  Object.keys(macros).forEach(name => html += createMacroCardHTML(name, macros[name]));
+  Object.entries(groups).forEach(([ws, snapshots]) => {
+    html += `<div class="col-span-full mb-2">
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-semibold text-zinc-500 uppercase tracking-widest">${ws}</span>
+        <div class="flex-1 h-px bg-zinc-800"></div>
+      </div>
+    </div>`;
+    Object.entries(snapshots).forEach(([ss, names]) => {
+      if (ss !== '—') {
+        html += `<div class="col-span-full mb-1 ml-1">
+          <span class="text-[10px] text-zinc-600 uppercase tracking-widest">↳ ${ss}</span>
+        </div>`;
+      }
+      names.forEach(name => { html += createMacroCardHTML(name, macros[name]); });
+    });
+  });
+
   grid.innerHTML = html;
 }
 
-// Called by app.js when macro_start WS event arrives (server-side timing)
+// Called by app.js when macro_start WS event arrives — fills bar over exact ramp duration
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
   bar.style.transition = 'none';
   bar.style.width = '0%';
   bar.offsetHeight; // force reflow
-  bar.style.transition = `width ${durationMs}ms cubic-bezier(0.4,0,0.2,1)`;
+  bar.style.transition = `width ${durationMs}ms linear`;
   bar.style.width = '100%';
 }
 
-// Called by app.js when macro_complete WS event arrives
-function resetProgress(name) {
+// Called by app.js when macro_complete WS event arrives — instant reset, no drain animation
+function snapProgressToZero(name) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
-  bar.style.transition = 'width 400ms cubic-bezier(0.4,0,0.2,1)';
+  bar.style.transition = 'none';
   bar.style.width = '0%';
 }
 
@@ -119,10 +152,23 @@ function toggleDetail(name) {
   }
 }
 
-function toggleSettingsMenu() {
+async function toggleSettingsMenu() {
   const menu = document.getElementById('settings-menu');
   if (!menu) return;
   menu.classList.toggle('hidden');
+  if (!menu.classList.contains('hidden')) {
+    // Fetch and show what's currently loaded
+    try {
+      const res = await fetch('/api/status');
+      const s = await res.json();
+      const info = document.getElementById('settings-status');
+      if (info) {
+        info.innerHTML =
+          `<span class="text-zinc-400">${s.macros} macro${s.macros !== 1 ? 's' : ''}</span>` +
+          ` · <span class="text-zinc-400">${s.channel_map_submixes} submix${s.channel_map_submixes !== 1 ? 'es' : ''}</span>`;
+      }
+    } catch (_) {}
+  }
 }
 
 document.addEventListener('click', (e) => {

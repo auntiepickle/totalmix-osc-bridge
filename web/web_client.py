@@ -67,6 +67,18 @@ async def test_api():
     }
 
 
+@app.get("/api/status")
+async def get_status():
+    """Return currently-loaded config summary for the gear menu."""
+    channel_map = bridge.channel_map or {}
+    return {
+        "macros": len(bridge.mappings.get("macros", {})),
+        "channel_map_submixes": len(channel_map.get("submixes", {})),
+        "workspace": bridge.current_workspace,
+        "snapshot": bridge.current_snapshot,
+    }
+
+
 # ── WebSocket ────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")

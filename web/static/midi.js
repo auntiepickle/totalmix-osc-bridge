@@ -5,12 +5,12 @@ let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
 
-// ── Signal activity flash on the MIDI pill ────────────────────────────────────
+// ── Signal activity flash — dot briefly pulses bright white on CC ─────────────
 function flashMIDIActivity() {
-  const el = document.getElementById('midi-status');
-  if (!el) return;
-  el.classList.add('!bg-green-400', '!text-black');
-  setTimeout(() => el.classList.remove('!bg-green-400', '!text-black'), 120);
+  const dot = document.getElementById('midi-status-dot');
+  if (!dot) return;
+  dot.classList.add('!bg-white', '!shadow-[0_0_8px_#fff]');
+  setTimeout(() => dot.classList.remove('!bg-white', '!shadow-[0_0_8px_#fff]'), 100);
 }
 
 function handleMIDIMessage(message) {
@@ -40,12 +40,8 @@ function handleMIDIMessage(message) {
 }
 
 function updateCardLastTrigger(name, cc, value, deviceName, channel) {
-  const badge = document.getElementById(`last-trigger-${name}`);
-  if (!badge) return;
-  const ts = new Date().toLocaleTimeString();
-  badge.textContent = `${ts} • val ${value}`;
-  badge.classList.remove('text-zinc-600');
-  badge.classList.add('bg-green-500/20', 'text-green-400');
+  // Light up the LED indicator immediately on MIDI trigger (before WS roundtrip)
+  pulseLED(name, Date.now() / 1000);
 }
 
 // ── MIDI init / connect / disconnect / rescan ─────────────────────────────────

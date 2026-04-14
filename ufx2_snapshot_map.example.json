@@ -1,0 +1,10 @@
+{
+  "_SETUP_REQUIRED": "Fill in real slot numbers from TotalMix Quick Select before use. bridge.py loads this file for workspace/snapshot switching. mqtt_handler.py loads from /app/config/ufx2_snapshot_map.json (SMB mount) — keep them in sync.",
+  "Pill_setup": {
+    "slot": 0,
+    "snapshots": {
+      "1": "Reset",
+      "2": "lastthingidid"
+    }
+  }
+}

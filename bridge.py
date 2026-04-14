@@ -58,7 +58,7 @@ ws_clients = []  # list of active FastAPI WebSocket connections
 
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
-        self._suppress_handler = False   
+        self._suppress_handler = False
         self._last_macro_end_time = 0.0
         self.osc_client = osc_client
         self.mappings = mappings
@@ -66,8 +66,9 @@ class TotalMixOSCBridge:
         self.current_workspace = None
         self.current_snapshot = None
         self.mqtt_client = None
-        self.macro_live_state = {}          # live macro state for polished cards
-        self.channel_map = None             # loaded once for routing labels
+        self.macro_live_state = {}
+        self.channel_map = None
+        self._running_macros = set()        # names of macros currently executing
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -151,14 +152,14 @@ class TotalMixOSCBridge:
 
     def update_snapshot(self, name: str = None, index: int = None, workspace: str = None):
         if name:
-            self.current_snapshot = name
+            self.current_snapshot = str(name).strip().lower()  # normalize: match run_macro
         elif index is not None and (workspace or self.current_workspace):
             ws = workspace or self.current_workspace
             if ws and ws in self.snapshot_map:
                 snapshots = self.snapshot_map[ws].get("snapshots", {})
                 for snap_key, snap_value in snapshots.items():
                     if str(snap_key) == str(index) or snap_value == name:
-                        self.current_snapshot = snap_value
+                        self.current_snapshot = str(snap_value).strip().lower()
                         break
         logger.info(f"BRIDGE STATE → snapshot = {self.current_snapshot or 'None'}")
         self.broadcast_state()  # ← live web update
@@ -181,22 +182,33 @@ class TotalMixOSCBridge:
             ws_name = ws_name.get("name") or list(ws_name.values())[0] if ws_name else None
 
         if snap_name:
-            snap_name = re.sub(r'^\d+\s*-\s*', '', str(snap_name)).strip().title()
+            # Normalize to lowercase-stripped so comparisons are case-insensitive.
+            # Previously used .title() which caused mismatches when mqtt_handler
+            # stored snapshot names in lowercase from the snapshot map.
+            snap_name = re.sub(r'^\d+\s*-\s*', '', str(snap_name)).strip().lower()
 
         force_switch = macro.get("force_switch", False)
 
-        logger.info(f"DEBUG — running macro from GitHub commit 'fixing state sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
-        # === DEBOUNCE ===
-        current_time = time.time()
-        if hasattr(self, '_last_macro_time') and current_time - self._last_macro_time < 1.5 and getattr(self, '_last_macro_name', None) == macro_name:
-            logger.info(f"   → Debounced duplicate macro trigger (ignored)")
-            return
-        self._last_macro_time = current_time
-        self._last_macro_name = macro_name
+        # === DUPLICATE FIRE GUARD ===
+        # Block re-trigger while this macro is already running.
+        # Per-macro opt-out: set "allow_retrigger": true in mappings.json.
+        if not macro.get("allow_retrigger", False):
+            if macro_name in self._running_macros:
+                logger.info(f"   → '{macro_name}' still running — duplicate ignored")
+                return
+
+        # Optional extra cooldown after completion (default 0ms, set via "debounce_ms" in macro).
+        debounce_ms = macro.get("debounce_ms", 0)
+        if debounce_ms > 0:
+            elapsed = (time.time() - self.macro_live_state.get(macro_name, {}).get("last_trigger", 0)) * 1000
+            if elapsed < debounce_ms:
+                logger.info(f"   → '{macro_name}' in debounce window ({elapsed:.0f}/{debounce_ms}ms) — ignored")
+                return
 
         self._suppress_handler = True
+        self._running_macros.add(macro_name)
 
         try:
             # === ALWAYS RESOLVE SLOTS/INDICES ===
@@ -215,7 +227,7 @@ class TotalMixOSCBridge:
                     else:
                         candidate_name = snap_data
                         candidate_index = snap_key
-                    if str(candidate_name).title() == str(snap_name).title():
+                    if str(candidate_name).strip().lower() == snap_name:
                         snap_num = candidate_index or snap_key
                         break
 
@@ -313,6 +325,7 @@ class TotalMixOSCBridge:
         finally:
             self._suppress_handler = False
             self._last_macro_end_time = time.time()
+            self._running_macros.discard(macro_name)
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)

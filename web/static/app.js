@@ -28,7 +28,7 @@ ws.onmessage = function (event) {
     if (ev.type === 'macro_start') {
       animateProgress(ev.name, ev.duration_ms);
     } else if (ev.type === 'macro_complete') {
-      resetProgress(ev.name);
+      snapProgressToZero(ev.name);
     }
   }
 
@@ -56,23 +56,30 @@ async function loadMacros() {
   }
 }
 
-// ── Status header (workspace + snapshot + MIDI badge) ────────────────────────
+// ── Status header (workspace + snapshot + MIDI pill) ─────────────────────────
 function updateStatusHeader() {
   const workspaceEl = document.getElementById('workspace');
   const snapshotEl = document.getElementById('snapshot');
   if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
   if (snapshotEl) snapshotEl.textContent = `Snapshot: ${currentSnapshot || '—'}`;
 
-  const midiStatusEl = document.getElementById('midi-status');
-  if (!midiStatusEl) return;
+  const pill    = document.getElementById('midi-status');
+  const dot     = document.getElementById('midi-status-dot');
+  const label   = document.getElementById('midi-status-text');
+  if (!pill || !dot || !label) return;
+
   if (midiConnectedDevice) {
-    midiStatusEl.textContent = `${midiConnectedDevice}`;
-    midiStatusEl.classList.remove('bg-zinc-800', 'text-zinc-400');
-    midiStatusEl.classList.add('bg-green-700', 'text-white');
+    label.textContent = midiConnectedDevice;
+    dot.classList.remove('bg-zinc-600');
+    dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    pill.classList.remove('bg-zinc-800', 'text-zinc-400', 'border-zinc-700');
+    pill.classList.add('bg-zinc-800', 'text-white', 'border-green-700');
   } else {
-    midiStatusEl.textContent = 'No MIDI';
-    midiStatusEl.classList.remove('bg-green-700', 'text-white');
-    midiStatusEl.classList.add('bg-zinc-800', 'text-zinc-400');
+    label.textContent = 'No MIDI';
+    dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    dot.classList.add('bg-zinc-600');
+    pill.classList.remove('text-white', 'border-green-700');
+    pill.classList.add('text-zinc-400', 'border-zinc-700');
   }
 }
 
@@ -84,16 +91,24 @@ function updateMacroCard(name) {
   const routingEl = document.querySelector(`#card-${name} .routing-label`);
   if (routingEl && m.routing_label) routingEl.textContent = m.routing_label;
 
-  // Show fired timestamp in badge
-  if (m.last_trigger) {
-    const badge = document.getElementById(`last-trigger-${name}`);
-    if (badge) {
-      const ts = new Date(m.last_trigger * 1000).toLocaleTimeString();
-      badge.innerHTML = `fired ${ts}`;
-      badge.classList.remove('text-zinc-600');
-      badge.classList.add('bg-green-500/20', 'text-green-400');
-    }
-  }
+  if (m.last_trigger) pulseLED(name, m.last_trigger);
+}
+
+// LED indicator — lights up green on trigger, fades to dim after 3s
+function pulseLED(name, triggerTimestamp) {
+  const dot = document.getElementById(`led-dot-${name}`);
+  const label = document.getElementById(`led-label-${name}`);
+  if (!dot || !label) return;
+
+  const ts = new Date(triggerTimestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  label.textContent = ts;
+  dot.classList.remove('bg-zinc-700');
+  dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+
+  setTimeout(() => {
+    dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    dot.classList.add('bg-zinc-700');
+  }, 3000);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

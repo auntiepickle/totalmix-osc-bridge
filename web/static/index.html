@@ -19,8 +19,9 @@
                 </select>
 
                 <!-- MIDI status pill -->
-                <div id="midi-status" class="bg-zinc-800 text-zinc-400 px-5 py-2 rounded-2xl text-sm font-medium whitespace-nowrap">
-                    MIDI Disconnected
+                <div id="midi-status" class="flex items-center gap-2 bg-zinc-800 text-zinc-400 px-4 py-2 rounded-2xl text-sm font-medium whitespace-nowrap border border-zinc-700 transition-all duration-200">
+                    <span id="midi-status-dot" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200"></span>
+                    <span id="midi-status-text">No MIDI</span>
                 </div>
 
                 <!-- Settings gear — uploads + reload -->
@@ -30,7 +31,11 @@
                         title="Settings">
                         <i class="fas fa-gear"></i>
                     </button>
-                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-1 z-50 min-w-[210px] shadow-xl">
+                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-1 z-50 min-w-[220px] shadow-xl">
+                        <!-- Loaded state summary -->
+                        <div class="px-4 py-2 text-[10px] text-zinc-500 border-b border-zinc-800 mb-1">
+                            Loaded: <span id="settings-status" class="text-zinc-400">…</span>
+                        </div>
                         <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">MIDI</div>
                         <button onclick="disconnectMIDI(); toggleSettingsMenu()"
                             class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
@@ -53,14 +58,14 @@
                         <div class="border-t border-zinc-700 my-1"></div>
                         <button onclick="reloadServer(); toggleSettingsMenu()"
                             class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
-                            <i class="fas fa-sync text-green-400 w-4"></i> Reload bridge
+                            <i class="fas fa-sync text-green-400 w-4"></i> Reload mappings from disk
                         </button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start"></div>
     </div>
 
     <script src="app.js"></script>
