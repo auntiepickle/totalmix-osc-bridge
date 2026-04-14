@@ -31,14 +31,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load snapshot map
-try:
-    with open("ufx2_snapshot_map.json", "r", encoding="utf-8") as f:
-        SNAPSHOT_MAP = json.load(f)
-    logger.info(f"Loaded ufx2_snapshot_map.json — workspaces: {list(SNAPSHOT_MAP.keys())}")
-except Exception as e:
-    logger.error(f"Failed to load ufx2_snapshot_map.json: {e}")
-    SNAPSHOT_MAP = {}
+# Load snapshot map — prefer the SMB-mounted path (same source as mqtt_handler.py),
+# fall back to local file for dev environments without the mount.
+_SNAPSHOT_MAP_PATHS = [
+    "/app/config/ufx2_snapshot_map.json",  # Docker: SMB mount (authoritative)
+    "ufx2_snapshot_map.json",              # Local dev fallback
+]
+SNAPSHOT_MAP = {}
+for _p in _SNAPSHOT_MAP_PATHS:
+    try:
+        with open(_p, "r", encoding="utf-8-sig") as f:
+            SNAPSHOT_MAP = json.load(f)
+        logger.info(f"Loaded snapshot map from {_p} — workspaces: {list(SNAPSHOT_MAP.keys())}")
+        break
+    except FileNotFoundError:
+        continue
+    except Exception as e:
+        logger.error(f"Failed to load snapshot map from {_p}: {e}")
+        break
+if not SNAPSHOT_MAP:
+    logger.warning("No snapshot map loaded — WS/SS switching will be disabled until map is available")
 
 # Load mappings
 try:
