@@ -69,6 +69,8 @@ class TotalMixOSCBridge:
         self.macro_live_state = {}
         self.channel_map = None
         self._running_macros = set()        # names of macros currently executing
+        self._cancel_events = {}            # macro_name → threading.Event (for restart mode)
+        self._queued_params = {}            # macro_name → float (for queue/restart modes)
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -191,15 +193,29 @@ class TotalMixOSCBridge:
 
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
-        # === DUPLICATE FIRE GUARD ===
-        # Block re-trigger while this macro is already running.
-        # Per-macro opt-out: set "allow_retrigger": true in mappings.json.
-        if not macro.get("allow_retrigger", False):
-            if macro_name in self._running_macros:
-                logger.info(f"   → '{macro_name}' still running — duplicate ignored")
+        # === FIRE MODE GUARD ===
+        # fire_mode in mappings.json controls behaviour when macro is already running:
+        #   "ignore"  (default) — drop the new trigger
+        #   "queue"             — run once more after current completes
+        #   "restart"           — cancel current immediately, re-run with new param
+        fire_mode = macro.get("fire_mode", "ignore")
+        if macro_name in self._running_macros:
+            if fire_mode == "ignore":
+                logger.info(f"   → '{macro_name}' running, mode=ignore — dropped")
+                return
+            elif fire_mode == "queue":
+                self._queued_params[macro_name] = param
+                logger.info(f"   → '{macro_name}' running, mode=queue — queued (param={param:.3f})")
+                return
+            elif fire_mode == "restart":
+                self._queued_params[macro_name] = param
+                ev = self._cancel_events.get(macro_name)
+                if ev:
+                    ev.set()
+                logger.info(f"   → '{macro_name}' running, mode=restart — cancelling and re-queuing")
                 return
 
-        # Optional extra cooldown after completion (default 0ms, set via "debounce_ms" in macro).
+        # Optional post-completion cooldown (ms). Set "debounce_ms" in macro config.
         debounce_ms = macro.get("debounce_ms", 0)
         if debounce_ms > 0:
             elapsed = (time.time() - self.macro_live_state.get(macro_name, {}).get("last_trigger", 0)) * 1000
@@ -208,6 +224,8 @@ class TotalMixOSCBridge:
                 return
 
         self._suppress_handler = True
+        cancel_event = threading.Event()
+        self._cancel_events[macro_name] = cancel_event
         self._running_macros.add(macro_name)
 
         try:
@@ -281,7 +299,8 @@ class TotalMixOSCBridge:
                         self.osc_client,
                         osc_addr,
                         value,
-                        op_config
+                        op_config,
+                        cancel_event=cancel_event,
                     )
                     continue
 
@@ -325,7 +344,13 @@ class TotalMixOSCBridge:
         finally:
             self._suppress_handler = False
             self._last_macro_end_time = time.time()
+            self._cancel_events.pop(macro_name, None)
             self._running_macros.discard(macro_name)
+            # Fire any queued trigger (queue mode or restart mode)
+            queued = self._queued_params.pop(macro_name, None)
+            if queued is not None:
+                logger.info(f"   → '{macro_name}' firing queued trigger (param={queued:.3f})")
+                threading.Thread(target=self.run_macro, args=(macro_name, queued), daemon=True).start()
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)

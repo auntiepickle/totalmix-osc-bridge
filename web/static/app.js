@@ -95,20 +95,23 @@ function updateMacroCard(name) {
 }
 
 // LED indicator — lights up green on trigger, fades to dim after 3s
+// Also pulses the workspace-group header LED (defined in ui.js as window.pulseGroupLED)
 function pulseLED(name, triggerTimestamp) {
   const dot = document.getElementById(`led-dot-${name}`);
-  const label = document.getElementById(`led-label-${name}`);
-  if (!dot || !label) return;
+  if (!dot) return;
 
-  const ts = new Date(triggerTimestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  label.textContent = ts;
   dot.classList.remove('bg-zinc-700');
   dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
-
   setTimeout(() => {
     dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
     dot.classList.add('bg-zinc-700');
   }, 3000);
+
+  // Bubble up to workspace group header
+  const m = macros[name];
+  if (m && m.workspace && typeof window.pulseGroupLED === 'function') {
+    window.pulseGroupLED(m.workspace, name, triggerTimestamp);
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

@@ -8,12 +8,20 @@
 </head>
 <body class="bg-zinc-950 text-white">
     <div class="max-w-7xl mx-auto p-6">
+
         <!-- NAV BAR -->
         <div class="flex items-center justify-between mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-700">
-            <h1 class="text-2xl font-bold tracking-tight">TotalMix OSC Bridge</h1>
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight">TotalMix OSC Bridge</h1>
+                <div class="flex items-center gap-4 mt-0.5">
+                    <span id="workspace" class="text-xs text-zinc-500">Workspace: —</span>
+                    <span id="snapshot"  class="text-xs text-zinc-500">Snapshot: —</span>
+                </div>
+            </div>
 
             <div class="flex items-center gap-3">
-                <!-- MIDI selector — auto-connects on change -->
+
+                <!-- MIDI device selector -->
                 <select id="midi-device-selector" onchange="connectSelectedMIDI()"
                     class="bg-zinc-800 text-white border border-zinc-700 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:border-orange-400 min-w-[160px]">
                 </select>
@@ -24,18 +32,29 @@
                     <span id="midi-status-text">No MIDI</span>
                 </div>
 
-                <!-- Settings gear — uploads + reload -->
+                <!-- CC stats badge — hidden until MIDI connected -->
+                <div id="midi-cc-stats" class="hidden flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 text-zinc-500 px-3 py-2 rounded-2xl text-[10px] font-mono whitespace-nowrap">
+                    <span id="midi-cc-rate">0/s</span>
+                    <span class="text-zinc-700">|</span>
+                    <span id="midi-cc-last">—</span>
+                </div>
+
+                <!-- Settings gear — uploads + reload + editor -->
                 <div class="relative">
                     <button onclick="toggleSettingsMenu()" data-settings-toggle
                         class="w-10 h-10 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-zinc-400 hover:text-white transition-all active:scale-95"
                         title="Settings">
                         <i class="fas fa-gear"></i>
                     </button>
-                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-1 z-50 min-w-[220px] shadow-xl">
-                        <!-- Loaded state summary -->
+
+                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-1 z-50 min-w-[240px] shadow-xl">
+
+                        <!-- Status summary -->
                         <div class="px-4 py-2 text-[10px] text-zinc-500 border-b border-zinc-800 mb-1">
                             Loaded: <span id="settings-status" class="text-zinc-400">…</span>
                         </div>
+
+                        <!-- MIDI section -->
                         <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">MIDI</div>
                         <button onclick="disconnectMIDI(); toggleSettingsMenu()"
                             class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
@@ -45,7 +64,23 @@
                             class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
                             <i class="fas fa-arrows-rotate text-blue-400 w-4"></i> Rescan devices
                         </button>
+
                         <div class="border-t border-zinc-700 my-1"></div>
+
+                        <!-- Edit section -->
+                        <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">Edit</div>
+                        <button onclick="openEditor('mappings'); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-pen text-orange-400 w-4"></i> Edit mappings.json
+                        </button>
+                        <button onclick="openEditor('channel_map'); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-pen text-amber-400 w-4"></i> Edit channel map
+                        </button>
+
+                        <div class="border-t border-zinc-700 my-1"></div>
+
+                        <!-- Config upload / reload section -->
                         <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">Config</div>
                         <label class="cursor-pointer flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all">
                             <i class="fas fa-upload text-orange-400 w-4"></i> Upload mappings.json
@@ -65,7 +100,62 @@
             </div>
         </div>
 
+        <!-- MACRO GRID -->
         <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start"></div>
+    </div>
+
+    <!-- ── Live Config Editor Modal ────────────────────────────────────────── -->
+    <div id="editor-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+         onclick="if(event.target===this) closeEditor()">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-3xl flex flex-col shadow-2xl"
+             style="max-height:90vh">
+
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+                <div class="flex items-center gap-3">
+                    <!-- Config tabs -->
+                    <button id="editor-tab-mappings" onclick="openEditor('mappings')"
+                        class="text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-black font-bold transition-colors">
+                        mappings.json
+                    </button>
+                    <button id="editor-tab-channel_map" onclick="openEditor('channel_map')"
+                        class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+                        channel_map.json
+                    </button>
+                    <span id="editor-status" class="text-[10px] text-zinc-500 ml-1"></span>
+                </div>
+                <button onclick="closeEditor()"
+                    class="text-zinc-500 hover:text-white transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800">
+                    <i class="fas fa-times text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Textarea -->
+            <div class="flex-1 overflow-hidden p-4" style="min-height:0">
+                <textarea id="editor-textarea"
+                    class="w-full h-full bg-zinc-950 text-zinc-300 text-xs font-mono p-4 rounded-xl border border-zinc-800 focus:outline-none focus:border-orange-400 resize-none leading-relaxed"
+                    style="min-height:400px"
+                    spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
+            </div>
+
+            <!-- Footer -->
+            <div class="flex items-center justify-between px-6 py-4 border-t border-zinc-800 shrink-0">
+                <button onclick="formatEditorJSON()"
+                    class="text-xs text-zinc-500 hover:text-white transition-colors flex items-center gap-1.5">
+                    <i class="fas fa-indent"></i> Format JSON
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeEditor()"
+                        class="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors">
+                        Cancel
+                    </button>
+                    <button onclick="saveEditor()"
+                        class="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-black font-bold text-sm transition-colors active:scale-95">
+                        Save &amp; Reload
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>

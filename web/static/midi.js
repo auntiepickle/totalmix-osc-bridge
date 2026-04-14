@@ -1,11 +1,52 @@
-/* midi.js — Web MIDI init, CC routing, device selector */
+/* midi.js — Web MIDI init, CC routing, device selector, CC rate stats */
 /* Globals (macros, midiConnectedDevice) and updateStatusHeader() live in app.js */
 
 let midiAccess = null;
 let midiInput = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
 
-// ── Signal activity flash — dot briefly pulses bright white on CC ─────────────
+// ── CC rate tracking (rolling 3s window) ──────────────────────────────────────
+const _ccTimestamps = [];  // epoch ms of recent CC events
+const CC_RATE_WINDOW_MS = 3000;
+let _lastCCInfo = null;    // { cc, channel, value }
+
+function _trackCC(cc, channel, value) {
+  const now = Date.now();
+  _ccTimestamps.push(now);
+  // Prune events older than the window
+  const cutoff = now - CC_RATE_WINDOW_MS;
+  while (_ccTimestamps.length && _ccTimestamps[0] < cutoff) _ccTimestamps.shift();
+  _lastCCInfo = { cc, channel, value };
+  _updateMIDIStats();
+}
+
+function _updateMIDIStats() {
+  const rateEl = document.getElementById('midi-cc-rate');
+  const lastEl = document.getElementById('midi-cc-last');
+  const statsEl = document.getElementById('midi-cc-stats');
+  if (rateEl) {
+    const rate = (_ccTimestamps.length / (CC_RATE_WINDOW_MS / 1000)).toFixed(1);
+    rateEl.textContent = `${rate}/s`;
+  }
+  if (lastEl && _lastCCInfo) {
+    lastEl.textContent = `CC${_lastCCInfo.cc} ch${_lastCCInfo.channel}`;
+  }
+  if (statsEl) statsEl.classList.remove('hidden');
+}
+
+// Decay rate display toward 0 when no new CCs arrive
+setInterval(() => {
+  const now = Date.now();
+  const cutoff = now - CC_RATE_WINDOW_MS;
+  while (_ccTimestamps.length && _ccTimestamps[0] < cutoff) _ccTimestamps.shift();
+  const rateEl = document.getElementById('midi-cc-rate');
+  if (rateEl) {
+    const rate = (_ccTimestamps.length / (CC_RATE_WINDOW_MS / 1000)).toFixed(1);
+    rateEl.textContent = `${rate}/s`;
+  }
+}, 500);
+
+// ── Signal activity flash — dot briefly pulses bright white on CC ──────────────
 function flashMIDIActivity() {
   const dot = document.getElementById('midi-status-dot');
   if (!dot) return;
@@ -19,32 +60,26 @@ function handleMIDIMessage(message) {
   if ((status & 0xF0) !== 0xB0) return;
 
   const channel = (status & 0x0F) + 1;
-  const cc = data1;
-  const value = data2 / 127.0;
+  const cc      = data1;
+  const value   = data2 / 127.0;
 
   flashMIDIActivity();
+  _trackCC(cc, channel, data2);
 
-  let triggered = false;
   Object.keys(macros).forEach(name => {
     const macro = macros[name];
     for (const trigger of macro.midi_triggers || []) {
       if (trigger.type === 'control_change' && trigger.number === cc && trigger.channel === channel) {
         console.log(`[MIDI] Triggered ${name} (CC${cc} ch${channel} val=${data2})`);
         fireMacro(name, value, false);
-        updateCardLastTrigger(name, cc, data2, message.target ? message.target.name : midiConnectedDevice, channel);
-        triggered = true;
+        pulseLED(name, Date.now() / 1000);
         return;
       }
     }
   });
 }
 
-function updateCardLastTrigger(name, cc, value, deviceName, channel) {
-  // Light up the LED indicator immediately on MIDI trigger (before WS roundtrip)
-  pulseLED(name, Date.now() / 1000);
-}
-
-// ── MIDI init / connect / disconnect / rescan ─────────────────────────────────
+// ── MIDI init / connect / disconnect / rescan ──────────────────────────────────
 async function initWebMIDI() {
   if (!navigator.requestMIDIAccess || midiInput) return;
   try {
@@ -52,9 +87,7 @@ async function initWebMIDI() {
     _populateSelector();
     const target = Array.from(midiAccess.inputs.values()).find(i => i.name === lastMidiDevice)
       || Array.from(midiAccess.inputs.values())[0];
-    if (target) {
-      _connectInput(target);
-    }
+    if (target) _connectInput(target);
   } catch (err) {
     console.error('[MIDI] requestMIDIAccess failed:', err);
   }
@@ -82,6 +115,9 @@ function _connectInput(input) {
   lastMidiDevice = input.name;
   localStorage.setItem('lastMidiDevice', input.name);
   console.log(`[MIDI] Connected to ${input.name}`);
+  // Show CC stats badge now that we have a device
+  const statsEl = document.getElementById('midi-cc-stats');
+  if (statsEl) statsEl.classList.remove('hidden');
   updateStatusHeader();
 }
 
@@ -96,6 +132,8 @@ window.disconnectMIDI = () => {
   if (midiInput) midiInput.onmidimessage = null;
   midiInput = null;
   midiConnectedDevice = '';
+  const statsEl = document.getElementById('midi-cc-stats');
+  if (statsEl) statsEl.classList.add('hidden');
   console.log('[MIDI] Disconnected');
   updateStatusHeader();
 };

@@ -2,7 +2,7 @@ import os
 import shutil
 import datetime
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import json
@@ -11,7 +11,7 @@ import uvicorn
 import logging
 import asyncio
 
-from bridge import bridge, ws_clients, MAPPINGS
+from bridge import bridge, ws_clients, MAPPINGS, SNAPSHOT_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +71,76 @@ async def test_api():
 async def get_status():
     """Return currently-loaded config summary for the gear menu."""
     channel_map = bridge.channel_map or {}
+    snap_map = bridge.snapshot_map or {}
     return {
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),
+        "snapshot_map_workspaces": len(snap_map),
         "workspace": bridge.current_workspace,
         "snapshot": bridge.current_snapshot,
     }
+
+
+@app.get("/api/snapshot_map")
+async def get_snapshot_map():
+    """Return the loaded snapshot map (for client-side WS/SS validation)."""
+    return bridge.snapshot_map or {}
+
+
+# ── Live Config Editor ────────────────────────────────────────────────────────
+
+@app.get("/api/config/mappings")
+async def get_config_mappings():
+    """Return full mappings.json content for the live editor."""
+    return bridge.mappings
+
+
+@app.post("/api/config/mappings")
+async def save_config_mappings(request: Request):
+    """Save JSON body directly to mappings.json and hot-reload into bridge."""
+    try:
+        data = await request.json()
+        if "macros" not in data:
+            raise HTTPException(status_code=400, detail="Invalid mappings.json: missing 'macros' key")
+        backup_json_files()
+        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        with open(target, "w") as f:
+            json.dump(data, f, indent=2)
+        bridge.mappings = data
+        logger.info(f"✅ mappings.json saved via live editor ({len(data.get('macros', {}))} macros)")
+        return {"status": "success", "macros": len(data.get("macros", {}))}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Config save failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/config/channel_map")
+async def get_config_channel_map():
+    """Return full channel_map content for the live editor."""
+    return bridge.channel_map or {}
+
+
+@app.post("/api/config/channel_map")
+async def save_config_channel_map(request: Request):
+    """Save JSON body directly to ufx2_channel_map.json and hot-reload into bridge."""
+    try:
+        data = await request.json()
+        if "submixes" not in data:
+            raise HTTPException(status_code=400, detail="Invalid channel_map: missing 'submixes' key")
+        backup_json_files()
+        target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
+        with open(target, "w") as f:
+            json.dump(data, f, indent=2)
+        bridge._load_channel_map()
+        logger.info("✅ channel_map.json saved via live editor")
+        return {"status": "success", "submixes": len(data.get("submixes", {}))}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Config save failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
