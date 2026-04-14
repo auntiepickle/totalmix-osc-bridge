@@ -25,12 +25,23 @@
 
                 <!-- Settings gear — uploads + reload -->
                 <div class="relative">
-                    <button onclick="toggleSettingsMenu()"
+                    <button onclick="toggleSettingsMenu()" data-settings-toggle
                         class="w-10 h-10 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-zinc-400 hover:text-white transition-all active:scale-95"
                         title="Settings">
                         <i class="fas fa-gear"></i>
                     </button>
-                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-2 z-50 min-w-[200px] shadow-xl">
+                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-1 z-50 min-w-[210px] shadow-xl">
+                        <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">MIDI</div>
+                        <button onclick="disconnectMIDI(); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-plug-circle-xmark text-red-400 w-4"></i> Disconnect
+                        </button>
+                        <button onclick="rescanMIDI(); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-arrows-rotate text-blue-400 w-4"></i> Rescan devices
+                        </button>
+                        <div class="border-t border-zinc-700 my-1"></div>
+                        <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">Config</div>
                         <label class="cursor-pointer flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all">
                             <i class="fas fa-upload text-orange-400 w-4"></i> Upload mappings.json
                             <input type="file" accept=".json" class="hidden" onchange="uploadFile(this, 'mappings')">

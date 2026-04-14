@@ -76,32 +76,29 @@ class TotalMixOSCBridge:
     # ─────────────────────────────────────────────────────────────
     # SAFE WEBSOCKET BROADCAST (FINAL VERSION — MQTT thread safe)
     # ─────────────────────────────────────────────────────────────
-    def _safe_broadcast_state(self, macro_update=None):
+    def _safe_broadcast_state(self, macro_update=None, macro_event=None):
         """Thread-safe broadcast that works from ANY thread (MQTT callbacks OR FastAPI)."""
         try:
-            # FastAPI thread — already in async context
             asyncio.get_running_loop()
-            asyncio.create_task(self._do_broadcast(macro_update))
+            asyncio.create_task(self._do_broadcast(macro_update, macro_event))
         except RuntimeError:
-            # MQTT thread — no event loop in this thread
             try:
-                # Try to use main loop if web_client.py already registered it
                 if hasattr(self, 'main_loop') and self.main_loop is not None:
-                    asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update), self.main_loop)
+                    asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update, macro_event), self.main_loop)
                 else:
-                    # Ultimate fallback — don't crash the MQTT handler
                     logger.debug("Broadcast skipped (no main_loop yet)")
             except Exception as e:
                 logger.debug(f"Broadcast failed safely: {e}")
 
-    async def _do_broadcast(self, macro_update=None):
+    async def _do_broadcast(self, macro_update=None, macro_event=None):
         """Actual broadcast logic (always runs inside asyncio)."""
         for client in list(ws_clients):
             try:
                 state = {
                     "current_snapshot": getattr(self, "current_snapshot", "unknown"),
                     "current_workspace": getattr(self, "current_workspace", "unknown"),
-                    "macro_update": macro_update
+                    "macro_update": macro_update,
+                    "macro_event": macro_event,
                 }
                 await client.send_json(state)
             except Exception:
@@ -118,6 +115,16 @@ class TotalMixOSCBridge:
         except Exception as e:
             logger.warning(f"Could not load ufx2_channel_map.json: {e}")
             self.channel_map = {}
+
+    def _get_macro_duration_ms(self, macro: dict) -> int:
+        """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events)."""
+        for step in macro.get("steps", []):
+            if "operation" in step:
+                op = step["operation"]
+                bars = op.get("bars", 2)
+                bpm = op.get("bpm", 140)
+                return int(bars * (240000 / bpm))
+        return 400  # instant macro — brief visual feedback
 
     def get_routing_label(self, macro_name: str) -> str:
         """Return human-readable routing line for UI cards"""
@@ -243,6 +250,14 @@ class TotalMixOSCBridge:
             else:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
+            # === EMIT macro_start SO BROWSER CAN SYNC PROGRESS BAR ===
+            duration_ms = self._get_macro_duration_ms(macro)
+            self.broadcast_state(macro_event={
+                "type": "macro_start",
+                "name": macro_name,
+                "duration_ms": duration_ms,
+            })
+
             # === MACRO STEPS WITH OPERATION LIBRARY ===
             for step in macro.get("steps", []):
                 osc_addr = step["osc"]
@@ -275,9 +290,8 @@ class TotalMixOSCBridge:
                     self.mqtt_client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
 
             logger.info(f"Macro '{macro_name}' complete")
-            self.broadcast_state()  # ← live web update after macro runs
-            
-            # === RICH MACRO UPDATE FOR CARDS (still only once per trigger) ===
+
+            # === RICH MACRO UPDATE + macro_complete EVENT ===
             macro_data = self.mappings["macros"][macro_name]
             live_data = {
                 "name": macro_name,
@@ -288,10 +302,13 @@ class TotalMixOSCBridge:
                 "last_trigger": time.time(),
                 "osc_preview": f"{macro_data.get('steps', [{}])[0].get('osc', '')} = {value:.3f}",
                 "routing_label": self.get_routing_label(macro_name),
-                "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None
+                "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None,
             }
             self.macro_live_state[macro_name] = live_data
-            self.broadcast_state(macro_update=live_data)   # one clean broadcast
+            self.broadcast_state(
+                macro_update=live_data,
+                macro_event={"type": "macro_complete", "name": macro_name},
+            )
 
         finally:
             self._suppress_handler = False

@@ -48,12 +48,13 @@ async def get_macros():
 
 @app.post("/api/trigger/{macro_name}")
 async def trigger_macro(macro_name: str, param: float = 0.5):
-    """Fire a macro when the user clicks a card in the web UI."""
-    if macro_name in MAPPINGS.get("macros", {}):
-        logger.info(f"Web UI clicked macro → {macro_name} (param={param:.3f})")
-        bridge.run_macro(macro_name, param)
-        return {"status": "success", "macro": macro_name, "param": param}
-    raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
+    """Fire a macro — runs in a background thread so the response returns immediately.
+    The browser gets progress bar timing from the macro_start WebSocket event."""
+    if macro_name not in MAPPINGS.get("macros", {}):
+        raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
+    logger.info(f"Web UI triggered macro → {macro_name} (param={param:.3f})")
+    threading.Thread(target=bridge.run_macro, args=(macro_name, param), daemon=True).start()
+    return {"status": "accepted", "macro": macro_name, "param": param}
 
 
 @app.get("/api/test")

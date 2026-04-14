@@ -21,11 +21,24 @@ ws.onmessage = function (event) {
   const data = JSON.parse(event.data);
   if (data.current_workspace) currentWorkspace = data.current_workspace;
   if (data.current_snapshot) currentSnapshot = data.current_snapshot;
+
+  // macro_event drives the progress bar (server-side timing)
+  if (data.macro_event) {
+    const ev = data.macro_event;
+    if (ev.type === 'macro_start') {
+      animateProgress(ev.name, ev.duration_ms);
+    } else if (ev.type === 'macro_complete') {
+      resetProgress(ev.name);
+    }
+  }
+
+  // macro_update carries the rich card data after completion
   if (data.macro_update) {
     const mu = data.macro_update;
     macros[mu.name] = { ...(macros[mu.name] || {}), ...mu };
     updateMacroCard(mu.name);
   }
+
   updateStatusHeader();
 };
 
@@ -53,12 +66,12 @@ function updateStatusHeader() {
   const midiStatusEl = document.getElementById('midi-status');
   if (!midiStatusEl) return;
   if (midiConnectedDevice) {
-    midiStatusEl.textContent = `MIDI Connected: ${midiConnectedDevice}`;
+    midiStatusEl.textContent = `${midiConnectedDevice}`;
     midiStatusEl.classList.remove('bg-zinc-800', 'text-zinc-400');
-    midiStatusEl.classList.add('bg-green-600', 'text-white');
+    midiStatusEl.classList.add('bg-green-700', 'text-white');
   } else {
-    midiStatusEl.textContent = 'MIDI Disconnected';
-    midiStatusEl.classList.remove('bg-green-600', 'text-white');
+    midiStatusEl.textContent = 'No MIDI';
+    midiStatusEl.classList.remove('bg-green-700', 'text-white');
     midiStatusEl.classList.add('bg-zinc-800', 'text-zinc-400');
   }
 }
@@ -68,24 +81,17 @@ function updateMacroCard(name) {
   const m = macros[name];
   if (!m) return;
 
-  // Update routing label if it changed
   const routingEl = document.querySelector(`#card-${name} .routing-label`);
   if (routingEl && m.routing_label) routingEl.textContent = m.routing_label;
 
-  // Update MIDI badge with last trigger info
-  const badge = document.getElementById(`last-trigger-${name}`);
-  if (badge && m.last_trigger) {
-    const ts = new Date(m.last_trigger * 1000).toLocaleTimeString();
-    badge.innerHTML = `<span class="font-semibold">fired</span><br>${ts}`;
-    badge.classList.add('bg-green-500/20', 'text-green-400');
-  }
-
-  // Animate progress bar for live value
-  if (m.progress !== undefined) {
-    const bar = document.getElementById(`progress-bar-${name}`);
-    if (bar) {
-      bar.style.transition = 'width 300ms ease';
-      bar.style.width = `${m.progress}%`;
+  // Show fired timestamp in badge
+  if (m.last_trigger) {
+    const badge = document.getElementById(`last-trigger-${name}`);
+    if (badge) {
+      const ts = new Date(m.last_trigger * 1000).toLocaleTimeString();
+      badge.innerHTML = `fired ${ts}`;
+      badge.classList.remove('text-zinc-600');
+      badge.classList.add('bg-green-500/20', 'text-green-400');
     }
   }
 }
