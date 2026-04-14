@@ -40,8 +40,8 @@ async def index_fallback():
 
 @app.get("/api/macros")
 async def get_macros():
-    """Return all macros from mappings.json for the card grid."""
-    macros = MAPPINGS.get("macros", {})
+    """Return all macros from the live bridge mappings (updated by live editor + reload)."""
+    macros = bridge.mappings.get("macros", {})
     logger.info(f"✅ /api/macros → serving {len(macros)} macro cards to web client")
     return macros
 
@@ -50,7 +50,7 @@ async def get_macros():
 async def trigger_macro(macro_name: str, param: float = 0.5):
     """Fire a macro — runs in a background thread so the response returns immediately.
     The browser gets progress bar timing from the macro_start WebSocket event."""
-    if macro_name not in MAPPINGS.get("macros", {}):
+    if macro_name not in bridge.mappings.get("macros", {}):
         raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
     logger.info(f"Web UI triggered macro → {macro_name} (param={param:.3f})")
     threading.Thread(target=bridge.run_macro, args=(macro_name, param), daemon=True).start()
@@ -140,6 +140,44 @@ async def save_config_channel_map(request: Request):
         raise
     except Exception as e:
         logger.error(f"Config save failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/config/snapshot_map")
+async def get_config_snapshot_map():
+    """Return full snapshot_map content for the live editor."""
+    return bridge.snapshot_map or {}
+
+
+@app.post("/api/config/snapshot_map")
+async def save_config_snapshot_map(request: Request):
+    """Save snapshot_map to both local file and /app/config (SMB mount if present).
+    Updates bridge.snapshot_map immediately so run_macro resolves slots correctly."""
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="snapshot_map must be a JSON object")
+        bridge.snapshot_map = data
+        # Write to local app directory
+        local_target = os.path.join(os.path.dirname(__file__), "../ufx2_snapshot_map.json")
+        with open(local_target, "w") as f:
+            json.dump(data, f, indent=2)
+        # Also write to SMB mount if accessible
+        smb_target = "/app/config/ufx2_snapshot_map.json"
+        smb_written = False
+        try:
+            with open(smb_target, "w") as f:
+                json.dump(data, f, indent=2)
+            smb_written = True
+        except Exception:
+            pass  # SMB mount not available in dev
+        workspaces = sum(1 for k, v in data.items() if not k.startswith("_") and isinstance(v, dict))
+        logger.info(f"✅ snapshot_map saved ({workspaces} workspaces, SMB={smb_written})")
+        return {"status": "success", "workspaces": workspaces, "smb_written": smb_written}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"snapshot_map save failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 

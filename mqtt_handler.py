@@ -93,10 +93,13 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         global SNAPSHOT_MAP
         payload = msg.payload.decode().strip()
 
-        # === TIME-BASED COOLDOWN + SUPPRESSION (prevents feedback loops) ===
-        if getattr(bridge, '_last_macro_end_time', 0) > 0 and time.time() - bridge._last_macro_end_time < 2.5:
-            if msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
-                print(f"Suppressed handler for {msg.topic} (cooldown after macro)")
+        # === SUPPRESSION (prevents feedback loops while macro is running or cooling down) ===
+        if msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
+            if getattr(bridge, '_suppress_handler', False):
+                print(f"Suppressed {msg.topic} (macro in progress)")
+                return
+            if getattr(bridge, '_last_macro_end_time', 0) > 0 and time.time() - bridge._last_macro_end_time < 2.5:
+                print(f"Suppressed {msg.topic} (cooldown after macro)")
                 return
 
         # === CLEAN LOGGING ===

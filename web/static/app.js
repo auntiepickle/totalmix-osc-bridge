@@ -114,7 +114,20 @@ function pulseLED(name, triggerTimestamp) {
   }
 }
 
+// ── Snapshot map — fetched once on load for detail panel validation ───────────
+async function loadSnapshotMap() {
+  try {
+    const res = await fetch('/api/snapshot_map');
+    window._snapshotMap = await res.json();
+    console.log(`[UI] Snapshot map loaded — ${Object.keys(window._snapshotMap).length} workspaces`);
+  } catch (e) {
+    console.warn('[UI] Could not load snapshot map:', e);
+    window._snapshotMap = {};
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
   initWebMIDI();
+  loadSnapshotMap();
 });

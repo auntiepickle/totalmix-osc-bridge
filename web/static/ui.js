@@ -84,11 +84,11 @@ function createMacroCardHTML(name, m) {
     </div>
     <div class="grid grid-cols-3 gap-2">
         <button onclick="fireMacro('${name}',1.0,false)"
-            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-4 rounded-xl text-lg transition-all">
+            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-2.5 rounded-xl text-base transition-all">
             FIRE
         </button>
         <button onclick="fireMacro('${name}',1.0,true)"
-            class="bg-zinc-800 hover:bg-amber-400/20 border border-amber-400/40 hover:border-amber-400 text-amber-400 font-semibold py-4 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
+            class="bg-zinc-800 hover:bg-amber-400/20 border border-amber-400/40 hover:border-amber-400 text-amber-400 font-semibold py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
             RAMP
         </button>
     </div>
@@ -185,6 +185,9 @@ async function fireMacro(name, value = 1.0, ramp = false) {
 }
 
 // ── Structured detail panel ───────────────────────────────────────────────────
+// _snapshotMap is loaded once on init (see app.js loadSnapshotMap)
+window._snapshotMap = window._snapshotMap || {};
+
 function toggleDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
@@ -204,18 +207,40 @@ function toggleDetail(name) {
   };
   const fireModeClass = fireModeColors[fireMode] || fireModeColors.IGNORE;
 
-  let html = `<div class="space-y-3 text-zinc-300">`;
+  // Check if ws/snapshot can be resolved in the loaded snapshot map
+  const snapMap = window._snapshotMap || {};
+  const wsEntry = snapMap[m.workspace];
+  const wsResolved = !!wsEntry;
+  const ssResolved = wsResolved && Object.values(wsEntry.snapshots || {})
+    .some(v => String(v).toLowerCase() === String(m.snapshot || '').toLowerCase());
 
-  // Top row: fire mode badge + duration
-  html += `<div class="flex items-center justify-between">
-    <span class="text-[10px] font-bold px-2.5 py-1 rounded-lg tracking-widest ${fireModeClass}">${fireMode}</span>
-    <span class="text-zinc-500 text-[10px] font-mono">⏱ ${durationSec}s</span>
+  let html = `<div class="space-y-3 text-zinc-300 text-sm">`;
+
+  // Snapshot map validation warning
+  if (m.workspace && m.snapshot && (!wsResolved || !ssResolved)) {
+    const missing = !wsResolved ? `workspace "${m.workspace}"` : `snapshot "${m.snapshot}" in ${m.workspace}`;
+    html += `<div class="flex items-center gap-2 bg-red-900/20 border border-red-800/40 text-red-400 text-xs px-3 py-2 rounded-lg">
+      <i class="fas fa-triangle-exclamation shrink-0"></i>
+      <span>${missing} not found in snapshot map — WS/SS switch will always fire.
+        <button onclick="openEditor('snapshot_map')" class="underline hover:text-red-300 ml-1">Fix in editor</button>
+      </span>
+    </div>`;
+  }
+
+  // Top row: fire mode badge + duration + Edit button
+  html += `<div class="flex items-center justify-between gap-2">
+    <span class="text-xs font-bold px-2.5 py-1 rounded-lg tracking-widest ${fireModeClass}">${fireMode}</span>
+    <span class="text-zinc-500 text-xs font-mono">⏱ ${durationSec}s</span>
+    <button onclick="openEditor('mappings')"
+        class="ml-auto text-xs text-zinc-500 hover:text-orange-400 flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
+      <i class="fas fa-pen text-[10px]"></i> Edit
+    </button>
   </div>`;
 
   // Steps
   if (m.steps && m.steps.length) {
     html += `<div>
-      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-1.5">Steps</div>
+      <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">Steps</div>
       <div class="space-y-1.5">`;
     m.steps.forEach(step => {
       const addr = step.osc || '?';
@@ -224,20 +249,21 @@ function toggleDetail(name) {
         const opType = (op.type || '').toUpperCase();
         const bars = op.bars || 2;
         const bpm  = op.bpm  || 140;
+        const curve = op.curve ? ` · ${op.curve}` : '';
         const opColors = { RAMP: 'text-amber-400', LFO: 'text-purple-400' };
         const opColor = opColors[opType] || 'text-zinc-400';
         html += `<div class="flex items-center gap-2 font-mono bg-zinc-900/60 px-2.5 py-1.5 rounded-lg">
-          <span class="text-zinc-500 text-[11px]">∿</span>
-          <span class="text-orange-300 text-[11px] flex-1 truncate">${addr}</span>
-          <span class="${opColor} text-[10px] font-bold">${opType}</span>
-          <span class="text-zinc-600 text-[10px]">${bars}b @ ${bpm}</span>
+          <span class="text-zinc-500 text-xs">∿</span>
+          <span class="text-orange-300 text-xs flex-1 truncate">${addr}</span>
+          <span class="${opColor} text-xs font-bold">${opType}</span>
+          <span class="text-zinc-600 text-xs">${bars}b @ ${bpm}${curve}</span>
         </div>`;
       } else {
         const val = step.value !== undefined ? step.value : '?';
         html += `<div class="flex items-center gap-2 font-mono bg-zinc-900/60 px-2.5 py-1.5 rounded-lg">
-          <span class="text-zinc-500 text-[11px]">⚡</span>
-          <span class="text-orange-300 text-[11px] flex-1 truncate">${addr}</span>
-          <span class="text-zinc-400 text-[10px]">= ${val}</span>
+          <span class="text-zinc-500 text-xs">⚡</span>
+          <span class="text-orange-300 text-xs flex-1 truncate">${addr}</span>
+          <span class="text-zinc-400 text-xs">= ${val}</span>
         </div>`;
       }
     });
@@ -247,7 +273,7 @@ function toggleDetail(name) {
   // MIDI triggers
   if (m.midi_triggers && m.midi_triggers.length) {
     html += `<div>
-      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-1.5">MIDI Triggers</div>
+      <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">MIDI Triggers</div>
       <div class="flex flex-wrap gap-1.5">`;
     m.midi_triggers.forEach(t => {
       html += `<span class="text-xs font-mono bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-700">CC${t.number} ch${t.channel}</span>`;
@@ -255,12 +281,28 @@ function toggleDetail(name) {
     html += `</div></div>`;
   }
 
-  // Workspace / Snapshot footer
-  html += `<div class="text-[10px] text-zinc-600 font-mono border-t border-zinc-800 pt-2 flex items-center gap-1.5">
-    <span class="text-zinc-500">${m.workspace || '—'}</span>
-    <span class="text-zinc-700">/</span>
-    <span class="text-zinc-500">${m.snapshot || '—'}</span>
-  </div>`;
+  // Workspace / Snapshot
+  html += `<div class="flex items-center gap-1.5 border-t border-zinc-800 pt-2">`;
+  html += wsResolved
+    ? `<span class="text-xs text-zinc-500 font-mono">${m.workspace || '—'} / ${m.snapshot || '—'}</span>`
+    : `<span class="text-xs text-red-500/70 font-mono">${m.workspace || '—'} / ${m.snapshot || '—'}</span>`;
+  if (wsEntry) {
+    const slot = wsEntry.slot;
+    const snapEntry = Object.entries(wsEntry.snapshots || {}).find(
+      ([, v]) => String(v).toLowerCase() === String(m.snapshot || '').toLowerCase()
+    );
+    if (slot !== undefined) html += `<span class="text-xs text-zinc-700 font-mono">· WS slot ${slot}</span>`;
+    if (snapEntry) html += `<span class="text-xs text-zinc-700 font-mono">· SS index ${snapEntry[0]}</span>`;
+  }
+  html += `</div>`;
+
+  // Full JSON — collapsible
+  html += `<details class="group">
+    <summary class="cursor-pointer text-xs text-zinc-600 hover:text-orange-400 transition-colors flex items-center gap-1 select-none">
+      <i class="fas fa-code text-[10px]"></i> Full JSON
+    </summary>
+    <pre class="mt-2 text-xs overflow-auto max-h-52 bg-zinc-950 text-zinc-400 p-3 rounded-lg border border-zinc-800 leading-relaxed">${JSON.stringify(m, null, 2)}</pre>
+  </details>`;
 
   html += `</div>`;
   panel.innerHTML = html;
@@ -325,7 +367,7 @@ async function openEditor(configType = 'mappings') {
   if (!modal || !textarea) return;
 
   // Tab styling
-  ['mappings', 'channel_map'].forEach(t => {
+  ['mappings', 'channel_map', 'snapshot_map'].forEach(t => {
     const tab = document.getElementById(`editor-tab-${t}`);
     if (!tab) return;
     tab.className = t === configType
@@ -374,7 +416,15 @@ async function saveEditor() {
     });
     if (res.ok) {
       modal.classList.add('hidden');
-      loadMacros(); // hot-reload cards without full page refresh
+      if (configType === 'snapshot_map') {
+        // Refresh local snapshot map cache so detail panels show correct validation
+        const sm = await fetch('/api/snapshot_map').then(r => r.json()).catch(() => ({}));
+        window._snapshotMap = sm;
+      } else {
+        // Hot-reload macro cards from updated bridge mappings
+        await loadMacros();
+        renderCards();
+      }
     } else {
       const err = await res.json();
       if (statusEl) statusEl.textContent = 'Error';
