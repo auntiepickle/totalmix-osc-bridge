@@ -18,3 +18,4 @@ ufx2_snapshot_map.json
 __pycache__/
 *.pyc
 venv/
+web/static/style.css

@@ -1,36 +1,60 @@
 import os
+import shutil
+import datetime
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import json
 import threading
 import uvicorn
+import logging
+import asyncio
+
 from bridge import bridge, ws_clients, MAPPINGS
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TotalMix OSC Bridge Web Client")
 
-# === CONFIGURABLE WEB PORT ===
 WEB_PORT = int(os.getenv("WEB_PORT", 8088))
 
-# ROBUST STATIC MOUNT (absolute path)
 static_dir = str(Path(__file__).parent / "static")
 print(f"DEBUG: Mounting static files from: {static_dir}")
 print(f"DEBUG: Files found: {list(Path(static_dir).glob('*'))}")
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
 @app.get("/")
 async def root():
     return RedirectResponse(url="/static/index.html")
+
 
 @app.get("/index.html")
 async def index_fallback():
     return RedirectResponse(url="/static/index.html")
 
+
+# ── Macro Cards API ──────────────────────────────────────────────────────────
+
 @app.get("/api/macros")
 async def get_macros():
-    return MAPPINGS.get("macros", {})
+    """Return all macros from mappings.json for the card grid."""
+    macros = MAPPINGS.get("macros", {})
+    logger.info(f"✅ /api/macros → serving {len(macros)} macro cards to web client")
+    return macros
+
+
+@app.post("/api/trigger/{macro_name}")
+async def trigger_macro(macro_name: str, param: float = 0.5):
+    """Fire a macro when the user clicks a card in the web UI."""
+    if macro_name in MAPPINGS.get("macros", {}):
+        logger.info(f"Web UI clicked macro → {macro_name} (param={param:.3f})")
+        bridge.run_macro(macro_name, param)
+        return {"status": "success", "macro": macro_name, "param": param}
+    raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
+
 
 @app.get("/api/test")
 async def test_api():
@@ -38,13 +62,11 @@ async def test_api():
         "status": "ok",
         "macros_count": len(MAPPINGS.get("macros", {})),
         "static_dir": static_dir,
-        "web_port": WEB_PORT
+        "web_port": WEB_PORT,
     }
 
-@app.post("/api/trigger/{macro_name}")
-async def trigger_macro(macro_name: str, param: float = 1.0):
-    bridge.run_macro(macro_name, param)
-    return {"status": "fired", "macro": macro_name, "param": param}
+
+# ── WebSocket ────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -57,14 +79,92 @@ async def websocket_endpoint(websocket: WebSocket):
         if websocket in ws_clients:
             ws_clients.remove(websocket)
 
-def start_bridge():
+
+# ── File Upload + Auto-Backup ────────────────────────────────────────────────
+
+def backup_json_files():
+    """Auto-backup mappings + channel map before every upload."""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = os.path.join(os.path.dirname(__file__), "../backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    for fn in ["mappings.json", "ufx2_channel_map.json"]:
+        src = os.path.join(os.path.dirname(__file__), "../" + fn)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(backup_dir, f"{fn}.{timestamp}"))
+            logger.info(f"✅ Auto-backup: {fn}.{timestamp}")
+
+
+@app.post("/api/upload/mappings")
+async def upload_mappings(file: UploadFile = File(...)):
+    if not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json files allowed")
+    try:
+        backup_json_files()
+        contents = await file.read()
+        data = json.loads(contents)
+        if "macros" not in data:
+            raise HTTPException(status_code=400, detail="Invalid mappings.json format")
+        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        with open(target, "w") as f:
+            json.dump(data, f, indent=2)
+        bridge.mappings = data
+        logger.info(f"✅ mappings.json uploaded + reloaded ({len(data.get('macros', {}))} macros)")
+        return {"status": "success", "message": "mappings.json updated and reloaded"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/upload/channel_map")
+async def upload_channel_map(file: UploadFile = File(...)):
+    if not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json files allowed")
+    try:
+        backup_json_files()
+        contents = await file.read()
+        data = json.loads(contents)
+        if "submixes" not in data:
+            raise HTTPException(status_code=400, detail="Invalid ufx2_channel_map.json format")
+        target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
+        with open(target, "w") as f:
+            json.dump(data, f, indent=2)
+        bridge._load_channel_map()
+        logger.info("✅ ufx2_channel_map.json uploaded + reloaded")
+        return {"status": "success", "message": "channel map updated and reloaded"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/reload")
+async def reload_bridge():
+    """Reload mappings.json from disk into the running bridge."""
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "../mappings.json"), "r") as f:
+            data = json.load(f)
+        bridge.mappings = data
+        logger.info(f"✅ Bridge reloaded — {len(data.get('macros', {}))} macros")
+        return {"status": "success", "macros": len(data.get("macros", {}))}
+    except Exception as e:
+        logger.error(f"Reload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Startup ──────────────────────────────────────────────────────────────────
+
+def _keepalive():
     import time
     while True:
         time.sleep(60)
 
+
 @app.on_event("startup")
 async def startup_event():
-    threading.Thread(target=start_bridge, daemon=True).start()
-    # NEW: start MQTT in web mode too
+    threading.Thread(target=_keepalive, daemon=True).start()
     bridge.start_mqtt()
-    print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT}) - MQTT ACTIVE")
+    bridge.main_loop = asyncio.get_running_loop()
+    print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT}) — MQTT ACTIVE")

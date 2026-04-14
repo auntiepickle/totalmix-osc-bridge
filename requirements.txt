@@ -3,3 +3,4 @@ python-osc
 mido[rtmidi]
 fastapi
 uvicorn[standard]
+python-multipart>=0.0.6
