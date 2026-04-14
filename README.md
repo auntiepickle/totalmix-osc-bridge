@@ -1,28 +1,83 @@
-# RME UFX II TotalMix OSC Bridge
+# TotalMix OSC Bridge
 
-**A reliable, data-driven OSC bridge for RME TotalMix FX sends + dynamic submix control.**
+Route MIDI CC from a hardware sequencer through a browser to an RME UFX II — without touching TotalMix's built-in MIDI learn.
 
-Designed for hardware sequencers (Cirklon, etc.) and Home Assistant.  
-**Single central server** that any remote MIDI client can trigger via simple MQTT.
+A Cirklon (or any MIDI controller) sends CC messages. The browser reads them via the Web MIDI API and fires macros over WebSocket to a persistent server. The server handles workspace switching, BPM-synced ramps, and OSC delivery to TotalMix FX. Everything — state, logic, config — lives in one place.
 
-## Architecture (Centralized Server Model)
+---
 
-- **Bridge Server** (`bridge.py`): Owns *everything* — macro definitions, workspace/snapshot state, OSC communication to the UFX II. Runs in Docker or venv on a always-on machine.
-- **Clients**: Lightweight scripts on MIDI-connected devices. They only read MIDI and publish one MQTT message (`totalmix/macro/<name>`).
-- **Why this design?** Central logic = easy maintenance, no duplicated code, works with any number of controllers. This pattern is reusable by any TotalMix user who wants custom FX routing without hacking TotalMix’s limited MIDI learn.
+## Signal chain
 
-Perfect for:
-- Cirklon / hardware sequencers
-- Home Assistant dashboards
-- Future TouchOSC / Lemur / iPad control surfaces
-- Multi-room or distributed studio setups
+```
+Cirklon → USB → Browser (Web MIDI API)
+  → WebSocket → FastAPI server
+  → bridge.run_macro() → operations (ramp / LFO)
+  → UDP OSC → TotalMix FX on RME UFX II
+```
 
-## Quick Start (after setup)
+MQTT (Home Assistant / mosquitto) carries workspace and snapshot state in both directions.
 
-1. Edit `mappings.json` to add new macros (no code changes).
-2. Run the bridge.
-3. On any MIDI client device, send MQTT: `totalmix/macro/an12_aes_send` with payload `0.0–1.0`.
+---
 
-See `RME_UFX_II_TotalMix_OSC_Bridge_Project.md` (full architecture & setup) and `MIDI_to_OSC_Mapping_System.md` (macro system & JSON format) for complete details.
+## Features
 
-Last updated: April 2026
+- **MIDI CC triggers** — bind any CC number + channel to a macro in `mappings.json`
+- **Fire modes** — `ignore`, `queue`, or `restart` when a macro is already running
+- **Workspace + snapshot switching** — macros declare their target by name; the bridge resolves slot numbers and switches via OSC only when needed
+- **BPM-synced ramp and LFO** — smooth fader moves over musical time (bars × BPM), cancellable mid-execution
+- **Live web UI** — macro cards with progress bars, four-state LED indicators, real-time WebSocket updates
+- **Inline config editing** — edit any macro in the browser; changes write to disk and hot-reload instantly
+- **MIDI clock BPM display** — reads `0xF8` timing clock from the Cirklon and shows live BPM in the header
+- **MQTT integration** — Home Assistant can trigger macros and receive live state
+- **Auto-backup** — every config save creates a timestamped copy in `backups/`
+
+---
+
+## Quick start
+
+**1. Deploy**
+
+```bash
+cp docker-compose.example.yml docker-compose.yml
+# Edit docker-compose.yml — set OSC_IP, MQTT_BROKER, SMB paths
+docker compose build && docker compose up -d
+```
+
+**2. Set up config files**
+
+```bash
+cp mappings.example.json mappings.json
+cp ufx2_channel_map.example.json ufx2_channel_map.json
+# Edit both to match your TotalMix routing
+```
+
+`ufx2_snapshot_map.json` lives outside the repo (on your NAS/SMB share). See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+**3. Open the UI**
+
+Navigate to `https://YOUR-SERVER-IP` (HTTPS required for Web MIDI). Select your MIDI input device in the header. Macro cards load automatically from `mappings.json`.
+
+If `mappings.json` is missing the UI shows a setup banner — click **Use as my mappings.json** to initialize from the example.
+
+---
+
+## Config files
+
+| File | Purpose |
+|---|---|
+| `mappings.json` | Macro definitions — steps, MIDI triggers, fire modes, operations |
+| `ufx2_snapshot_map.json` | Workspace names → TotalMix Quick Select slots + snapshot names |
+| `ufx2_channel_map.json` | OSC address → human name map used to generate routing labels on cards |
+
+All three have `*.example.json` counterparts in the repo. The real files are git-ignored so live edits survive `git pull`. See [docs/MAPPINGS_REFERENCE.md](docs/MAPPINGS_REFERENCE.md) for the full schema.
+
+---
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Every component, the state machine, thread safety, OSC address reference |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker setup, environment variables, SMB snapshot map, HTTPS, Home Assistant |
+| [docs/MAPPINGS_REFERENCE.md](docs/MAPPINGS_REFERENCE.md) | Complete JSON schema for all three config files |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local dev setup, adding macros, adding operations, known issues |

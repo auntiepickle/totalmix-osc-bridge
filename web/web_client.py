@@ -80,6 +80,7 @@ async def get_status():
         "snapshot": bridge.current_snapshot,
         "mappings_is_example": bridge.mappings_is_example,
         "mappings_source": bridge.mappings_source,
+        "channel_map_is_example": getattr(bridge, "channel_map_is_example", False),
     }
 
 
@@ -159,6 +160,7 @@ async def save_config_channel_map(request: Request):
         with open(target, "w") as f:
             json.dump(data, f, indent=2)
         bridge._load_channel_map()
+        bridge.channel_map_is_example = False
         logger.info("✅ channel_map.json saved via live editor")
         return {"status": "success", "submixes": len(data.get("submixes", {}))}
     except HTTPException:
@@ -291,6 +293,7 @@ async def init_channel_map_from_example():
             raise HTTPException(status_code=404, detail="ufx2_channel_map.example.json not found")
         shutil.copy2(example, target)
         bridge._load_channel_map()
+        bridge.channel_map_is_example = False
         submixes = len((bridge.channel_map or {}).get("submixes", {}))
         logger.info(f"✅ ufx2_channel_map.json initialized from example ({submixes} submixes)")
         return {"status": "success", "submixes": submixes}

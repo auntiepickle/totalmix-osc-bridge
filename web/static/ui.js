@@ -560,9 +560,13 @@ async function toggleSettingsMenu() {
         const wsText = wsCount > 0
           ? `<span class="text-zinc-400">${wsCount} workspace${wsCount !== 1 ? 's' : ''}</span>`
           : `<span class="text-red-400" title="ufx2_snapshot_map.json not loaded">⚠ no snapshot map</span>`;
+        const submixLabel = s.channel_map_submixes > 0 ? s.channel_map_submixes : 0;
+        const submixEx = s.channel_map_is_example
+          ? `<span class="text-amber-400/80" title="Using ufx2_channel_map.example.json — routing labels may not match your setup">${submixLabel} submix${submixLabel !== 1 ? 'es' : ''} (example)</span>`
+          : `<span class="text-zinc-400">${submixLabel} submix${submixLabel !== 1 ? 'es' : ''}</span>`;
         info.innerHTML =
           `<span class="text-zinc-400">${s.macros} macro${s.macros !== 1 ? 's' : ''}</span>` +
-          ` · <span class="text-zinc-400">${s.channel_map_submixes} submix${s.channel_map_submixes !== 1 ? 'es' : ''}</span>` +
+          ` · ${submixEx}` +
           ` · ${wsText}`;
       }
     } catch (_) {}

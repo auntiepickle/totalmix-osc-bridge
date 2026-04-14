@@ -3,11 +3,10 @@ import time
 import logging
 import logging.handlers
 import json
-import mido
 import threading
 import paho.mqtt.client as mqtt
 import re
-import asyncio  # ← NEW: required for async-safe WebSocket broadcast
+import asyncio
 from pythonosc import udp_client
 from config import *
 from mqtt_handler import setup_mqtt
@@ -99,6 +98,7 @@ class TotalMixOSCBridge:
         self.mqtt_client = None
         self.macro_live_state = {}
         self.channel_map = None
+        self.channel_map_is_example = False
         self._running_macros = set()        # names of macros currently executing
         self._cancel_events = {}            # macro_name → threading.Event (for restart mode)
         self._queued_params = {}            # macro_name → float (for queue/restart modes)
@@ -141,18 +141,23 @@ class TotalMixOSCBridge:
 
    
     def _load_channel_map(self):
-        """Load ufx2_channel_map.json, falling back to the example file if missing."""
+        """Load ufx2_channel_map.json, falling back to the example file if missing.
+
+        Sets self.channel_map_is_example = True when the fallback is used so the
+        web UI can surface a setup prompt to the user.
+        """
         for path in ("ufx2_channel_map.json", "ufx2_channel_map.example.json"):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     self.channel_map = json.load(f)
-                if path.endswith(".example.json"):
+                self.channel_map_is_example = path.endswith(".example.json")
+                if self.channel_map_is_example:
                     logger.warning(
-                        f"ufx2_channel_map.json not found — loaded fallback {path}. "
-                        "Create ufx2_channel_map.json to override."
+                        "ufx2_channel_map.json not found — loaded example fallback. "
+                        "Routing labels on macro cards may not match your setup."
                     )
                 else:
-                    logger.info("✅ Loaded ufx2_channel_map.json for card routing labels")
+                    logger.info("✅ Loaded ufx2_channel_map.json")
                 return
             except FileNotFoundError:
                 continue
@@ -160,6 +165,7 @@ class TotalMixOSCBridge:
                 logger.warning(f"Could not load {path}: {e}")
                 break
         self.channel_map = {}
+        self.channel_map_is_example = False
 
     def _get_macro_duration_ms(self, macro: dict) -> int:
         """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events)."""
@@ -326,7 +332,7 @@ class TotalMixOSCBridge:
                     time.sleep(1.0)
 
                 if snap_name and snap_num is not None:
-                    osc_addr = f"/3/snapshots/{9 - int(snap_num)}/1"
+                    osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
                     self.osc_client.send_message(osc_addr, 1.0)
                     logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
                     self.current_snapshot = snap_name

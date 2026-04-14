@@ -6,40 +6,16 @@ MQTT_BROKER = os.getenv('MQTT_BROKER', 'mosquitto')
 MQTT_PORT = int(os.getenv('MQTT_PORT', 1883))
 MQTT_USER = os.getenv('MQTT_USER')
 MQTT_PASS = os.getenv('MQTT_PASS')
-# NOTE: WORKSPACE_NAMES is now DEPRECATED — workspaces are fully dynamic from ufx2_snapshot_map.json
-# Your real workspace names (edit here)
-# WORKSPACE_NAMES = [
-#     "Blank",           # 1
-#     "Music",           # 2
-#     "Work",            # 3
-#     "techno",          # 4
-#     "techno_7",        # 5
-#     "<Empty>",         # 6
-#     "Pill_setup",      # 7
-#     "<Empty>",         # 8
-#     "<Empty>",         # 9
-#     "<Empty>",         # 10
-#     "<Empty>",         # 11
-#     "<Empty>",         # 12
-#     "<Empty>",         # 13
-#     "<Empty>",         # 14
-#     "<Empty>",         # 15
-#     "<Empty>",         # 16
-#     "<Empty>",         # 17
-#     "<Empty>",         # 18
-#     "<Empty>",         # 19
-#     "<Empty>",         # 20
-#     "<Empty>",         # 21
-#     "<Empty>",         # 22
-#     "<Empty>",         # 23
-#     "<Empty>",         # 24
-#     "<Empty>",         # 25
-#     "<Empty>",         # 26
-#     "<Empty>",         # 27
-#     "<Empty>",         # 28
-#     "<Empty>",         # 29
-#     "<Empty>"          # 30
-# ]
+
+def snapshot_num_to_osc_index(snap_num: int) -> int:
+    """Convert a 1–8 snapshot slot number to the TotalMix OSC button index.
+
+    TotalMix orders snapshot buttons bottom-to-top in its OSC namespace, so
+    slot 1 is index 8 and slot 8 is index 1. The OSC address to recall a
+    snapshot is:  /3/snapshots/{index}/1  with value 1.0
+    """
+    return 9 - int(snap_num)
+
 # === OSC MONITOR SETTINGS (for learning addresses) ===
 ENABLE_OSC_MONITOR = os.getenv('ENABLE_OSC_MONITOR', 'False').lower() == 'true'
 OSC_MONITOR_PORT = int(os.getenv('OSC_MONITOR_PORT', '9001'))
