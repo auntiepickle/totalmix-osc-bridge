@@ -1,24 +1,24 @@
-/* app.js - main entry point (WS, globals, init) */
+/* app.js — global state, WebSocket, macro loading, status updates */
 
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
-
+// ── Global state (shared by ui.js and midi.js) ───────────────────────────────
 let macros = {};
 let currentWorkspace = '—';
 let currentSnapshot = '—';
-let midiConnectedDevice = '—';
+let midiConnectedDevice = '';
 
-ws.onopen = async () => {
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+
+ws.onopen = () => {
   console.log('[WS] Connected to bridge');
-  await loadMacros();
-  ensureMIDIControls();
+  loadMacros();
 };
 
 ws.onclose = () => console.log('[WS] Disconnected');
 
 ws.onmessage = function (event) {
   const data = JSON.parse(event.data);
-  console.log('[WS] Received:', data);
   if (data.current_workspace) currentWorkspace = data.current_workspace;
   if (data.current_snapshot) currentSnapshot = data.current_snapshot;
   if (data.macro_update) {
@@ -29,40 +29,68 @@ ws.onmessage = function (event) {
   updateStatusHeader();
 };
 
-function ensureMIDIControls() {
-  if (document.getElementById('midi-device-selector')) return;
-  const header = document.querySelector('header') || document.querySelector('.flex');
-  if (!header) return;
-  const midiDiv = document.createElement('div');
-  midiDiv.className = 'flex items-center gap-3 ml-auto';
-  midiDiv.innerHTML = `
-    <select id="midi-device-selector" class="bg-[#1E1E1E] text-white px-4 py-2 rounded-2xl border border-zinc-700 focus:outline-none text-sm"></select>
-    <button onclick="connectSelectedMIDI()" class="px-5 py-2 bg-green-600 hover:bg-green-500 rounded-2xl text-sm font-medium transition-colors">Connect MIDI</button>
-  `;
-  header.appendChild(midiDiv);
+// ── Macro loading ─────────────────────────────────────────────────────────────
+async function loadMacros() {
+  try {
+    const res = await fetch('/api/macros');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    macros = await res.json();
+    console.log(`[UI] Loaded ${Object.keys(macros).length} macros`);
+    renderCards();
+    updateStatusHeader();
+  } catch (err) {
+    console.error('[UI] loadMacros failed:', err);
+  }
 }
 
+// ── Status header (workspace + snapshot + MIDI badge) ────────────────────────
 function updateStatusHeader() {
   const workspaceEl = document.getElementById('workspace');
   const snapshotEl = document.getElementById('snapshot');
   if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
   if (snapshotEl) snapshotEl.textContent = `Snapshot: ${currentSnapshot || '—'}`;
-}
 
-async function loadMacros() {
-  console.log("🚀 loadMacros() called — fetching /api/macros");
-  try {
-    const res = await fetch('/api/macros');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    macros = await res.json();
-    console.log("✅ Loaded", Object.keys(macros).length, "macros");
-    renderCards();
-    updateStatusHeader();
-  } catch (err) {
-    console.error("❌ loadMacros failed:", err);
+  const midiStatusEl = document.getElementById('midi-status');
+  if (!midiStatusEl) return;
+  if (midiConnectedDevice) {
+    midiStatusEl.textContent = `MIDI Connected: ${midiConnectedDevice}`;
+    midiStatusEl.classList.remove('bg-zinc-800', 'text-zinc-400');
+    midiStatusEl.classList.add('bg-green-600', 'text-white');
+  } else {
+    midiStatusEl.textContent = 'MIDI Disconnected';
+    midiStatusEl.classList.remove('bg-green-600', 'text-white');
+    midiStatusEl.classList.add('bg-zinc-800', 'text-zinc-400');
   }
 }
 
-window.onload = () => {
+// ── Live card update from WebSocket macro_update payload ─────────────────────
+function updateMacroCard(name) {
+  const m = macros[name];
+  if (!m) return;
+
+  // Update routing label if it changed
+  const routingEl = document.querySelector(`#card-${name} .routing-label`);
+  if (routingEl && m.routing_label) routingEl.textContent = m.routing_label;
+
+  // Update MIDI badge with last trigger info
+  const badge = document.getElementById(`last-trigger-${name}`);
+  if (badge && m.last_trigger) {
+    const ts = new Date(m.last_trigger * 1000).toLocaleTimeString();
+    badge.innerHTML = `<span class="font-semibold">fired</span><br>${ts}`;
+    badge.classList.add('bg-green-500/20', 'text-green-400');
+  }
+
+  // Animate progress bar for live value
+  if (m.progress !== undefined) {
+    const bar = document.getElementById(`progress-bar-${name}`);
+    if (bar) {
+      bar.style.transition = 'width 300ms ease';
+      bar.style.width = `${m.progress}%`;
+    }
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
   initWebMIDI();
-};
+});

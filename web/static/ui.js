@@ -1,6 +1,5 @@
-/* ui.js - M2_branch FULL STABLE (April 2026) — fixes all regressions */
-
-let macros = {};
+/* ui.js — card rendering, animation, fire/ramp, file upload, server reload */
+/* Globals (macros, midiConnectedDevice, etc.) live in app.js — loaded first  */
 
 function calculateDurationMs(macro, isRamp) {
   if (macro.durationMs) return macro.durationMs;
@@ -20,7 +19,7 @@ function createMacroCardHTML(name, m) {
         <div class="flex-1">
             <h3 class="text-2xl font-bold text-white">${name}</h3>
             <p class="text-zinc-400 text-sm mt-1">${m.description || ''}</p>
-            <p class="text-orange-400 text-xs font-medium mt-3 tracking-widest">${m.routing_label || '—'}</p>
+            <p class="routing-label text-orange-400 text-xs font-medium mt-3 tracking-widest">${m.routing_label || '—'}</p>
         </div>
         <div id="last-trigger-${name}" class="midi-badge text-xs font-mono bg-green-500/10 text-green-400 px-4 py-1.5 rounded-2xl flex items-center gap-1"></div>
     </div>
@@ -47,10 +46,15 @@ function renderCards() {
 function animateProgress(name, durationMs) {
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
-  bar.style.transition = 'none'; bar.style.width = '0%'; bar.offsetHeight;
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  bar.offsetHeight; // force reflow
   bar.style.transition = `width ${durationMs}ms cubic-bezier(0.4,0,0.2,1)`;
   bar.style.width = '100%';
-  setTimeout(() => { bar.style.transition = 'width 300ms cubic-bezier(0.4,0,0.2,1)'; bar.style.width = '0%'; }, durationMs);
+  setTimeout(() => {
+    bar.style.transition = 'width 300ms cubic-bezier(0.4,0,0.2,1)';
+    bar.style.width = '0%';
+  }, durationMs);
 }
 
 async function fireMacro(name, value = 1.0, ramp = false) {
@@ -58,8 +62,14 @@ async function fireMacro(name, value = 1.0, ramp = false) {
   if (!macro) return;
   animateProgress(name, calculateDurationMs(macro, ramp));
   try {
-    await fetch(`/api/trigger/${name}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({param: value}) });
-  } catch(e) { console.error(e); }
+    await fetch(`/api/trigger/${name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ param: value }),
+    });
+  } catch (e) {
+    console.error('[UI] fireMacro error:', e);
+  }
 }
 
 function toggleDetail(name) {
@@ -71,10 +81,10 @@ function toggleDetail(name) {
     let html = `<div class="space-y-4">`;
     html += `<div><strong class="text-orange-400">Routing:</strong> ${m.routing_label || '—'}</div>`;
     html += `<div><strong class="text-orange-400">OSC Preview:</strong> <code class="text-amber-300">${m.osc_preview || '—'}</code></div>`;
-    html += `<div><strong class="text-orange-400">Duration:</strong> ${(calculateDurationMs(m,false)/1000).toFixed(1)}s</div>`;
+    html += `<div><strong class="text-orange-400">Duration:</strong> ${(calculateDurationMs(m, false) / 1000).toFixed(1)}s</div>`;
     if (m.midi_triggers && m.midi_triggers.length) {
       html += `<div><strong class="text-orange-400">MIDI Triggers:</strong><ul class="list-disc ml-4">`;
-      m.midi_triggers.forEach(t => html += `<li>CC${t.number} ch${t.channel}</li>`);
+      m.midi_triggers.forEach(t => { html += `<li>CC${t.number} ch${t.channel}</li>`; });
       html += `</ul></div>`;
     }
     html += `<details class="mt-4"><summary class="cursor-pointer text-orange-400">Full macro JSON</summary><pre class="text-[10px] overflow-auto max-h-64 mt-2">${JSON.stringify(m, null, 2)}</pre></details>`;
@@ -83,7 +93,6 @@ function toggleDetail(name) {
   }
 }
 
-/* FIX: reloadServer and uploadFile (the functions you were missing) */
 async function reloadServer() {
   if (confirm('Reload bridge server?')) {
     await fetch('/api/reload', { method: 'POST' });
@@ -98,40 +107,5 @@ function uploadFile(input, type) {
   formData.append('file', file);
   fetch(`/api/upload/${type}`, { method: 'POST', body: formData })
     .then(() => location.reload())
-    .catch(e => console.error(e));
+    .catch(e => console.error('[UI] uploadFile error:', e));
 }
-
-/* Auto-load + MIDI init + nav bar status */
-window.addEventListener('load', () => {
-  loadMacros();
-  initWebMIDI();
-  console.log('🚀 UI fully restored — MIDI nav bar + snapshot caching active');
-});
-
-async function loadMacros() {
-  try {
-    const res = await fetch('/api/macros');
-    macros = await res.json();
-    renderCards();
-  } catch(e) { console.error(e); }
-}
-
-/* ── MISSING FUNCTIONS ADDED (minimal fix for commit 0b44617) ── */
-function updateStatusHeader() {
-  const statusEl = document.getElementById('midi-status');
-  if (!statusEl) return;
-  if (typeof midiConnectedDevice !== 'undefined' && midiConnectedDevice) {
-    statusEl.innerHTML = `MIDI Connected: ${midiConnectedDevice}`;
-    statusEl.classList.remove('bg-zinc-800', 'text-zinc-400');
-    statusEl.classList.add('bg-green-600', 'text-white');
-  } else {
-    statusEl.innerHTML = 'MIDI Disconnected';
-    statusEl.classList.remove('bg-green-600', 'text-white');
-    statusEl.classList.add('bg-zinc-800', 'text-zinc-400');
-  }
-}
-
-function updateMIDIBadge(deviceName) {
-  updateStatusHeader();   // reuse the single status element
-}
-
