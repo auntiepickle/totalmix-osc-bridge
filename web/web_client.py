@@ -280,6 +280,27 @@ async def upload_channel_map(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/config/channel_map/init-from-example")
+async def init_channel_map_from_example():
+    """Copy ufx2_channel_map.example.json → ufx2_channel_map.json and reload."""
+    base = os.path.dirname(__file__)
+    example = os.path.join(base, "../ufx2_channel_map.example.json")
+    target  = os.path.join(base, "../ufx2_channel_map.json")
+    try:
+        if not os.path.exists(example):
+            raise HTTPException(status_code=404, detail="ufx2_channel_map.example.json not found")
+        shutil.copy2(example, target)
+        bridge._load_channel_map()
+        submixes = len((bridge.channel_map or {}).get("submixes", {}))
+        logger.info(f"✅ ufx2_channel_map.json initialized from example ({submixes} submixes)")
+        return {"status": "success", "submixes": submixes}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Init channel_map from example failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/config/mappings/init-from-example")
 async def init_mappings_from_example():
     """Copy mappings.example.json → mappings.json and reload into the bridge.

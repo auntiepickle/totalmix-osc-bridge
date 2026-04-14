@@ -141,14 +141,25 @@ class TotalMixOSCBridge:
 
    
     def _load_channel_map(self):
-        """Load ufx2_channel_map.json once for human-readable routing labels"""
-        try:
-            with open("ufx2_channel_map.json", "r", encoding="utf-8") as f:
-                self.channel_map = json.load(f)
-            logger.info("✅ Loaded ufx2_channel_map.json for card routing labels")
-        except Exception as e:
-            logger.warning(f"Could not load ufx2_channel_map.json: {e}")
-            self.channel_map = {}
+        """Load ufx2_channel_map.json, falling back to the example file if missing."""
+        for path in ("ufx2_channel_map.json", "ufx2_channel_map.example.json"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    self.channel_map = json.load(f)
+                if path.endswith(".example.json"):
+                    logger.warning(
+                        f"ufx2_channel_map.json not found — loaded fallback {path}. "
+                        "Create ufx2_channel_map.json to override."
+                    )
+                else:
+                    logger.info("✅ Loaded ufx2_channel_map.json for card routing labels")
+                return
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                logger.warning(f"Could not load {path}: {e}")
+                break
+        self.channel_map = {}
 
     def _get_macro_duration_ms(self, macro: dict) -> int:
         """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events)."""
