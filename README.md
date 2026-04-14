@@ -69,7 +69,7 @@ If `mappings.json` is missing the UI shows a setup banner — click **Use as my 
 | `ufx2_snapshot_map.json` | Workspace names → TotalMix Quick Select slots + snapshot names |
 | `ufx2_channel_map.json` | OSC address → human name map used to generate routing labels on cards |
 
-All three have `*.example.json` counterparts in the repo. The real files are git-ignored so live edits survive `git pull`. See [docs/MAPPINGS_REFERENCE.md](docs/MAPPINGS_REFERENCE.md) for the full schema.
+All three have `*.example.json` counterparts in the repo. The real files are git-ignored so live edits survive `git pull`. Full schema: [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
 
 ---
 
@@ -77,7 +77,6 @@ All three have `*.example.json` counterparts in the repo. The real files are git
 
 | Doc | What's in it |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Every component, the state machine, thread safety, OSC address reference |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker setup, environment variables, SMB snapshot map, HTTPS, Home Assistant |
-| [docs/MAPPINGS_REFERENCE.md](docs/MAPPINGS_REFERENCE.md) | Complete JSON schema for all three config files |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local dev setup, adding macros, adding operations, known issues |
+| [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) | Signal flow, every component, state machine, TotalMix OSC gotchas, thread safety, frontend patterns |
+| [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) | Full schema for all three config files |
+| [docs/SETUP.md](docs/SETUP.md) | Docker deployment, local dev, env vars, HTTPS, Home Assistant |
