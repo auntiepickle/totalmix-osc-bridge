@@ -31,23 +31,52 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load snapshot map
-try:
-    with open("ufx2_snapshot_map.json", "r", encoding="utf-8") as f:
-        SNAPSHOT_MAP = json.load(f)
-    logger.info(f"Loaded ufx2_snapshot_map.json — workspaces: {list(SNAPSHOT_MAP.keys())}")
-except Exception as e:
-    logger.error(f"Failed to load ufx2_snapshot_map.json: {e}")
-    SNAPSHOT_MAP = {}
+# Load snapshot map — prefer the SMB-mounted path (same source as mqtt_handler.py),
+# fall back to local file for dev environments without the mount.
+_SNAPSHOT_MAP_PATHS = [
+    "/app/config/ufx2_snapshot_map.json",  # Docker: SMB mount (authoritative)
+    "ufx2_snapshot_map.json",              # Local dev fallback
+]
+SNAPSHOT_MAP = {}
+for _p in _SNAPSHOT_MAP_PATHS:
+    try:
+        with open(_p, "r", encoding="utf-8-sig") as f:
+            SNAPSHOT_MAP = json.load(f)
+        logger.info(f"Loaded snapshot map from {_p} — workspaces: {list(SNAPSHOT_MAP.keys())}")
+        break
+    except FileNotFoundError:
+        continue
+    except Exception as e:
+        logger.error(f"Failed to load snapshot map from {_p}: {e}")
+        break
+if not SNAPSHOT_MAP:
+    logger.warning("No snapshot map loaded — WS/SS switching will be disabled until map is available")
 
-# Load mappings
-try:
-    with open("mappings.json", "r", encoding="utf-8") as f:
-        MAPPINGS = json.load(f)
-    logger.info("Loaded mappings.json — macros fully data-driven")
-except Exception as e:
-    logger.error(f"Failed to load mappings.json: {e}")
-    MAPPINGS = {"macros": {}}
+# Load mappings — prefer mappings.json (user config), fall back to example
+_MAPPINGS_PATHS = ["mappings.json", "mappings.example.json"]
+MAPPINGS = {"macros": {}}
+MAPPINGS_SOURCE = None
+MAPPINGS_IS_EXAMPLE = False
+
+for _mp in _MAPPINGS_PATHS:
+    try:
+        with open(_mp, "r", encoding="utf-8") as f:
+            MAPPINGS = json.load(f)
+        MAPPINGS_SOURCE = _mp
+        MAPPINGS_IS_EXAMPLE = _mp != "mappings.json"
+        if MAPPINGS_IS_EXAMPLE:
+            logger.warning(
+                f"mappings.json not found — loaded fallback {_mp}. "
+                "Create mappings.json to override."
+            )
+        else:
+            logger.info(f"Loaded mappings.json — {len(MAPPINGS.get('macros', {}))} macros")
+        break
+    except FileNotFoundError:
+        continue
+    except Exception as e:
+        logger.error(f"Failed to load {_mp}: {e}")
+        break
 
 # OSC client
 osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) if OSC_IP and OSC_PORT else None
@@ -58,16 +87,21 @@ ws_clients = []  # list of active FastAPI WebSocket connections
 
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
-        self._suppress_handler = False   
+        self._suppress_handler = False
         self._last_macro_end_time = 0.0
         self.osc_client = osc_client
         self.mappings = mappings
+        self.mappings_is_example = MAPPINGS_IS_EXAMPLE
+        self.mappings_source = MAPPINGS_SOURCE
         self.snapshot_map = snapshot_map
         self.current_workspace = None
         self.current_snapshot = None
         self.mqtt_client = None
-        self.macro_live_state = {}          # live macro state for polished cards
-        self.channel_map = None             # loaded once for routing labels
+        self.macro_live_state = {}
+        self.channel_map = None
+        self._running_macros = set()        # names of macros currently executing
+        self._cancel_events = {}            # macro_name → threading.Event (for restart mode)
+        self._queued_params = {}            # macro_name → float (for queue/restart modes)
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -76,32 +110,29 @@ class TotalMixOSCBridge:
     # ─────────────────────────────────────────────────────────────
     # SAFE WEBSOCKET BROADCAST (FINAL VERSION — MQTT thread safe)
     # ─────────────────────────────────────────────────────────────
-    def _safe_broadcast_state(self, macro_update=None):
+    def _safe_broadcast_state(self, macro_update=None, macro_event=None):
         """Thread-safe broadcast that works from ANY thread (MQTT callbacks OR FastAPI)."""
         try:
-            # FastAPI thread — already in async context
             asyncio.get_running_loop()
-            asyncio.create_task(self._do_broadcast(macro_update))
+            asyncio.create_task(self._do_broadcast(macro_update, macro_event))
         except RuntimeError:
-            # MQTT thread — no event loop in this thread
             try:
-                # Try to use main loop if web_client.py already registered it
                 if hasattr(self, 'main_loop') and self.main_loop is not None:
-                    asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update), self.main_loop)
+                    asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update, macro_event), self.main_loop)
                 else:
-                    # Ultimate fallback — don't crash the MQTT handler
                     logger.debug("Broadcast skipped (no main_loop yet)")
             except Exception as e:
                 logger.debug(f"Broadcast failed safely: {e}")
 
-    async def _do_broadcast(self, macro_update=None):
+    async def _do_broadcast(self, macro_update=None, macro_event=None):
         """Actual broadcast logic (always runs inside asyncio)."""
         for client in list(ws_clients):
             try:
                 state = {
                     "current_snapshot": getattr(self, "current_snapshot", "unknown"),
                     "current_workspace": getattr(self, "current_workspace", "unknown"),
-                    "macro_update": macro_update
+                    "macro_update": macro_update,
+                    "macro_event": macro_event,
                 }
                 await client.send_json(state)
             except Exception:
@@ -110,14 +141,35 @@ class TotalMixOSCBridge:
 
    
     def _load_channel_map(self):
-        """Load ufx2_channel_map.json once for human-readable routing labels"""
-        try:
-            with open("ufx2_channel_map.json", "r", encoding="utf-8") as f:
-                self.channel_map = json.load(f)
-            logger.info("✅ Loaded ufx2_channel_map.json for card routing labels")
-        except Exception as e:
-            logger.warning(f"Could not load ufx2_channel_map.json: {e}")
-            self.channel_map = {}
+        """Load ufx2_channel_map.json, falling back to the example file if missing."""
+        for path in ("ufx2_channel_map.json", "ufx2_channel_map.example.json"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    self.channel_map = json.load(f)
+                if path.endswith(".example.json"):
+                    logger.warning(
+                        f"ufx2_channel_map.json not found — loaded fallback {path}. "
+                        "Create ufx2_channel_map.json to override."
+                    )
+                else:
+                    logger.info("✅ Loaded ufx2_channel_map.json for card routing labels")
+                return
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                logger.warning(f"Could not load {path}: {e}")
+                break
+        self.channel_map = {}
+
+    def _get_macro_duration_ms(self, macro: dict) -> int:
+        """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events)."""
+        for step in macro.get("steps", []):
+            if "operation" in step:
+                op = step["operation"]
+                bars = op.get("bars", 2)
+                bpm = op.get("bpm", 140)
+                return int(bars * (240000 / bpm))
+        return 400  # instant macro — brief visual feedback
 
     def get_routing_label(self, macro_name: str) -> str:
         """Return human-readable routing line for UI cards"""
@@ -144,14 +196,14 @@ class TotalMixOSCBridge:
 
     def update_snapshot(self, name: str = None, index: int = None, workspace: str = None):
         if name:
-            self.current_snapshot = name
+            self.current_snapshot = str(name).strip().lower()  # normalize: match run_macro
         elif index is not None and (workspace or self.current_workspace):
             ws = workspace or self.current_workspace
             if ws and ws in self.snapshot_map:
                 snapshots = self.snapshot_map[ws].get("snapshots", {})
                 for snap_key, snap_value in snapshots.items():
                     if str(snap_key) == str(index) or snap_value == name:
-                        self.current_snapshot = snap_value
+                        self.current_snapshot = str(snap_value).strip().lower()
                         break
         logger.info(f"BRIDGE STATE → snapshot = {self.current_snapshot or 'None'}")
         self.broadcast_state()  # ← live web update
@@ -174,22 +226,49 @@ class TotalMixOSCBridge:
             ws_name = ws_name.get("name") or list(ws_name.values())[0] if ws_name else None
 
         if snap_name:
-            snap_name = re.sub(r'^\d+\s*-\s*', '', str(snap_name)).strip().title()
+            # Normalize to lowercase-stripped so comparisons are case-insensitive.
+            # Previously used .title() which caused mismatches when mqtt_handler
+            # stored snapshot names in lowercase from the snapshot map.
+            snap_name = re.sub(r'^\d+\s*-\s*', '', str(snap_name)).strip().lower()
 
         force_switch = macro.get("force_switch", False)
 
-        logger.info(f"DEBUG — running macro from GitHub commit 'fixing state sync' — state now: ws={self.current_workspace} snap={self.current_snapshot}")
         logger.info(f"Running macro '{macro_name}' → {ws_name}/{snap_name} param={value:.4f} (force_switch={force_switch})")
 
-        # === DEBOUNCE ===
-        current_time = time.time()
-        if hasattr(self, '_last_macro_time') and current_time - self._last_macro_time < 1.5 and getattr(self, '_last_macro_name', None) == macro_name:
-            logger.info(f"   → Debounced duplicate macro trigger (ignored)")
-            return
-        self._last_macro_time = current_time
-        self._last_macro_name = macro_name
+        # === FIRE MODE GUARD ===
+        # fire_mode in mappings.json controls behaviour when macro is already running:
+        #   "ignore"  (default) — drop the new trigger
+        #   "queue"             — run once more after current completes
+        #   "restart"           — cancel current immediately, re-run with new param
+        fire_mode = macro.get("fire_mode", "ignore")
+        if macro_name in self._running_macros:
+            if fire_mode == "ignore":
+                logger.info(f"   → '{macro_name}' running, mode=ignore — dropped")
+                return
+            elif fire_mode == "queue":
+                self._queued_params[macro_name] = param
+                logger.info(f"   → '{macro_name}' running, mode=queue — queued (param={param:.3f})")
+                return
+            elif fire_mode == "restart":
+                self._queued_params[macro_name] = param
+                ev = self._cancel_events.get(macro_name)
+                if ev:
+                    ev.set()
+                logger.info(f"   → '{macro_name}' running, mode=restart — cancelling and re-queuing")
+                return
+
+        # Optional post-completion cooldown (ms). Set "debounce_ms" in macro config.
+        debounce_ms = macro.get("debounce_ms", 0)
+        if debounce_ms > 0:
+            elapsed = (time.time() - self.macro_live_state.get(macro_name, {}).get("last_trigger", 0)) * 1000
+            if elapsed < debounce_ms:
+                logger.info(f"   → '{macro_name}' in debounce window ({elapsed:.0f}/{debounce_ms}ms) — ignored")
+                return
 
         self._suppress_handler = True
+        cancel_event = threading.Event()
+        self._cancel_events[macro_name] = cancel_event
+        self._running_macros.add(macro_name)
 
         try:
             # === ALWAYS RESOLVE SLOTS/INDICES ===
@@ -208,7 +287,7 @@ class TotalMixOSCBridge:
                     else:
                         candidate_name = snap_data
                         candidate_index = snap_key
-                    if str(candidate_name).title() == str(snap_name).title():
+                    if str(candidate_name).strip().lower() == snap_name:
                         snap_num = candidate_index or snap_key
                         break
 
@@ -218,6 +297,21 @@ class TotalMixOSCBridge:
                 self.current_snapshot == snap_name and
                 ws_name is not None and snap_name is not None
             )
+
+            # Block WS/SS switch if another macro is mid-execution and force_switch is off.
+            # Avoids tearing the mixer state while a ramp is running.
+            other_running = len(self._running_macros) > 1  # this macro already in set
+            if not already_on_target and not force_switch and other_running:
+                logger.info(
+                    f"   → '{macro_name}' skipped: WS/SS switch needed but "
+                    f"{len(self._running_macros)-1} other macro(s) running (force_switch=False)"
+                )
+                self.broadcast_state(macro_event={
+                    "type": "macro_skipped",
+                    "name": macro_name,
+                    "reason": "ws_ss_blocked",
+                })
+                return
 
             if force_switch or not already_on_target:
                 logger.info(f"   → Need to switch (force={force_switch} or state mismatch)")
@@ -243,6 +337,14 @@ class TotalMixOSCBridge:
             else:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
+            # === EMIT macro_start SO BROWSER CAN SYNC PROGRESS BAR ===
+            duration_ms = self._get_macro_duration_ms(macro)
+            self.broadcast_state(macro_event={
+                "type": "macro_start",
+                "name": macro_name,
+                "duration_ms": duration_ms,
+            })
+
             # === MACRO STEPS WITH OPERATION LIBRARY ===
             for step in macro.get("steps", []):
                 osc_addr = step["osc"]
@@ -254,7 +356,8 @@ class TotalMixOSCBridge:
                         self.osc_client,
                         osc_addr,
                         value,
-                        op_config
+                        op_config,
+                        cancel_event=cancel_event,
                     )
                     continue
 
@@ -275,9 +378,8 @@ class TotalMixOSCBridge:
                     self.mqtt_client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
 
             logger.info(f"Macro '{macro_name}' complete")
-            self.broadcast_state()  # ← live web update after macro runs
-            
-            # === RICH MACRO UPDATE FOR CARDS (still only once per trigger) ===
+
+            # === RICH MACRO UPDATE + macro_complete EVENT ===
             macro_data = self.mappings["macros"][macro_name]
             live_data = {
                 "name": macro_name,
@@ -288,14 +390,24 @@ class TotalMixOSCBridge:
                 "last_trigger": time.time(),
                 "osc_preview": f"{macro_data.get('steps', [{}])[0].get('osc', '')} = {value:.3f}",
                 "routing_label": self.get_routing_label(macro_name),
-                "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None
+                "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None,
             }
             self.macro_live_state[macro_name] = live_data
-            self.broadcast_state(macro_update=live_data)   # one clean broadcast
+            self.broadcast_state(
+                macro_update=live_data,
+                macro_event={"type": "macro_complete", "name": macro_name},
+            )
 
         finally:
             self._suppress_handler = False
             self._last_macro_end_time = time.time()
+            self._cancel_events.pop(macro_name, None)
+            self._running_macros.discard(macro_name)
+            # Fire any queued trigger (queue mode or restart mode)
+            queued = self._queued_params.pop(macro_name, None)
+            if queued is not None:
+                logger.info(f"   → '{macro_name}' firing queued trigger (param={queued:.3f})")
+                threading.Thread(target=self.run_macro, args=(macro_name, queued), daemon=True).start()
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)

@@ -1,18 +1,75 @@
-/* midi.js — Web MIDI init, CC routing, device selector */
+/* midi.js — Web MIDI init, CC routing, device selector, MIDI activity display */
 /* Globals (macros, midiConnectedDevice) and updateStatusHeader() live in app.js */
 
 let midiAccess = null;
-let midiInput = null;
+let midiInput  = null;
 let lastMidiDevice = localStorage.getItem('lastMidiDevice') || '';
 
+// ── Last-CC tracking ──────────────────────────────────────────────────────────
+let _lastCCInfo = null;   // { cc, channel, value }
+let _lastCCTime = null;   // epoch ms
+
+// ── MIDI clock BPM detection ──────────────────────────────────────────────────
+// Cirklon (and most DAWs) sends 0xF8 timing clock at 24 pulses per quarter note
+let _clockTicks = [];     // timestamps of recent clock ticks
+
+function _processMIDIClock() {
+  const now = Date.now();
+  _clockTicks.push(now);
+  if (_clockTicks.length > 25) _clockTicks.shift();
+  if (_clockTicks.length < 4) return;
+
+  // Average interval between adjacent ticks → BPM
+  let sum = 0;
+  for (let i = 1; i < _clockTicks.length; i++) sum += _clockTicks[i] - _clockTicks[i - 1];
+  const avgMs = sum / (_clockTicks.length - 1);
+  const bpm   = Math.round(60000 / (24 * avgMs));
+  if (bpm < 20 || bpm > 400) return;
+
+  const el = document.getElementById('midi-bpm');
+  if (el) el.textContent = `${bpm} BPM`;
+}
+
+// Live age display: updates every 100ms so you can see recency at a glance
+setInterval(() => {
+  const ageEl = document.getElementById('midi-cc-age');
+  if (!ageEl || !_lastCCTime) return;
+  const ms = Date.now() - _lastCCTime;
+  ageEl.textContent = ms < 60000 ? `${(ms / 1000).toFixed(1)}s ago` : '>1m ago';
+}, 100);
+
+function _trackCC(cc, channel, value) {
+  _lastCCTime = Date.now();
+  _lastCCInfo = { cc, channel, value };
+  const lastEl  = document.getElementById('midi-cc-last');
+  const statsEl = document.getElementById('midi-cc-stats');
+  if (lastEl)  lastEl.textContent = `CC${cc} ch${channel}`;
+  if (statsEl) statsEl.classList.remove('hidden');
+}
+
+// ── Signal activity flash — MIDI status dot pulses white on any CC ────────────
+function flashMIDIActivity() {
+  const dot = document.getElementById('midi-status-dot');
+  if (!dot) return;
+  dot.classList.add('!bg-white', '!shadow-[0_0_8px_#fff]');
+  setTimeout(() => dot.classList.remove('!bg-white', '!shadow-[0_0_8px_#fff]'), 100);
+}
+
+// ── MIDI message handler ──────────────────────────────────────────────────────
 function handleMIDIMessage(message) {
   const [status, data1, data2] = message.data;
-  // Only handle Control Change (0xB0); silently ignore clock, active sensing, etc.
-  if ((status & 0xF0) !== 0xB0) return;
+
+  // MIDI Clock (0xF8) — detect BPM from Cirklon/DAW timing clock
+  if (status === 0xF8) { _processMIDIClock(); return; }
+
+  if ((status & 0xF0) !== 0xB0) return;   // CC only
 
   const channel = (status & 0x0F) + 1;
-  const cc = data1;
-  const value = data2 / 127.0;
+  const cc      = data1;
+  const value   = data2 / 127.0;
+
+  flashMIDIActivity();
+  _trackCC(cc, channel, data2);
 
   Object.keys(macros).forEach(name => {
     const macro = macros[name];
@@ -20,61 +77,74 @@ function handleMIDIMessage(message) {
       if (trigger.type === 'control_change' && trigger.number === cc && trigger.channel === channel) {
         console.log(`[MIDI] Triggered ${name} (CC${cc} ch${channel} val=${data2})`);
         fireMacro(name, value, false);
-        updateCardLastTrigger(name, cc, data2, message.target ? message.target.name : midiConnectedDevice, channel);
+        pulseLED(name, Date.now() / 1000);
         return;
       }
     }
   });
 }
 
-function updateCardLastTrigger(name, cc, value, deviceName, channel) {
-  const badge = document.getElementById(`last-trigger-${name}`);
-  if (!badge) return;
-  badge.innerHTML = `<span class="font-semibold">${deviceName}</span><br>CC${cc} • ch${channel}`;
-  badge.classList.add('bg-green-500/20', 'text-green-400');
-}
-
+// ── MIDI init / connect / disconnect / rescan ─────────────────────────────────
 async function initWebMIDI() {
   if (!navigator.requestMIDIAccess || midiInput) return;
   try {
     midiAccess = await navigator.requestMIDIAccess({ sysex: false });
-    const inputs = Array.from(midiAccess.inputs.values());
-    const selector = document.getElementById('midi-device-selector');
-    if (selector) {
-      selector.innerHTML = '<option value="">— select MIDI input —</option>';
-      inputs.forEach(i => {
-        const opt = document.createElement('option');
-        opt.value = i.id;
-        opt.textContent = i.name;
-        if (i.name === lastMidiDevice) opt.selected = true;
-        selector.appendChild(opt);
-      });
-    }
-    // Auto-connect to last used device, or first available
-    const target = inputs.find(i => i.name === lastMidiDevice) || inputs[0];
-    if (target) {
-      midiInput = target;
-      midiInput.onmidimessage = handleMIDIMessage;
-      midiConnectedDevice = target.name;
-      console.log(`[MIDI] Auto-connected to ${target.name}`);
-      updateStatusHeader();
-    }
+    _populateSelector();
+    const target = Array.from(midiAccess.inputs.values()).find(i => i.name === lastMidiDevice)
+      || Array.from(midiAccess.inputs.values())[0];
+    if (target) _connectInput(target);
   } catch (err) {
     console.error('[MIDI] requestMIDIAccess failed:', err);
   }
+}
+
+function _populateSelector() {
+  const selector = document.getElementById('midi-device-selector');
+  if (!selector || !midiAccess) return;
+  selector.innerHTML = '<option value="">— select MIDI input —</option>';
+  Array.from(midiAccess.inputs.values()).forEach(i => {
+    const opt = document.createElement('option');
+    opt.value = i.id;
+    opt.textContent = i.name;
+    if (i.name === lastMidiDevice) opt.selected = true;
+    selector.appendChild(opt);
+  });
+}
+
+function _connectInput(input) {
+  if (midiInput) midiInput.onmidimessage = null;
+  midiInput = input;
+  midiInput.onmidimessage = handleMIDIMessage;
+  midiConnectedDevice = input.name;
+  lastMidiDevice = input.name;
+  localStorage.setItem('lastMidiDevice', input.name);
+  console.log(`[MIDI] Connected to ${input.name}`);
+  document.getElementById('midi-cc-stats')?.classList.remove('hidden');
+  document.getElementById('midi-bpm-badge')?.classList.remove('hidden');
+  updateStatusHeader();
 }
 
 window.connectSelectedMIDI = async () => {
   const selector = document.getElementById('midi-device-selector');
   if (!selector || !midiAccess) return;
   const input = Array.from(midiAccess.inputs.values()).find(i => i.id === selector.value);
-  if (!input) return;
+  if (input) _connectInput(input);
+};
+
+window.disconnectMIDI = () => {
   if (midiInput) midiInput.onmidimessage = null;
-  midiInput = input;
-  midiInput.onmidimessage = handleMIDIMessage;
-  lastMidiDevice = input.name;
-  midiConnectedDevice = input.name;
-  localStorage.setItem('lastMidiDevice', input.name);
-  console.log(`[MIDI] Connected to ${input.name}`);
+  midiInput = null;
+  midiConnectedDevice = '';
+  _clockTicks = [];
+  document.getElementById('midi-cc-stats')?.classList.add('hidden');
+  document.getElementById('midi-bpm-badge')?.classList.add('hidden');
+  console.log('[MIDI] Disconnected');
   updateStatusHeader();
+};
+
+window.rescanMIDI = async () => {
+  midiInput = null;
+  midiAccess = null;
+  midiConnectedDevice = '';
+  await initWebMIDI();
 };

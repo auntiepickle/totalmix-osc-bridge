@@ -1,12 +1,15 @@
 {
   "macros": {
     "an3_to_adat1_send": {
-      "description": "Hardware Input AN 3 → ADAT 1 output send (native ramp)",
+      "description": "Hardware Input AN 3 \u2192 ADAT 1 output send (native ramp)",
       "workspace": "Pill_setup",
-      "snapshot": "lastthingidid",
+      "snapshot": "lastthingdid",
       "force_switch": false,
       "steps": [
-        { "osc": "/setSubmix", "value": 14.0 },
+        {
+          "osc": "/setSubmix",
+          "value": "14"
+        },
         {
           "osc": "/1/volume2",
           "value": "{{param}}",
@@ -18,17 +21,26 @@
         }
       ],
       "midi_triggers": [
-        { "type": "control_change", "number": 44, "channel": 1, "use_value_as_param": true }
+        {
+          "type": "control_change",
+          "number": 44,
+          "channel": 1,
+          "use_value_as_param": true
+        }
       ],
-      "routing_label": "AN 3 → ADAT 1"
+      "routing_label": "AN 3 \u2192 ADAT 1",
+      "fire_mode": "restart"
     },
     "an12_to_aes_send": {
-      "description": "Hardware Input AN 1/2 → AES Hardware Output send (native ramp)",
+      "description": "Hardware Input AN 1/2 \u2192 AES Hardware Output send (native ramp)",
       "workspace": "Pill_setup",
       "snapshot": "Reset",
       "force_switch": false,
       "steps": [
-        { "osc": "/setSubmix", "value": 12.0 },
+        {
+          "osc": "/setSubmix",
+          "value": "12"
+        },
         {
           "osc": "/1/volume1",
           "value": "{{param}}",
@@ -40,9 +52,15 @@
         }
       ],
       "midi_triggers": [
-        { "type": "control_change", "number": 42, "channel": 1, "use_value_as_param": true }
+        {
+          "type": "control_change",
+          "number": 42,
+          "channel": 1,
+          "use_value_as_param": true
+        }
       ],
-      "routing_label": "AN 1/2 → AES"
+      "routing_label": "AN 1/2 \u2192 AES",
+      "fire_mode": "ignore"
     },
     "an12_lfo_test": {
       "description": "AN 1/2 send LFO test",
@@ -50,7 +68,10 @@
       "snapshot": "Reset",
       "force_switch": false,
       "steps": [
-        { "osc": "/setSubmix", "value": 12.0 },
+        {
+          "osc": "/setSubmix",
+          "value": 12
+        },
         {
           "osc": "/1/volume1",
           "value": "{{param}}",
@@ -62,7 +83,12 @@
         }
       ],
       "midi_triggers": [
-        { "type": "control_change", "number": 43, "channel": 1, "use_value_as_param": true }
+        {
+          "type": "control_change",
+          "number": 43,
+          "channel": 1,
+          "use_value_as_param": true
+        }
       ],
       "routing_label": "AN 1/2 LFO test"
     }

@@ -68,12 +68,14 @@ def publish_dynamic_workspaces(client):
     except Exception as e:
         print(f"Error publishing dynamic workspaces: {e}")
         
-def map_watcher(client):
-    global LAST_MTIME
+def map_watcher(client, bridge=None):
     print("Started background snapshot map watcher (checks every 5s)")
     while True:
         time.sleep(5)
         if load_snapshot_map():
+            if bridge is not None:
+                bridge.snapshot_map = SNAPSHOT_MAP
+                print(f"✅ bridge.snapshot_map updated from SMB ({len(SNAPSHOT_MAP)} workspaces)")
             publish_snapshot_map(client)
             publish_dynamic_workspaces(client)
 
@@ -86,6 +88,10 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
 
         publish_workspaces(client)
         load_snapshot_map()
+        # Sync bridge snapshot_map immediately so run_macro resolves slots correctly
+        if SNAPSHOT_MAP:
+            bridge.snapshot_map = SNAPSHOT_MAP
+            print(f"✅ bridge.snapshot_map synced on connect ({len(SNAPSHOT_MAP)} workspaces)")
         publish_snapshot_map(client)
         publish_dynamic_workspaces(client)
 
@@ -93,10 +99,13 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         global SNAPSHOT_MAP
         payload = msg.payload.decode().strip()
 
-        # === TIME-BASED COOLDOWN + SUPPRESSION (prevents feedback loops) ===
-        if getattr(bridge, '_last_macro_end_time', 0) > 0 and time.time() - bridge._last_macro_end_time < 2.5:
-            if msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
-                print(f"Suppressed handler for {msg.topic} (cooldown after macro)")
+        # === SUPPRESSION (prevents feedback loops while macro is running or cooling down) ===
+        if msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
+            if getattr(bridge, '_suppress_handler', False):
+                print(f"Suppressed {msg.topic} (macro in progress)")
+                return
+            if getattr(bridge, '_last_macro_end_time', 0) > 0 and time.time() - bridge._last_macro_end_time < 2.5:
+                print(f"Suppressed {msg.topic} (cooldown after macro)")
                 return
 
         # === CLEAN LOGGING ===
@@ -185,5 +194,5 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
     client.username_pw_set(mqtt_user, mqtt_pass)
     client.connect(mqtt_broker, mqtt_port, 60)
 
-    watcher_thread = threading.Thread(target=map_watcher, args=(client,), daemon=True)
+    watcher_thread = threading.Thread(target=map_watcher, args=(client, bridge), daemon=True)
     watcher_thread.start()

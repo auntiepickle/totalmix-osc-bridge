@@ -8,29 +8,87 @@
 </head>
 <body class="bg-zinc-950 text-white">
     <div class="max-w-7xl mx-auto p-6">
+
         <!-- NAV BAR -->
         <div class="flex items-center justify-between mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-700">
-            <h1 class="text-2xl font-bold tracking-tight">TotalMix OSC Bridge</h1>
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight">TotalMix OSC Bridge</h1>
+                <div class="flex items-center gap-4 mt-0.5 flex-wrap">
+                    <span id="workspace" class="text-xs text-zinc-500">Workspace: —</span>
+                    <span id="snapshot"  class="text-xs text-zinc-500">Snapshot: —</span>
+                    <span id="last-fired-label" class="hidden text-xs text-orange-400/80 font-mono"></span>
+                </div>
+            </div>
 
             <div class="flex items-center gap-3">
-                <!-- MIDI selector — auto-connects on change -->
+
+                <!-- MIDI device selector -->
                 <select id="midi-device-selector" onchange="connectSelectedMIDI()"
                     class="bg-zinc-800 text-white border border-zinc-700 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:border-orange-400 min-w-[160px]">
                 </select>
 
                 <!-- MIDI status pill -->
-                <div id="midi-status" class="bg-zinc-800 text-zinc-400 px-5 py-2 rounded-2xl text-sm font-medium whitespace-nowrap">
-                    MIDI Disconnected
+                <div id="midi-status" class="flex items-center gap-2 bg-zinc-800 text-zinc-400 px-4 py-2 rounded-2xl text-sm font-medium whitespace-nowrap border border-zinc-700 transition-all duration-200">
+                    <span id="midi-status-dot" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200"></span>
+                    <span id="midi-status-text">No MIDI</span>
                 </div>
 
-                <!-- Settings gear — uploads + reload -->
+                <!-- MIDI activity badge — shows last CC + recency, hidden until connected -->
+                <div id="midi-cc-stats" class="hidden flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-2xl text-[10px] font-mono whitespace-nowrap">
+                    <span id="midi-cc-last" class="text-zinc-300">—</span>
+                    <span class="text-zinc-700">·</span>
+                    <span id="midi-cc-age" class="text-zinc-500">—</span>
+                </div>
+
+                <!-- MIDI clock BPM — populated from 0xF8 clock messages -->
+                <div id="midi-bpm-badge" class="hidden flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-2xl text-[10px] font-mono whitespace-nowrap">
+                    <i class="fas fa-music text-orange-400/70 text-[9px]"></i>
+                    <span id="midi-bpm" class="text-zinc-300">— BPM</span>
+                </div>
+
+                <!-- Settings gear — uploads + reload + editor -->
                 <div class="relative">
-                    <button onclick="toggleSettingsMenu()"
+                    <button onclick="toggleSettingsMenu()" data-settings-toggle
                         class="w-10 h-10 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-zinc-400 hover:text-white transition-all active:scale-95"
                         title="Settings">
                         <i class="fas fa-gear"></i>
                     </button>
-                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-2 z-50 min-w-[200px] shadow-xl">
+
+                    <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-3 flex flex-col gap-1 z-50 min-w-[240px] shadow-xl">
+
+                        <!-- Status summary -->
+                        <div class="px-4 py-2 text-[10px] text-zinc-500 border-b border-zinc-800 mb-1">
+                            Loaded: <span id="settings-status" class="text-zinc-400">…</span>
+                        </div>
+
+                        <!-- MIDI section -->
+                        <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">MIDI</div>
+                        <button onclick="disconnectMIDI(); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-plug-circle-xmark text-red-400 w-4"></i> Disconnect
+                        </button>
+                        <button onclick="rescanMIDI(); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-arrows-rotate text-blue-400 w-4"></i> Rescan devices
+                        </button>
+
+                        <div class="border-t border-zinc-700 my-1"></div>
+
+                        <!-- Edit section -->
+                        <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">Edit</div>
+                        <button onclick="openEditor('mappings'); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-pen text-orange-400 w-4"></i> Edit mappings.json
+                        </button>
+                        <button onclick="openEditor('channel_map'); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
+                            <i class="fas fa-pen text-amber-400 w-4"></i> Edit channel map
+                        </button>
+
+                        <div class="border-t border-zinc-700 my-1"></div>
+
+                        <!-- Config upload / reload section -->
+                        <div class="px-4 py-1 text-[10px] text-zinc-500 uppercase tracking-widest">Config</div>
                         <label class="cursor-pointer flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all">
                             <i class="fas fa-upload text-orange-400 w-4"></i> Upload mappings.json
                             <input type="file" accept=".json" class="hidden" onchange="uploadFile(this, 'mappings')">
@@ -42,14 +100,83 @@
                         <div class="border-t border-zinc-700 my-1"></div>
                         <button onclick="reloadServer(); toggleSettingsMenu()"
                             class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
-                            <i class="fas fa-sync text-green-400 w-4"></i> Reload bridge
+                            <i class="fas fa-sync text-green-400 w-4"></i> Reload mappings from disk
                         </button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        <!-- Example-mappings warning banner (hidden unless server loaded the fallback) -->
+        <div id="example-mappings-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
+            <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
+            <span class="flex-1">No <code class="font-mono text-amber-200 bg-amber-900/40 px-1 rounded">mappings.json</code> found — running from the example file. Changes won't persist until you initialize your own.</span>
+            <button id="example-mappings-btn" onclick="initMappingsFromExample()"
+                class="shrink-0 bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-xs px-4 py-2 rounded-xl transition-all">
+                Use as my mappings.json
+            </button>
+        </div>
+
+        <!-- MACRO GRID -->
+        <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start"></div>
+    </div>
+
+    <!-- ── Live Config Editor Modal ────────────────────────────────────────── -->
+    <div id="editor-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+         onclick="if(event.target===this) closeEditor()">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-3xl flex flex-col shadow-2xl"
+             style="max-height:90vh">
+
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+                <div class="flex items-center gap-2">
+                    <!-- Config tabs -->
+                    <button id="editor-tab-mappings" onclick="openEditor('mappings')"
+                        class="text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-black font-bold transition-colors">
+                        mappings.json
+                    </button>
+                    <button id="editor-tab-channel_map" onclick="openEditor('channel_map')"
+                        class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+                        channel_map.json
+                    </button>
+                    <button id="editor-tab-snapshot_map" onclick="openEditor('snapshot_map')"
+                        class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+                        snapshot_map.json
+                    </button>
+                    <span id="editor-status" class="text-[10px] text-zinc-500 ml-1"></span>
+                </div>
+                <button onclick="closeEditor()"
+                    class="text-zinc-500 hover:text-white transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800">
+                    <i class="fas fa-times text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Textarea -->
+            <div class="flex-1 overflow-hidden p-4" style="min-height:0">
+                <textarea id="editor-textarea"
+                    class="w-full h-full bg-zinc-950 text-zinc-300 text-xs font-mono p-4 rounded-xl border border-zinc-800 focus:outline-none focus:border-orange-400 resize-none leading-relaxed"
+                    style="min-height:400px"
+                    spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
+            </div>
+
+            <!-- Footer -->
+            <div class="flex items-center justify-between px-6 py-4 border-t border-zinc-800 shrink-0">
+                <button onclick="formatEditorJSON()"
+                    class="text-xs text-zinc-500 hover:text-white transition-colors flex items-center gap-1.5">
+                    <i class="fas fa-indent"></i> Format JSON
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeEditor()"
+                        class="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors">
+                        Cancel
+                    </button>
+                    <button onclick="saveEditor()"
+                        class="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-black font-bold text-sm transition-colors active:scale-95">
+                        Save &amp; Reload
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>
