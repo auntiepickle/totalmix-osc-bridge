@@ -99,11 +99,11 @@ function createMacroCardHTML(name, m) {
     <!-- Action buttons -->
     <div class="grid grid-cols-3 gap-2">
         <button onclick="fireMacro('${name}',1.0,false)"
-            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-2.5 rounded-xl text-sm transition-all">
+            class="fire-btn col-span-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 active:scale-95 active:bg-zinc-600 text-zinc-400 hover:text-white font-medium py-2.5 rounded-xl text-xs tracking-widest transition-all">
             FIRE
         </button>
         <button onclick="fireMacro('${name}',1.0,true)"
-            class="bg-zinc-800 hover:bg-amber-400/10 border border-zinc-700 hover:border-amber-400/60 text-amber-400 font-semibold py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
+            class="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-500 hover:text-zinc-300 font-medium py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
             RAMP
         </button>
     </div>
@@ -230,14 +230,7 @@ function snapProgressToZero(name) {
 async function fireMacro(name, value = 1.0, ramp = false) {
   if (!macros[name]) return;
   try {
-    await fetch(`/api/trigger/${name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        param: value,
-        clock_bpm: window._detectedBPM || null,
-      }),
-    });
+    await API.trigger(name, value, window._detectedBPM || null);
   } catch (e) {
     console.error('[UI] fireMacro error:', e);
   }
@@ -581,23 +574,13 @@ async function saveInlineEdit(name) {
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
 
   try {
-    const res = await fetch(`/api/config/macros/${name}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(m),
-    });
-    if (res.ok) {
-      macros[name] = m;
-      cancelInlineEdit(name);
-      // Reopen in read-only mode to show the saved state
-      setTimeout(() => toggleDetail(name), 30);
-    } else {
-      const err = await res.json().catch(() => ({ detail: 'unknown error' }));
-      alert(`Save failed: ${err.detail}`);
-      if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
-    }
+    await API.saveMacro(name, m);
+    macros[name] = m;
+    cancelInlineEdit(name);
+    // Reopen in read-only mode to show the saved state
+    setTimeout(() => toggleDetail(name), 30);
   } catch (e) {
-    alert(`Save error: ${e.message}`);
+    alert(`Save failed: ${e.message}`);
     if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
   }
 }
@@ -636,8 +619,7 @@ async function toggleSettingsMenu() {
   menu.classList.toggle('hidden');
   if (!menu.classList.contains('hidden')) {
     try {
-      const res = await fetch('/api/status');
-      const s = await res.json();
+      const s = await API.getStatus();
       const info = document.getElementById('settings-status');
       if (info) {
         const wsCount = s.snapshot_map_workspaces || 0;
@@ -668,7 +650,7 @@ document.addEventListener('click', (e) => {
 // ── Server reload ─────────────────────────────────────────────────────────────
 async function reloadServer() {
   if (confirm('Reload bridge server?')) {
-    await fetch('/api/reload', { method: 'POST' });
+    await API.reload();
     location.reload();
   }
 }
@@ -679,7 +661,7 @@ function uploadFile(input, type) {
   if (!file) return;
   const formData = new FormData();
   formData.append('file', file);
-  fetch(`/api/upload/${type}`, { method: 'POST', body: formData })
+  API.upload(type, formData)
     .then(() => location.reload())
     .catch(e => console.error('[UI] uploadFile error:', e));
 }
@@ -705,9 +687,9 @@ async function openEditor(configType = 'mappings') {
   modal.classList.remove('hidden');
 
   try {
-    const res  = await fetch(`/api/config/${configType}`);
-    const data = await res.json();
-    textarea.value = JSON.stringify(data, null, 2);
+    const text = await API.getConfig(configType);
+    // getConfig returns raw text; pretty-print it
+    textarea.value = JSON.stringify(JSON.parse(text), null, 2);
     if (statusEl) statusEl.textContent = '';
     textarea.focus();
   } catch (e) {
@@ -734,26 +716,15 @@ async function saveEditor() {
 
   if (statusEl) statusEl.textContent = 'Saving…';
   try {
-    const res = await fetch(`/api/config/${configType}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      modal.classList.add('hidden');
-      if (configType === 'snapshot_map') {
-        // Refresh local snapshot map cache so detail panels show correct validation
-        const sm = await fetch('/api/snapshot_map').then(r => r.json()).catch(() => ({}));
-        window._snapshotMap = sm;
-      } else {
-        // Hot-reload macro cards from updated bridge mappings
-        await loadMacros();
-        renderCards();
-      }
+    await API.saveConfig(configType, textarea.value);
+    modal.classList.add('hidden');
+    if (configType === 'snapshot_map') {
+      // Refresh local snapshot map cache so detail panels show correct validation
+      window._snapshotMap = await API.getSnapshotMap().catch(() => ({}));
     } else {
-      const err = await res.json();
-      if (statusEl) statusEl.textContent = 'Error';
-      alert(`Save failed: ${err.detail}`);
+      // Hot-reload macro cards from updated bridge mappings
+      await loadMacros();
+      renderCards();
     }
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Error';

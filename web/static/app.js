@@ -52,9 +52,7 @@ ws.onmessage = function (event) {
 // ── Macro loading ─────────────────────────────────────────────────────────────
 async function loadMacros() {
   try {
-    const res = await fetch('/api/macros');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    macros = await res.json();
+    macros = await API.getMacros();
     console.log(`[UI] Loaded ${Object.keys(macros).length} macros`);
     renderCards();
     updateStatusHeader();
@@ -66,7 +64,7 @@ async function loadMacros() {
 // ── Example-mappings banner ───────────────────────────────────────────────────
 async function checkMappingsSource() {
   try {
-    const s = await fetch('/api/status').then(r => r.json());
+    const s = await API.getStatus();
     const banner = document.getElementById('example-mappings-banner');
     if (!banner) return;
     if (s.mappings_is_example) {
@@ -81,17 +79,11 @@ async function initMappingsFromExample() {
   const btn = document.getElementById('example-mappings-btn');
   if (btn) { btn.textContent = 'Initializing…'; btn.disabled = true; }
   try {
-    const res = await fetch('/api/config/mappings/init-from-example', { method: 'POST' });
-    if (res.ok) {
-      document.getElementById('example-mappings-banner').classList.add('hidden');
-      await loadMacros();
-    } else {
-      const err = await res.json().catch(() => ({}));
-      alert(`Init failed: ${err.detail || 'unknown error'}`);
-      if (btn) { btn.textContent = 'Use as my mappings.json'; btn.disabled = false; }
-    }
+    await API.initMappingsFromExample();
+    document.getElementById('example-mappings-banner').classList.add('hidden');
+    await loadMacros();
   } catch (e) {
-    alert(`Init error: ${e.message}`);
+    alert(`Init failed: ${e.message}`);
     if (btn) { btn.textContent = 'Use as my mappings.json'; btn.disabled = false; }
   }
 }
@@ -173,11 +165,7 @@ window.switchToFromNav = async function() {
   }
 
   try {
-    await fetch('/api/switch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace: ws, snapshot: ss || null }),
-    });
+    await API.switch(ws, ss || null);
   } catch (e) {
     console.error('[UI] switchToFromNav error:', e);
   }
@@ -282,8 +270,7 @@ function flashLEDSkipped(name) {
 // ── Snapshot map — fetched once on load for detail panel validation ───────────
 async function loadSnapshotMap() {
   try {
-    const res = await fetch('/api/snapshot_map');
-    window._snapshotMap = await res.json();
+    window._snapshotMap = await API.getSnapshotMap();
     console.log(`[UI] Snapshot map loaded — ${Object.keys(window._snapshotMap).length} workspaces`);
     _updateNavDropdowns();
   } catch (e) {
@@ -298,7 +285,7 @@ async function loadSnapshotMap() {
 // the first WS broadcast (which can take a second or two).
 async function prefillBridgeState() {
   try {
-    const s = await fetch('/api/status').then(r => r.json());
+    const s = await API.getStatus();
     if (s.workspace) currentWorkspace = s.workspace;
     if (s.snapshot)  currentSnapshot  = s.snapshot;
     _updateNavDropdowns();
@@ -309,7 +296,7 @@ async function prefillBridgeState() {
 // ── Health polling — MQTT and OSC status dots ─────────────────────────────────
 async function pollHealth() {
   try {
-    const h = await fetch('/api/health').then(r => r.json());
+    const h = await API.getHealth();
     _applyHealthDot('mqtt-health-dot', h.mqtt_connected, 'MQTT');
     _applyHealthDot('osc-health-dot',  h.osc_configured,  'OSC');
   } catch (_) {
