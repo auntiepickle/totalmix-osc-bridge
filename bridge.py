@@ -193,7 +193,7 @@ class TotalMixOSCBridge:
             for send_name, send_data in submix_data.get("sends", {}).items():
                 if any(step.get("osc") == send_data.get("osc_address")
                        for step in self.mappings.get("macros", {}).get(macro_name, {}).get("steps", [])):
-                    return f"{send_name} → {submix_name} {send_data.get('description', '')}"
+                    return f"{send_name} → {submix_name}"
         return "—"
     
     def update_workspace(self, name: str = None, slot: int = None):

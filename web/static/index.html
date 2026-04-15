@@ -13,21 +13,19 @@
         <div class="flex items-center justify-between mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-700">
             <div>
                 <h1 class="text-2xl font-bold tracking-tight">TotalMix OSC Bridge</h1>
-                <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+                <div class="flex items-center gap-2 mt-1 flex-wrap">
                     <!-- Workspace selector — shows current WS, switches on change -->
                     <select id="workspace-select" onchange="switchToFromNav()"
-                        class="text-xs text-zinc-400 bg-transparent border-0 focus:outline-none cursor-pointer hover:text-white transition-colors appearance-none pr-4"
-                        style="background-image:none">
+                        class="text-xs text-zinc-400 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-400/60 cursor-pointer hover:text-white hover:border-zinc-600 transition-colors">
                         <option value="">Workspace: —</option>
                     </select>
                     <span class="text-zinc-700 text-xs">/</span>
                     <!-- Snapshot selector — shows current SS, switches on change -->
                     <select id="snapshot-select-nav" onchange="switchToFromNav()"
-                        class="text-xs text-zinc-400 bg-transparent border-0 focus:outline-none cursor-pointer hover:text-white transition-colors appearance-none pr-4"
-                        style="background-image:none">
+                        class="text-xs text-zinc-400 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-400/60 cursor-pointer hover:text-white hover:border-zinc-600 transition-colors">
                         <option value="">Snapshot: —</option>
                     </select>
-                    <span id="last-fired-label" class="hidden text-xs text-orange-400/80 font-mono ml-2"></span>
+                    <span id="last-fired-label" class="hidden text-xs text-orange-400/80 font-mono"></span>
                 </div>
             </div>
 

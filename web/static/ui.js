@@ -61,8 +61,9 @@ function calculateDurationMs(macro) {
   if (macro.durationMs) return macro.durationMs;
   const step = macro.steps ? macro.steps.find(s => s.operation) : null;
   if (!step || !step.operation) return 2000;
-  const op = step.operation;
-  return Math.round((op.bars || 2) * (240000 / (op.bpm || 140)));
+  const op  = step.operation;
+  const bpm = op.bpm === 'clock' ? (window._detectedBPM || 140) : (op.bpm || 140);
+  return Math.round((op.bars || 2) * (240000 / bpm));
 }
 
 function getMidiTriggerLabel(m) {
@@ -76,39 +77,42 @@ function getMidiTriggerLabel(m) {
 
 // ── Card HTML ─────────────────────────────────────────────────────────────────
 function createMacroCardHTML(name, m) {
-  const midiLabel = getMidiTriggerLabel(m);
+  const midiLabel   = getMidiTriggerLabel(m);
+  const routingLabel = m.routing_label || '—';
   return `
-<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-5 rounded-2xl">
-    <div class="flex items-start gap-3 mb-3">
-        <!-- LED dot — top left, larger, aligned to title baseline -->
-        <span id="led-dot-${name}" class="w-4 h-4 rounded-full bg-zinc-700 transition-all duration-150 shrink-0 mt-1"></span>
-        <!-- Title + meta -->
-        <div class="flex-1 min-w-0">
-            <h3 class="text-lg font-bold text-white truncate">${name}</h3>
-            <p class="text-zinc-400 text-xs mt-0.5">${m.description || ''}</p>
-            <p class="routing-label text-orange-400 text-xs font-medium mt-1.5 tracking-wider">${m.routing_label || '—'}</p>
-        </div>
-        <!-- MIDI badge -->
-        ${midiLabel ? `<div class="text-xs font-mono bg-zinc-800/80 text-zinc-400 px-2.5 py-1 rounded-lg shrink-0">${midiLabel}</div>` : ''}
+<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200">
+    <!-- Header: LED · name/desc · MIDI badge -->
+    <div class="flex items-center gap-3 mb-1">
+        <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
+        <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
+        ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
     </div>
-    <div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden mb-4">
-      <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500" style="width:0%;"></div>
+    <!-- Description + routing label -->
+    <div class="pl-6 mb-3">
+        ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${m.description}</p>` : ''}
+        <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${routingLabel}</p>
     </div>
+    <!-- Progress bar -->
+    <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3">
+      <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
+    </div>
+    <!-- Action buttons -->
     <div class="grid grid-cols-3 gap-2">
         <button onclick="fireMacro('${name}',1.0,false)"
-            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-2.5 rounded-xl text-base transition-all">
+            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-2.5 rounded-xl text-sm transition-all">
             FIRE
         </button>
         <button onclick="fireMacro('${name}',1.0,true)"
-            class="bg-zinc-800 hover:bg-amber-400/20 border border-amber-400/40 hover:border-amber-400 text-amber-400 font-semibold py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
+            class="bg-zinc-800 hover:bg-amber-400/10 border border-zinc-700 hover:border-amber-400/60 text-amber-400 font-semibold py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
             RAMP
         </button>
     </div>
+    <!-- Details toggle -->
     <button onclick="toggleDetail('${name}')"
-        class="mt-4 w-full text-zinc-600 hover:text-orange-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
+        class="mt-3 w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
         DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
-    <div id="detail-${name}" class="hidden mt-2 p-3 bg-[#111111] rounded-xl border border-zinc-700/50 text-xs"></div>
+    <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
 </div>`;
 }
 
