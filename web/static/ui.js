@@ -80,15 +80,15 @@ function createMacroCardHTML(name, m) {
   const midiLabel   = getMidiTriggerLabel(m);
   const routingLabel = m.routing_label || '—';
   return `
-<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200 flex flex-col relative">
+<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200">
     <!-- Header: LED · name/desc · MIDI badge -->
     <div class="flex items-center gap-3 mb-1">
         <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
         <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
         ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
     </div>
-    <!-- Description + routing label — flex-1 pushes buttons to bottom -->
-    <div class="pl-6 mb-3 flex-1">
+    <!-- Description + routing label -->
+    <div class="pl-6 mb-3">
         ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${m.description}</p>` : ''}
         <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${routingLabel}</p>
     </div>
@@ -112,7 +112,7 @@ function createMacroCardHTML(name, m) {
         class="mt-3 w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
         DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
-    <div id="detail-${name}" class="hidden absolute top-full left-0 right-0 z-20 mt-1 p-3 bg-zinc-900 border border-zinc-700 rounded-2xl text-xs shadow-2xl shadow-black/60"></div>
+    <div id="detail-${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
 </div>`;
 }
 
@@ -180,7 +180,33 @@ function renderCards() {
   });
 
   grid.innerHTML = html;
+  // Run after paint so getBoundingClientRect reflects final layout
+  requestAnimationFrame(equalizeCardHeights);
 }
+
+// ── Equal card heights per visual row ────────────────────────────────────────
+// Groups cards by their top offset (= same grid row) and sets a shared
+// min-height so each row looks uniform. Runs after render and on resize.
+// Expanding details only grows that one card — it never shrinks its neighbours.
+function equalizeCardHeights() {
+  const cards = [...document.querySelectorAll('#macro-grid .card')];
+  // Reset before measuring
+  cards.forEach(c => { c.style.minHeight = ''; });
+
+  const rows = new Map();
+  cards.forEach(c => {
+    const top = Math.round(c.getBoundingClientRect().top);
+    if (!rows.has(top)) rows.set(top, []);
+    rows.get(top).push(c);
+  });
+
+  rows.forEach(rowCards => {
+    const max = Math.max(...rowCards.map(c => c.offsetHeight));
+    rowCards.forEach(c => { c.style.minHeight = max + 'px'; });
+  });
+}
+
+window.addEventListener('resize', equalizeCardHeights);
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
 function animateProgress(name, durationMs) {
@@ -230,7 +256,10 @@ function toggleDetail(name) {
 
   panel.classList.toggle('hidden');
   if (arrow) arrow.style.transform = panel.classList.contains('hidden') ? '' : 'rotate(180deg)';
-  if (panel.classList.contains('hidden')) return;
+  if (panel.classList.contains('hidden')) {
+    requestAnimationFrame(equalizeCardHeights);
+    return;
+  }
 
   const durationSec = (calculateDurationMs(m) / 1000).toFixed(2);
   const fireMode = (m.fire_mode || 'ignore').toUpperCase();
@@ -579,6 +608,8 @@ function cancelInlineEdit(name) {
   if (!panel) return;
   panel.classList.add('hidden');
   if (arrow) arrow.style.transform = '';
+  // Re-equalise now this card has collapsed
+  requestAnimationFrame(equalizeCardHeights);
 }
 
 // ── BPM clock toggle in step editor ──────────────────────────────────────────
