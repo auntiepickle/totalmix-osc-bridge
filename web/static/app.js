@@ -210,9 +210,10 @@ function updateMacroCard(name) {
 let _lastFiredName = null;
 
 const _LED_ALL = ['bg-zinc-700','bg-white','bg-amber-400','bg-green-400','bg-red-500',
-                  'bg-orange-400','bg-orange-500/30',
+                  'bg-cyan-400',
                   'shadow-[0_0_8px_#fff]','shadow-[0_0_8px_#fbbf24]',
-                  'shadow-[0_0_10px_#4ade80]','shadow-[0_0_8px_#ef4444]','shadow-[0_0_8px_#fb923c]'];
+                  'shadow-[0_0_10px_#4ade80]','shadow-[0_0_8px_#ef4444]',
+                  'shadow-[0_0_8px_#22d3ee]'];
 
 function _ledSet(dot, color, shadow, durationMs) {
   if (!dot) return;
@@ -251,10 +252,12 @@ function _clearLastFired(name) {
   const dot  = document.getElementById(`led-dot-${name}`);
   const card = document.getElementById(`card-${name}`);
   if (dot)  { dot.classList.remove(..._LED_ALL); dot.classList.add('bg-zinc-700'); }
-  if (card) card.classList.remove('!border-orange-500', 'shadow-[0_0_12px_rgba(249,115,22,0.25)]');
+  if (card) card.classList.remove('!border-cyan-500', 'shadow-[0_0_14px_rgba(34,211,238,0.15)]');
 }
 
-// Green flash → bright orange peak-hold on LED + glowing card border
+// Green flash → cyan peak-hold on LED + card border
+// Cyan (cool) vs amber (warm) — maximum perceptual contrast between
+// "currently running" and "last fired", readable at a glance across the room.
 function flashLEDComplete(name) {
   _lastFiredName = name;
   const dot  = document.getElementById(`led-dot-${name}`);
@@ -265,8 +268,8 @@ function flashLEDComplete(name) {
   setTimeout(() => {
     dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
     dot.classList.remove(..._LED_ALL);
-    dot.classList.add('bg-orange-400', 'shadow-[0_0_8px_#fb923c]');
-    if (card) card.classList.add('!border-orange-500', 'shadow-[0_0_12px_rgba(249,115,22,0.25)]');
+    dot.classList.add('bg-cyan-400', 'shadow-[0_0_8px_#22d3ee]');
+    if (card) card.classList.add('!border-cyan-500', 'shadow-[0_0_14px_rgba(34,211,238,0.15)]');
   }, 600);
 }
 
