@@ -289,6 +289,20 @@ async function loadSnapshotMap() {
   }
 }
 
+// ── Pre-fill bridge state from REST — no WebSocket wait ──────────────────────
+// /api/status already carries current_workspace and current_snapshot so we
+// can populate the nav dropdowns immediately on load rather than waiting for
+// the first WS broadcast (which can take a second or two).
+async function prefillBridgeState() {
+  try {
+    const s = await fetch('/api/status').then(r => r.json());
+    if (s.workspace) currentWorkspace = s.workspace;
+    if (s.snapshot)  currentSnapshot  = s.snapshot;
+    _updateNavDropdowns();
+    updateStatusHeader();
+  } catch (_) {}
+}
+
 // ── Health polling — MQTT and OSC status dots ─────────────────────────────────
 async function pollHealth() {
   try {
@@ -311,9 +325,11 @@ function _applyHealthDot(id, ok, label) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   initWebMIDI();
-  loadSnapshotMap();
+  // Load snapshot map and bridge state in parallel — populate dropdowns as
+  // soon as both resolve rather than waiting for the first WS broadcast.
+  await Promise.all([loadSnapshotMap(), prefillBridgeState()]);
   checkMappingsSource();
   pollHealth();
   setInterval(pollHealth, 15000);
