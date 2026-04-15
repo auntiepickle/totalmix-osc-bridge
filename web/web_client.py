@@ -2,9 +2,11 @@ import os
 import shutil
 import datetime
 from pathlib import Path
+from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 import json
 import threading
 import uvicorn
@@ -46,15 +48,66 @@ async def get_macros():
     return macros
 
 
+class TriggerBody(BaseModel):
+    param: float = 0.5
+    clock_bpm: Optional[float] = None
+
+
+class SwitchBody(BaseModel):
+    workspace: str
+    snapshot: Optional[str] = None
+
+
 @app.post("/api/trigger/{macro_name}")
-async def trigger_macro(macro_name: str, param: float = 0.5):
+async def trigger_macro(macro_name: str, body: TriggerBody = TriggerBody()):
     """Fire a macro — runs in a background thread so the response returns immediately.
-    The browser gets progress bar timing from the macro_start WebSocket event."""
+
+    Accepts a JSON body with ``param`` (0.0–1.0) and an optional ``clock_bpm``
+    (detected from the MIDI clock). When ``clock_bpm`` is provided the bridge
+    substitutes it for any step that specifies ``"bpm": "clock"``.
+
+    The browser gets progress bar timing from the ``macro_start`` WebSocket event.
+    """
     if macro_name not in bridge.mappings.get("macros", {}):
         raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
-    logger.info(f"Web UI triggered macro → {macro_name} (param={param:.3f})")
-    threading.Thread(target=bridge.run_macro, args=(macro_name, param), daemon=True).start()
-    return {"status": "accepted", "macro": macro_name, "param": param}
+    logger.info(
+        f"Web UI triggered macro → {macro_name} "
+        f"(param={body.param:.3f}, clock_bpm={body.clock_bpm})"
+    )
+    threading.Thread(
+        target=bridge.run_macro,
+        args=(macro_name, body.param),
+        kwargs={"clock_bpm": body.clock_bpm},
+        daemon=True,
+    ).start()
+    return {"status": "accepted", "macro": macro_name, "param": body.param}
+
+
+@app.post("/api/switch")
+async def switch_workspace(body: SwitchBody):
+    """Switch to a workspace and optionally a snapshot without firing a macro.
+
+    Used by the click-to-switch buttons in the UI group headers. Runs in a
+    daemon thread — the OSC + sleep sequence takes up to 1.3s.
+    """
+    if not bridge.osc_client:
+        raise HTTPException(status_code=503, detail="OSC client not configured")
+    threading.Thread(
+        target=bridge.switch_to,
+        args=(body.workspace,),
+        kwargs={"snapshot": body.snapshot},
+        daemon=True,
+    ).start()
+    return {"status": "accepted", "workspace": body.workspace, "snapshot": body.snapshot}
+
+
+@app.get("/api/health")
+async def get_health():
+    """Return connection health for MQTT and OSC."""
+    return {
+        "mqtt_connected": getattr(bridge, "mqtt_connected", False),
+        "osc_configured": bridge.osc_client is not None,
+    }
 
 
 @app.get("/api/test")

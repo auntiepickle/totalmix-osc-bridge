@@ -46,6 +46,15 @@
                     <span id="midi-bpm" class="text-zinc-300">— BPM</span>
                 </div>
 
+                <!-- MQTT + OSC health dots -->
+                <div class="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-2xl" title="Connection health">
+                    <span id="mqtt-health-dot" class="w-2 h-2 rounded-full bg-zinc-700 transition-all duration-300" title="MQTT: unknown"></span>
+                    <span class="text-[9px] text-zinc-600 font-mono">MQTT</span>
+                    <span class="text-zinc-800 mx-0.5">·</span>
+                    <span id="osc-health-dot"  class="w-2 h-2 rounded-full bg-zinc-700 transition-all duration-300" title="OSC: unknown"></span>
+                    <span class="text-[9px] text-zinc-600 font-mono">OSC</span>
+                </div>
+
                 <!-- Settings gear — uploads + reload + editor -->
                 <div class="relative">
                     <button onclick="toggleSettingsMenu()" data-settings-toggle

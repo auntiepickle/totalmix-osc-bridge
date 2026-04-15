@@ -102,6 +102,7 @@ class TotalMixOSCBridge:
         self._running_macros = set()        # names of macros currently executing
         self._cancel_events = {}            # macro_name → threading.Event (for restart mode)
         self._queued_params = {}            # macro_name → float (for queue/restart modes)
+        self.mqtt_connected = False         # set True/False by mqtt_handler callbacks
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -167,13 +168,19 @@ class TotalMixOSCBridge:
         self.channel_map = {}
         self.channel_map_is_example = False
 
-    def _get_macro_duration_ms(self, macro: dict) -> int:
-        """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events)."""
+    def _get_macro_duration_ms(self, macro: dict, clock_bpm: float = None) -> int:
+        """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events).
+
+        If the operation config has ``"bpm": "clock"`` and clock_bpm is provided,
+        the detected MIDI clock BPM is used for the duration calculation.
+        """
         for step in macro.get("steps", []):
             if "operation" in step:
                 op = step["operation"]
                 bars = op.get("bars", 2)
-                bpm = op.get("bpm", 140)
+                bpm  = op.get("bpm", 140)
+                if bpm == "clock":
+                    bpm = clock_bpm if clock_bpm else 140
                 return int(bars * (240000 / bpm))
         return 400  # instant macro — brief visual feedback
 
@@ -214,7 +221,51 @@ class TotalMixOSCBridge:
         logger.info(f"BRIDGE STATE → snapshot = {self.current_snapshot or 'None'}")
         self.broadcast_state()  # ← live web update
 
-    def run_macro(self, macro_name: str, param: float = 0.5):
+    def switch_to(self, workspace: str, snapshot: str = None) -> bool:
+        """Switch workspace and optionally a snapshot without running a macro.
+
+        Used by the click-to-switch UI buttons. Runs the same OSC sequence as
+        run_macro's switch block but with no steps and no suppress guard.
+        Returns True on success, False if the workspace is not in the snapshot map.
+        """
+        if not self.osc_client:
+            logger.warning("switch_to: no OSC client")
+            return False
+
+        ws_entry = self.snapshot_map.get(workspace)
+        if ws_entry is None:
+            logger.warning(f"switch_to: workspace '{workspace}' not in snapshot map")
+            return False
+
+        ws_slot = ws_entry.get("slot")
+        if ws_slot is None:
+            logger.warning(f"switch_to: workspace '{workspace}' has no slot")
+            return False
+
+        self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
+        self.current_workspace = workspace
+        logger.info(f"switch_to: workspace '{workspace}' (slot {ws_slot})")
+
+        if snapshot:
+            time.sleep(1.0)
+            snapshots = ws_entry.get("snapshots", {})
+            snap_num  = None
+            for snap_key, snap_val in snapshots.items():
+                if str(snap_val).strip().lower() == snapshot.strip().lower():
+                    snap_num = snap_key
+                    break
+            if snap_num is not None:
+                osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
+                self.osc_client.send_message(osc_addr, 1.0)
+                self.current_snapshot = snapshot.strip().lower()
+                logger.info(f"switch_to: snapshot '{snapshot}' ({osc_addr})")
+            else:
+                logger.warning(f"switch_to: snapshot '{snapshot}' not found in '{workspace}'")
+
+        self.broadcast_state()
+        return True
+
+    def run_macro(self, macro_name: str, param: float = 0.5, clock_bpm: float = None):
         if macro_name not in self.mappings.get("macros", {}):
             logger.error(f"Macro '{macro_name}' not found")
             return
@@ -344,7 +395,7 @@ class TotalMixOSCBridge:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
             # === EMIT macro_start SO BROWSER CAN SYNC PROGRESS BAR ===
-            duration_ms = self._get_macro_duration_ms(macro)
+            duration_ms = self._get_macro_duration_ms(macro, clock_bpm=clock_bpm)
             self.broadcast_state(macro_event={
                 "type": "macro_start",
                 "name": macro_name,
@@ -357,6 +408,11 @@ class TotalMixOSCBridge:
 
                 if "operation" in step and step.get("value") == "{{param}}":
                     op_config = step["operation"]
+                    # Substitute live MIDI clock BPM when the mapping uses "bpm": "clock"
+                    if op_config.get("bpm") == "clock":
+                        resolved_bpm = clock_bpm if clock_bpm else 140
+                        op_config = {**op_config, "bpm": resolved_bpm}
+                        logger.info(f"   → BPM clock sync: using {resolved_bpm} BPM")
                     OperationRegistry.execute(
                         op_config["type"],
                         self.osc_client,

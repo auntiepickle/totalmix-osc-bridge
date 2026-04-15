@@ -204,9 +204,32 @@ async function loadSnapshotMap() {
   }
 }
 
+// ── Health polling — MQTT and OSC status dots ─────────────────────────────────
+async function pollHealth() {
+  try {
+    const h = await fetch('/api/health').then(r => r.json());
+    _applyHealthDot('mqtt-health-dot', h.mqtt_connected, 'MQTT');
+    _applyHealthDot('osc-health-dot',  h.osc_configured,  'OSC');
+  } catch (_) {
+    _applyHealthDot('mqtt-health-dot', false, 'MQTT');
+    _applyHealthDot('osc-health-dot',  false, 'OSC');
+  }
+}
+
+function _applyHealthDot(id, ok, label) {
+  const dot = document.getElementById(id);
+  if (!dot) return;
+  dot.classList.toggle('bg-green-500',   ok);
+  dot.classList.toggle('shadow-[0_0_5px_#22c55e]', ok);
+  dot.classList.toggle('bg-zinc-700',    !ok);
+  dot.title = ok ? `${label}: connected` : `${label}: disconnected`;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
   initWebMIDI();
   loadSnapshotMap();
   checkMappingsSource();
+  pollHealth();
+  setInterval(pollHealth, 15000);
 });

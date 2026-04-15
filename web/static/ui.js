@@ -68,6 +68,9 @@ function calculateDurationMs(macro) {
 function getMidiTriggerLabel(m) {
   const t = m.midi_triggers && m.midi_triggers[0];
   if (!t) return '';
+  const type = t.type || 'control_change';
+  if (type === 'note_on')  return `NOTE ON ${t.note ?? '?'} · ch${t.channel}`;
+  if (type === 'note_off') return `NOTE OFF ${t.note ?? '?'} · ch${t.channel}`;
   return `CC${t.number} · ch${t.channel}`;
 }
 
@@ -132,15 +135,22 @@ function renderCards() {
 
     // Workspace section header — always visible, click to collapse
     html += `<div class="col-span-full mb-2">
-      <button onclick="toggleGroup('${ws}')"
-          class="w-full flex items-center gap-3 group text-left py-1">
-        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-widest group-hover:text-white transition-colors">${ws}</span>
-        <div class="flex-1 h-px bg-zinc-800"></div>
-        <!-- Group last-fired LED + label -->
-        <span id="group-led-dot-${wsId}" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200 shrink-0"></span>
-        <span id="group-led-label-${wsId}" class="text-[10px] font-mono text-zinc-600 max-w-[200px] truncate"></span>
-        <i id="group-arrow-${wsId}" class="fas fa-chevron-down text-[9px] text-zinc-500 transition-transform duration-200 ml-1" ${arrowStyle}></i>
-      </button>
+      <div class="flex items-center gap-3 py-1">
+        <button onclick="toggleGroup('${ws}')"
+            class="flex items-center gap-3 flex-1 group text-left min-w-0">
+          <span class="text-xs font-semibold text-zinc-400 uppercase tracking-widest group-hover:text-white transition-colors shrink-0">${ws}</span>
+          <div class="flex-1 h-px bg-zinc-800"></div>
+          <!-- Group last-fired LED + label -->
+          <span id="group-led-dot-${wsId}" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200 shrink-0"></span>
+          <span id="group-led-label-${wsId}" class="text-[10px] font-mono text-zinc-600 max-w-[120px] truncate"></span>
+          <i id="group-arrow-${wsId}" class="fas fa-chevron-down text-[9px] text-zinc-500 transition-transform duration-200 ml-1 shrink-0" ${arrowStyle}></i>
+        </button>
+        <button onclick="event.stopPropagation(); switchTo('${ws}')"
+            title="Switch to workspace ${ws}"
+            class="shrink-0 text-[10px] text-zinc-600 hover:text-white bg-zinc-800/0 hover:bg-zinc-800 border border-transparent hover:border-zinc-700 px-2 py-1 rounded-lg transition-all">
+          <i class="fas fa-right-to-bracket text-[9px]"></i>
+        </button>
+      </div>
     </div>`;
 
     // Collapsible body — display:contents keeps children as direct grid items
@@ -155,11 +165,18 @@ function renderCards() {
         const ssArrowStyle = ssCollapsed ? 'style="transform:rotate(-90deg)"' : '';
 
         html += `<div class="col-span-full mb-1 ml-1">
-          <button onclick="toggleSnapshotGroup('${ws}','${ss}')"
-              class="flex items-center gap-2 group text-left py-0.5">
-            <span class="text-[10px] text-zinc-600 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">↳ ${ss}</span>
-            <i id="ss-arrow-${ssId}" class="fas fa-chevron-down text-[8px] text-zinc-700 group-hover:text-zinc-500 transition-transform duration-150" ${ssArrowStyle}></i>
-          </button>
+          <div class="flex items-center gap-2 py-0.5">
+            <button onclick="toggleSnapshotGroup('${ws}','${ss}')"
+                class="flex items-center gap-2 group text-left">
+              <span class="text-[10px] text-zinc-600 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">↳ ${ss}</span>
+              <i id="ss-arrow-${ssId}" class="fas fa-chevron-down text-[8px] text-zinc-700 group-hover:text-zinc-500 transition-transform duration-150" ${ssArrowStyle}></i>
+            </button>
+            <button onclick="switchTo('${ws}','${ss}')"
+                title="Switch to ${ws} / ${ss}"
+                class="text-[9px] text-zinc-700 hover:text-zinc-400 transition-colors px-1.5">
+              <i class="fas fa-right-to-bracket"></i>
+            </button>
+          </div>
         </div>`;
         html += `<div id="ss-body-${ssId}" style="display:${ssBodyDisp}">`;
         names.forEach(name => { html += createMacroCardHTML(name, macros[name]); });
@@ -200,12 +217,28 @@ async function fireMacro(name, value = 1.0, ramp = false) {
     await fetch(`/api/trigger/${name}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ param: value }),
+      body: JSON.stringify({
+        param: value,
+        clock_bpm: window._detectedBPM || null,
+      }),
     });
   } catch (e) {
     console.error('[UI] fireMacro error:', e);
   }
 }
+
+// ── Click-to-switch workspace / snapshot ──────────────────────────────────────
+window.switchTo = async function(workspace, snapshot = null) {
+  try {
+    await fetch('/api/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace, snapshot }),
+    });
+  } catch (e) {
+    console.error('[UI] switchTo error:', e);
+  }
+};
 
 // ── Structured detail panel ───────────────────────────────────────────────────
 // _snapshotMap is loaded once on init (see app.js loadSnapshotMap)
@@ -270,8 +303,9 @@ function toggleDetail(name) {
       if (step.operation) {
         const op = step.operation;
         const opType = (op.type || '').toUpperCase();
-        const bars = op.bars || 2;
-        const bpm  = op.bpm  || 140;
+        const bars  = op.bars || 2;
+        const bpm   = op.bpm;
+        const bpmLabel = bpm === 'clock' ? '<span class="text-orange-400/80">clock</span>' : (bpm || 140);
         const curve = op.curve ? ` · ${op.curve}` : '';
         const opColors = { RAMP: 'text-amber-400', LFO: 'text-purple-400' };
         const opColor = opColors[opType] || 'text-zinc-400';
@@ -279,7 +313,7 @@ function toggleDetail(name) {
           <span class="text-zinc-500 text-xs">∿</span>
           <span class="text-orange-300 text-xs flex-1 truncate">${addr}</span>
           <span class="${opColor} text-xs font-bold">${opType}</span>
-          <span class="text-zinc-600 text-xs">${bars}b @ ${bpm}${curve}</span>
+          <span class="text-zinc-600 text-xs">${bars}b @ ${bpmLabel}${curve}</span>
         </div>`;
       } else {
         const val = step.value !== undefined ? step.value : '?';
@@ -299,7 +333,12 @@ function toggleDetail(name) {
       <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">MIDI Triggers</div>
       <div class="flex flex-wrap gap-1.5">`;
     m.midi_triggers.forEach(t => {
-      html += `<span class="text-xs font-mono bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-700">CC${t.number} ch${t.channel}</span>`;
+      const type = t.type || 'control_change';
+      let label;
+      if (type === 'note_on')       label = `NOTE ON ${t.note ?? '?'} ch${t.channel}`;
+      else if (type === 'note_off') label = `NOTE OFF ${t.note ?? '?'} ch${t.channel}`;
+      else                          label = `CC${t.number ?? '?'} ch${t.channel}`;
+      html += `<span class="text-xs font-mono bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-700">${label}</span>`;
     });
     html += `</div></div>`;
   }
@@ -408,7 +447,12 @@ function editDetail(name) {
         <div class="flex gap-2 items-center">
           <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
           <span class="text-zinc-500 text-xs shrink-0">bars @</span>
-          <input data-field="steps.${i}.operation.bpm" type="number" min="1" value="${_esc(op.bpm??140)}" class="${nc}">
+          <select data-field="steps.${i}.operation.bpm" class="${sc} shrink-0">
+            <option value="clock"${op.bpm==='clock'?' selected':''}>clock</option>
+            ${[60,80,100,120,130,140,150,160,170,180].map(b =>
+              `<option value="${b}"${(op.bpm||140)===b?' selected':''}>${b}</option>`
+            ).join('')}
+          </select>
           <span class="text-zinc-500 text-xs shrink-0">BPM</span>
         </div>
       </div>`;
@@ -421,14 +465,24 @@ function editDetail(name) {
     }
   }).join('');
 
-  // MIDI triggers
-  const midiHtml = (m.midi_triggers || []).map((t, i) => `
-    <div class="flex gap-2 items-center bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
-      <span class="text-zinc-500 text-xs shrink-0">CC</span>
-      <input data-field="midi_triggers.${i}.number" type="number" min="0" max="127" value="${_esc(t.number)}" class="${nc}">
+  // MIDI triggers — type-aware: CC uses 'number', Note On/Off use 'note'
+  const midiHtml = (m.midi_triggers || []).map((t, i) => {
+    const type    = t.type || 'control_change';
+    const isNote  = type === 'note_on' || type === 'note_off';
+    const numField = isNote ? `midi_triggers.${i}.note`   : `midi_triggers.${i}.number`;
+    const numValue = isNote ? (t.note ?? 0)               : (t.number ?? 0);
+    return `<div class="flex gap-2 items-center bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
+      <select data-field="midi_triggers.${i}.type" class="${sc} shrink-0">
+        <option value="control_change"${type==='control_change'?' selected':''}>CC</option>
+        <option value="note_on"${type==='note_on'?' selected':''}>Note On</option>
+        <option value="note_off"${type==='note_off'?' selected':''}>Note Off</option>
+      </select>
+      <span class="text-zinc-500 text-xs shrink-0">#</span>
+      <input data-field="${numField}" type="number" min="0" max="127" value="${_esc(numValue)}" class="${nc}">
       <span class="text-zinc-500 text-xs shrink-0">ch</span>
       <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   panel.innerHTML = `<div class="space-y-3 text-sm">
 
