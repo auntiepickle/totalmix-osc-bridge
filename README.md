@@ -1,63 +1,85 @@
 # TotalMix OSC Bridge
 
-Route MIDI CC from a hardware sequencer through a browser to an RME UFX II — without touching TotalMix's built-in MIDI learn.
+Automate RME TotalMix FX from any MIDI controller. One trigger fires multi-step macros — workspace switches, BPM-synced fader ramps, LFOs — delivered over OSC to TotalMix in real time.
 
-A Cirklon (or any MIDI controller) sends CC messages. The browser reads them via the Web MIDI API and fires macros over WebSocket to a persistent server. The server handles workspace switching, BPM-synced ramps, and OSC delivery to TotalMix FX. Everything — state, logic, config — lives in one place.
+---
+
+## Why this exists
+
+TotalMix FX has OSC built in and it's excellent. What it doesn't have is automation: the built-in MIDI remote is one CC → one fader, static, no timing. There's no way to say "when I hit this note, smoothly ramp the reverb send over 4 bars at current tempo, then switch to the breakdown snapshot." That workflow — common in hardware-heavy live rigs where TotalMix *is* the mixer — simply wasn't a product anywhere.
+
+This bridge fills that gap. It sits between your MIDI controller and TotalMix's OSC interface and adds the layer that's missing: multi-step macros, tempo-synced operations, workspace orchestration, and a web UI to monitor and configure everything without touching JSON.
+
+**Why OSC instead of more MIDI:** MIDI CC is 7-bit (128 steps). A fader ramp over MIDI is 128 discrete jumps — audible on a hardware send effect. OSC carries 32-bit floats. Ramps are smooth at any resolution. OSC over UDP on LAN is also orders of magnitude more responsive than MIDI's serial bandwidth under load.
 
 ---
 
 ## Signal chain
 
 ```
-Cirklon → USB → Browser (Web MIDI API)
+MIDI controller → USB → Browser (Web MIDI API)
   → WebSocket → FastAPI server
   → bridge.run_macro() → operations (ramp / LFO)
   → UDP OSC → TotalMix FX on RME UFX II
 ```
 
-MQTT (Home Assistant / mosquitto) carries workspace and snapshot state in both directions.
+Any standard MIDI controller works. The bridge responds to CC, Note On, and Note Off messages.
+
+Optional: MQTT (Home Assistant / Mosquitto) for home automation integration — trigger macros from HA automations, or react to bridge state in your home environment. Not required for core functionality.
 
 ---
 
 ## Features
 
-- **MIDI CC triggers** — bind any CC number + channel to a macro in `mappings.json`
+- **MIDI triggers** — bind CC, Note On, or Note Off (any number, any channel) to a macro
 - **Fire modes** — `ignore`, `queue`, or `restart` when a macro is already running
-- **Workspace + snapshot switching** — macros declare their target by name; the bridge resolves slot numbers and switches via OSC only when needed
-- **BPM-synced ramp and LFO** — smooth fader moves over musical time (bars × BPM), cancellable mid-execution
-- **Live web UI** — macro cards with progress bars, four-state LED indicators, real-time WebSocket updates
+- **Workspace + snapshot switching** — macros declare target by name; bridge resolves slot numbers and switches via OSC only when needed
+- **BPM-synced ramp and LFO** — smooth fader moves over musical time (`bars × BPM`); use `"bpm": "clock"` to sync to live MIDI clock tempo
+- **Live web UI** — macro cards with progress bars, five-state LED indicators, real-time WebSocket updates
 - **Inline config editing** — edit any macro in the browser; changes write to disk and hot-reload instantly
-- **MIDI clock BPM display** — reads `0xF8` timing clock from the Cirklon and shows live BPM in the header
-- **MQTT integration** — Home Assistant can trigger macros and receive live state
+- **MIDI clock BPM display** — reads `0xF8` timing clock and shows live BPM in the header
+- **OSC address discovery** — run the OSC monitor, move a fader in TotalMix, see the address *(M4)*
+- **MQTT integration** — optional; Home Assistant can trigger macros and receive live workspace state
 - **Auto-backup** — every config save creates a timestamped copy in `backups/`
 
 ---
 
 ## Quick start
 
-**1. Deploy**
+### Option A — Local (laptop, no server needed)
+
+```bash
+git clone https://github.com/auntiepickle/totalmix-osc-bridge.git
+cd totalmix-osc-bridge
+
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+cp mappings.example.json mappings.json
+cp ufx2_channel_map.example.json ufx2_channel_map.json
+cp ufx2_snapshot_map.example.json ufx2_snapshot_map.json
+
+export OSC_IP=127.0.0.1   # TotalMix is on the same machine
+uvicorn web.web_client:app --host 0.0.0.0 --port 8080
+```
+
+Open `http://localhost:8080`. MIDI works on localhost without HTTPS.
+Point TotalMix OSC output to `127.0.0.1`.
+
+### Option B — Docker (always-on server)
 
 ```bash
 cp docker-compose.example.yml docker-compose.yml
-# Edit docker-compose.yml — set OSC_IP, MQTT_BROKER, SMB paths
-docker compose build && docker compose up -d
-```
+# Edit docker-compose.yml — set OSC_IP at minimum
 
-**2. Set up config files**
-
-```bash
 cp mappings.example.json mappings.json
 cp ufx2_channel_map.example.json ufx2_channel_map.json
-# Edit both to match your TotalMix routing
+
+docker compose build --no-cache && docker compose up -d
+docker compose logs -f
 ```
 
-`ufx2_snapshot_map.json` lives outside the repo (on your NAS/SMB share). See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-
-**3. Open the UI**
-
-Navigate to `https://YOUR-SERVER-IP` (HTTPS required for Web MIDI). Select your MIDI input device in the header. Macro cards load automatically from `mappings.json`.
-
-If `mappings.json` is missing the UI shows a setup banner — click **Use as my mappings.json** to initialize from the example.
+HTTPS is required for Web MIDI on a real IP — see [docs/SETUP.md](docs/SETUP.md#https).
 
 ---
 
@@ -67,9 +89,9 @@ If `mappings.json` is missing the UI shows a setup banner — click **Use as my 
 |---|---|
 | `mappings.json` | Macro definitions — steps, MIDI triggers, fire modes, operations |
 | `ufx2_snapshot_map.json` | Workspace names → TotalMix Quick Select slots + snapshot names |
-| `ufx2_channel_map.json` | OSC address → human name map used to generate routing labels on cards |
+| `ufx2_channel_map.json` | OSC address → human name map for routing labels on cards |
 
-All three have `*.example.json` counterparts in the repo. The real files are git-ignored so live edits survive `git pull`. Full schema: [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
+All three have `*.example.json` counterparts. The real files are git-ignored so live edits survive `git pull`. Full schema: [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
 
 ---
 
@@ -77,6 +99,6 @@ All three have `*.example.json` counterparts in the repo. The real files are git
 
 | Doc | What's in it |
 |---|---|
-| [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) | Signal flow, every component, state machine, TotalMix OSC gotchas, thread safety, frontend patterns |
-| [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) | Full schema for all three config files |
-| [docs/SETUP.md](docs/SETUP.md) | Docker deployment, local dev, env vars, HTTPS, Home Assistant |
+| [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) | Signal flow, every component, state machine, TotalMix OSC gotchas, thread safety, frontend architecture |
+| [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) | Full schema for all three config files with examples |
+| [docs/SETUP.md](docs/SETUP.md) | Local and Docker deployment, env vars, HTTPS, MQTT / Home Assistant |
