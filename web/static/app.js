@@ -121,42 +121,57 @@ function updateStatusHeader() {
 }
 
 // Populate and sync the workspace / snapshot nav dropdowns.
-// Rebuilds options from window._snapshotMap so they reflect the live map,
-// then selects the currently active workspace and snapshot.
+// A disabled '—' placeholder is always the first option. It stays selected
+// until the WebSocket delivers a confirmed workspace/snapshot from the bridge.
 function _updateNavDropdowns() {
   const wsSel = document.getElementById('workspace-select');
   const ssSel = document.getElementById('snapshot-select-nav');
   if (!wsSel || !ssSel) return;
 
-  const snapMap   = window._snapshotMap || {};
+  const snapMap    = window._snapshotMap || {};
   const workspaces = Object.keys(snapMap);
+  const wsKnown    = workspaces.includes(currentWorkspace);
 
-  // Workspace dropdown
-  wsSel.innerHTML = workspaces.length
-    ? workspaces.map(ws =>
-        `<option value="${ws}"${ws === currentWorkspace ? ' selected' : ''}>${ws}</option>`
-      ).join('')
-    : `<option value="">${currentWorkspace || 'Workspace: —'}</option>`;
+  // Workspace dropdown — placeholder selected when state not yet confirmed
+  wsSel.innerHTML =
+    `<option value="" disabled${!wsKnown ? ' selected' : ''}>—</option>` +
+    workspaces.map(ws =>
+      `<option value="${ws}"${ws === currentWorkspace ? ' selected' : ''}>${ws}</option>`
+    ).join('');
 
-  // Snapshot dropdown — scoped to the selected workspace
-  const selectedWs = wsSel.value || currentWorkspace;
-  const ssValues   = selectedWs && snapMap[selectedWs]
-    ? Object.values(snapMap[selectedWs].snapshots || {})
+  // Snapshot dropdown — scoped to the confirmed workspace
+  const ssValues = wsKnown && snapMap[currentWorkspace]
+    ? Object.values(snapMap[currentWorkspace].snapshots || {})
     : [];
-  ssSel.innerHTML = ssValues.length
-    ? ssValues.map(ss =>
-        `<option value="${ss}"${ss.toLowerCase() === (currentSnapshot || '').toLowerCase() ? ' selected' : ''}>${ss}</option>`
-      ).join('')
-    : `<option value="">${currentSnapshot || 'Snapshot: —'}</option>`;
+  const ssKnown = ssValues.some(
+    s => s.toLowerCase() === (currentSnapshot || '').toLowerCase()
+  );
+  ssSel.innerHTML =
+    `<option value="" disabled${!ssKnown ? ' selected' : ''}>—</option>` +
+    ssValues.map(ss =>
+      `<option value="${ss}"${ss.toLowerCase() === (currentSnapshot || '').toLowerCase() ? ' selected' : ''}>${ss}</option>`
+    ).join('');
 }
 
-// Called when either nav dropdown changes — fires POST /api/switch
+// Called when either nav dropdown changes — fires POST /api/switch.
+// Refreshes snapshot options immediately using the newly selected workspace
+// (can't wait for WS round-trip to update currentWorkspace first).
 window.switchToFromNav = async function() {
-  const ws = document.getElementById('workspace-select')?.value;
-  const ss = document.getElementById('snapshot-select-nav')?.value;
+  const wsSel = document.getElementById('workspace-select');
+  const ssSel = document.getElementById('snapshot-select-nav');
+  const ws    = wsSel?.value;
+  const ss    = ssSel?.value;
   if (!ws) return;
-  // Refresh snapshot options when workspace changes
-  _updateNavDropdowns();
+
+  // Refresh snapshot dropdown to match the workspace the user just picked
+  const snapMap  = window._snapshotMap || {};
+  const ssValues = snapMap[ws] ? Object.values(snapMap[ws].snapshots || {}) : [];
+  if (ssSel) {
+    ssSel.innerHTML =
+      `<option value="" disabled selected>—</option>` +
+      ssValues.map(s => `<option value="${s}">${s}</option>`).join('');
+  }
+
   try {
     await fetch('/api/switch', {
       method: 'POST',
