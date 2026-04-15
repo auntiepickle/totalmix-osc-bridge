@@ -135,22 +135,15 @@ function renderCards() {
 
     // Workspace section header — always visible, click to collapse
     html += `<div class="col-span-full mb-2">
-      <div class="flex items-center gap-3 py-1">
-        <button onclick="toggleGroup('${ws}')"
-            class="flex items-center gap-3 flex-1 group text-left min-w-0">
-          <span class="text-xs font-semibold text-zinc-400 uppercase tracking-widest group-hover:text-white transition-colors shrink-0">${ws}</span>
-          <div class="flex-1 h-px bg-zinc-800"></div>
-          <!-- Group last-fired LED + label -->
-          <span id="group-led-dot-${wsId}" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200 shrink-0"></span>
-          <span id="group-led-label-${wsId}" class="text-[10px] font-mono text-zinc-600 max-w-[120px] truncate"></span>
-          <i id="group-arrow-${wsId}" class="fas fa-chevron-down text-[9px] text-zinc-500 transition-transform duration-200 ml-1 shrink-0" ${arrowStyle}></i>
-        </button>
-        <button onclick="event.stopPropagation(); switchTo('${ws}')"
-            title="Switch to workspace ${ws}"
-            class="shrink-0 text-[10px] text-zinc-600 hover:text-white bg-zinc-800/0 hover:bg-zinc-800 border border-transparent hover:border-zinc-700 px-2 py-1 rounded-lg transition-all">
-          <i class="fas fa-right-to-bracket text-[9px]"></i>
-        </button>
-      </div>
+      <button onclick="toggleGroup('${ws}')"
+          class="w-full flex items-center gap-3 group text-left py-1">
+        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-widest group-hover:text-white transition-colors">${ws}</span>
+        <div class="flex-1 h-px bg-zinc-800"></div>
+        <!-- Group last-fired LED + label -->
+        <span id="group-led-dot-${wsId}" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200 shrink-0"></span>
+        <span id="group-led-label-${wsId}" class="text-[10px] font-mono text-zinc-600 max-w-[200px] truncate"></span>
+        <i id="group-arrow-${wsId}" class="fas fa-chevron-down text-[9px] text-zinc-500 transition-transform duration-200 ml-1" ${arrowStyle}></i>
+      </button>
     </div>`;
 
     // Collapsible body — display:contents keeps children as direct grid items
@@ -165,18 +158,11 @@ function renderCards() {
         const ssArrowStyle = ssCollapsed ? 'style="transform:rotate(-90deg)"' : '';
 
         html += `<div class="col-span-full mb-1 ml-1">
-          <div class="flex items-center gap-2 py-0.5">
-            <button onclick="toggleSnapshotGroup('${ws}','${ss}')"
-                class="flex items-center gap-2 group text-left">
-              <span class="text-[10px] text-zinc-600 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">↳ ${ss}</span>
-              <i id="ss-arrow-${ssId}" class="fas fa-chevron-down text-[8px] text-zinc-700 group-hover:text-zinc-500 transition-transform duration-150" ${ssArrowStyle}></i>
-            </button>
-            <button onclick="switchTo('${ws}','${ss}')"
-                title="Switch to ${ws} / ${ss}"
-                class="text-[9px] text-zinc-700 hover:text-zinc-400 transition-colors px-1.5">
-              <i class="fas fa-right-to-bracket"></i>
-            </button>
-          </div>
+          <button onclick="toggleSnapshotGroup('${ws}','${ss}')"
+              class="flex items-center gap-2 group text-left py-0.5">
+            <span class="text-[10px] text-zinc-600 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">↳ ${ss}</span>
+            <i id="ss-arrow-${ssId}" class="fas fa-chevron-down text-[8px] text-zinc-700 group-hover:text-zinc-500 transition-transform duration-150" ${ssArrowStyle}></i>
+          </button>
         </div>`;
         html += `<div id="ss-body-${ssId}" style="display:${ssBodyDisp}">`;
         names.forEach(name => { html += createMacroCardHTML(name, macros[name]); });
@@ -227,18 +213,6 @@ async function fireMacro(name, value = 1.0, ramp = false) {
   }
 }
 
-// ── Click-to-switch workspace / snapshot ──────────────────────────────────────
-window.switchTo = async function(workspace, snapshot = null) {
-  try {
-    await fetch('/api/switch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace, snapshot }),
-    });
-  } catch (e) {
-    console.error('[UI] switchTo error:', e);
-  }
-};
 
 // ── Structured detail panel ───────────────────────────────────────────────────
 // _snapshotMap is loaded once on init (see app.js loadSnapshotMap)
@@ -447,13 +421,17 @@ function editDetail(name) {
         <div class="flex gap-2 items-center">
           <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
           <span class="text-zinc-500 text-xs shrink-0">bars @</span>
-          <select data-field="steps.${i}.operation.bpm" class="${sc} shrink-0">
-            <option value="clock"${op.bpm==='clock'?' selected':''}>clock</option>
-            ${[60,80,100,120,130,140,150,160,170,180].map(b =>
-              `<option value="${b}"${(op.bpm||140)===b?' selected':''}>${b}</option>`
-            ).join('')}
-          </select>
-          <span class="text-zinc-500 text-xs shrink-0">BPM</span>
+          <input data-field="steps.${i}.operation.bpm" id="bpm-input-step-${i}"
+              type="${op.bpm==='clock'?'text':'number'}" min="20" max="400"
+              value="${op.bpm==='clock'?'clock':_esc(op.bpm??140)}"
+              class="${nc}" ${op.bpm==='clock'?'disabled':''}>
+          <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
+              title="Sync to live MIDI clock tempo">
+            <input type="checkbox" id="bpm-clock-cb-${i}" class="w-3 h-3 accent-orange-500"
+                ${op.bpm==='clock'?'checked':''}
+                onchange="toggleBPMClock(${i})">
+            clock
+          </label>
         </div>
       </div>`;
     } else {
@@ -598,6 +576,23 @@ function cancelInlineEdit(name) {
   panel.classList.add('hidden');
   if (arrow) arrow.style.transform = '';
 }
+
+// ── BPM clock toggle in step editor ──────────────────────────────────────────
+window.toggleBPMClock = function(stepIndex) {
+  const cb  = document.getElementById(`bpm-clock-cb-${stepIndex}`);
+  const inp = document.getElementById(`bpm-input-step-${stepIndex}`);
+  if (!cb || !inp) return;
+  if (cb.checked) {
+    inp.dataset.prevBpm = inp.value;   // stash the last numeric BPM
+    inp.type     = 'text';
+    inp.value    = 'clock';
+    inp.disabled = true;
+  } else {
+    inp.type     = 'number';
+    inp.value    = inp.dataset.prevBpm || '140';
+    inp.disabled = false;
+  }
+};
 
 // ── Settings menu ─────────────────────────────────────────────────────────────
 async function toggleSettingsMenu() {

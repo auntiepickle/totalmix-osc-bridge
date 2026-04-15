@@ -96,12 +96,9 @@ async function initMappingsFromExample() {
   }
 }
 
-// ── Status header ─────────────────────────────────────────────────────────────
+// ── Status header + WS/SS nav dropdowns ──────────────────────────────────────
 function updateStatusHeader() {
-  const workspaceEl = document.getElementById('workspace');
-  const snapshotEl  = document.getElementById('snapshot');
-  if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
-  if (snapshotEl)  snapshotEl.textContent  = `Snapshot: ${currentSnapshot || '—'}`;
+  _updateNavDropdowns();
 
   const pill  = document.getElementById('midi-status');
   const dot   = document.getElementById('midi-status-dot');
@@ -122,6 +119,54 @@ function updateStatusHeader() {
     pill.classList.add('text-zinc-400', 'border-zinc-700');
   }
 }
+
+// Populate and sync the workspace / snapshot nav dropdowns.
+// Rebuilds options from window._snapshotMap so they reflect the live map,
+// then selects the currently active workspace and snapshot.
+function _updateNavDropdowns() {
+  const wsSel = document.getElementById('workspace-select');
+  const ssSel = document.getElementById('snapshot-select-nav');
+  if (!wsSel || !ssSel) return;
+
+  const snapMap   = window._snapshotMap || {};
+  const workspaces = Object.keys(snapMap);
+
+  // Workspace dropdown
+  wsSel.innerHTML = workspaces.length
+    ? workspaces.map(ws =>
+        `<option value="${ws}"${ws === currentWorkspace ? ' selected' : ''}>${ws}</option>`
+      ).join('')
+    : `<option value="">${currentWorkspace || 'Workspace: —'}</option>`;
+
+  // Snapshot dropdown — scoped to the selected workspace
+  const selectedWs = wsSel.value || currentWorkspace;
+  const ssValues   = selectedWs && snapMap[selectedWs]
+    ? Object.values(snapMap[selectedWs].snapshots || {})
+    : [];
+  ssSel.innerHTML = ssValues.length
+    ? ssValues.map(ss =>
+        `<option value="${ss}"${ss.toLowerCase() === (currentSnapshot || '').toLowerCase() ? ' selected' : ''}>${ss}</option>`
+      ).join('')
+    : `<option value="">${currentSnapshot || 'Snapshot: —'}</option>`;
+}
+
+// Called when either nav dropdown changes — fires POST /api/switch
+window.switchToFromNav = async function() {
+  const ws = document.getElementById('workspace-select')?.value;
+  const ss = document.getElementById('snapshot-select-nav')?.value;
+  if (!ws) return;
+  // Refresh snapshot options when workspace changes
+  _updateNavDropdowns();
+  try {
+    await fetch('/api/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: ws, snapshot: ss || null }),
+    });
+  } catch (e) {
+    console.error('[UI] switchToFromNav error:', e);
+  }
+};
 
 // ── Last fired display ────────────────────────────────────────────────────────
 function updateLastFired() {
@@ -198,6 +243,7 @@ async function loadSnapshotMap() {
     const res = await fetch('/api/snapshot_map');
     window._snapshotMap = await res.json();
     console.log(`[UI] Snapshot map loaded — ${Object.keys(window._snapshotMap).length} workspaces`);
+    _updateNavDropdowns();
   } catch (e) {
     console.warn('[UI] Could not load snapshot map:', e);
     window._snapshotMap = {};
