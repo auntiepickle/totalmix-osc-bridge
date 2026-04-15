@@ -61,51 +61,58 @@ function calculateDurationMs(macro) {
   if (macro.durationMs) return macro.durationMs;
   const step = macro.steps ? macro.steps.find(s => s.operation) : null;
   if (!step || !step.operation) return 2000;
-  const op = step.operation;
-  return Math.round((op.bars || 2) * (240000 / (op.bpm || 140)));
+  const op  = step.operation;
+  const bpm = op.bpm === 'clock' ? (window._detectedBPM || 140) : (op.bpm || 140);
+  return Math.round((op.bars || 2) * (240000 / bpm));
 }
 
 function getMidiTriggerLabel(m) {
   const t = m.midi_triggers && m.midi_triggers[0];
   if (!t) return '';
+  const type = t.type || 'control_change';
+  if (type === 'note_on')  return `NOTE ON ${t.note ?? '?'} · ch${t.channel}`;
+  if (type === 'note_off') return `NOTE OFF ${t.note ?? '?'} · ch${t.channel}`;
   return `CC${t.number} · ch${t.channel}`;
 }
 
 // ── Card HTML ─────────────────────────────────────────────────────────────────
 function createMacroCardHTML(name, m) {
-  const midiLabel = getMidiTriggerLabel(m);
+  const midiLabel   = getMidiTriggerLabel(m);
+  const routingLabel = m.routing_label || '—';
   return `
-<div id="card-${name}" class="card bg-[#1E1E1E] border border-zinc-700 p-5 rounded-2xl">
-    <div class="flex items-start gap-3 mb-3">
-        <!-- LED dot — top left, larger, aligned to title baseline -->
-        <span id="led-dot-${name}" class="w-4 h-4 rounded-full bg-zinc-700 transition-all duration-150 shrink-0 mt-1"></span>
-        <!-- Title + meta -->
-        <div class="flex-1 min-w-0">
-            <h3 class="text-lg font-bold text-white truncate">${name}</h3>
-            <p class="text-zinc-400 text-xs mt-0.5">${m.description || ''}</p>
-            <p class="routing-label text-orange-400 text-xs font-medium mt-1.5 tracking-wider">${m.routing_label || '—'}</p>
-        </div>
-        <!-- MIDI badge -->
-        ${midiLabel ? `<div class="text-xs font-mono bg-zinc-800/80 text-zinc-400 px-2.5 py-1 rounded-lg shrink-0">${midiLabel}</div>` : ''}
+<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200">
+    <!-- Header: LED · name/desc · MIDI badge -->
+    <div class="flex items-center gap-3 mb-1">
+        <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
+        <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
+        ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
     </div>
-    <div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden mb-4">
-      <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500" style="width:0%;"></div>
+    <!-- Description + routing label -->
+    <div class="pl-6 mb-3">
+        ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${m.description}</p>` : ''}
+        <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${routingLabel}</p>
     </div>
+    <!-- Progress bar -->
+    <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3">
+      <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
+    </div>
+    <!-- Action buttons -->
     <div class="grid grid-cols-3 gap-2">
         <button onclick="fireMacro('${name}',1.0,false)"
-            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-2.5 rounded-xl text-base transition-all">
+            class="fire-btn col-span-2 bg-orange-500 hover:bg-orange-400 active:scale-95 active:bg-orange-600 text-black font-bold py-2.5 rounded-xl text-sm transition-all">
             FIRE
         </button>
         <button onclick="fireMacro('${name}',1.0,true)"
-            class="bg-zinc-800 hover:bg-amber-400/20 border border-amber-400/40 hover:border-amber-400 text-amber-400 font-semibold py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
+            class="bg-zinc-800 hover:bg-amber-400/10 border border-zinc-700 hover:border-amber-400/60 text-amber-400 font-semibold py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
             RAMP
         </button>
     </div>
+    <!-- Details toggle -->
     <button onclick="toggleDetail('${name}')"
-        class="mt-4 w-full text-zinc-600 hover:text-orange-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
+        class="mt-3 w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
         DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
-    <div id="detail-${name}" class="hidden mt-2 p-3 bg-[#111111] rounded-xl border border-zinc-700/50 text-xs"></div>
+    <div id="detail-${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
 </div>`;
 }
 
@@ -173,7 +180,33 @@ function renderCards() {
   });
 
   grid.innerHTML = html;
+  // Run after paint so getBoundingClientRect reflects final layout
+  requestAnimationFrame(equalizeCardHeights);
 }
+
+// ── Equal card heights per visual row ────────────────────────────────────────
+// Groups cards by their top offset (= same grid row) and sets a shared
+// min-height so each row looks uniform. Runs after render and on resize.
+// Expanding details only grows that one card — it never shrinks its neighbours.
+function equalizeCardHeights() {
+  const cards = [...document.querySelectorAll('#macro-grid .card')];
+  // Reset before measuring
+  cards.forEach(c => { c.style.minHeight = ''; });
+
+  const rows = new Map();
+  cards.forEach(c => {
+    const top = Math.round(c.getBoundingClientRect().top);
+    if (!rows.has(top)) rows.set(top, []);
+    rows.get(top).push(c);
+  });
+
+  rows.forEach(rowCards => {
+    const max = Math.max(...rowCards.map(c => c.offsetHeight));
+    rowCards.forEach(c => { c.style.minHeight = max + 'px'; });
+  });
+}
+
+window.addEventListener('resize', equalizeCardHeights);
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
 function animateProgress(name, durationMs) {
@@ -200,12 +233,16 @@ async function fireMacro(name, value = 1.0, ramp = false) {
     await fetch(`/api/trigger/${name}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ param: value }),
+      body: JSON.stringify({
+        param: value,
+        clock_bpm: window._detectedBPM || null,
+      }),
     });
   } catch (e) {
     console.error('[UI] fireMacro error:', e);
   }
 }
+
 
 // ── Structured detail panel ───────────────────────────────────────────────────
 // _snapshotMap is loaded once on init (see app.js loadSnapshotMap)
@@ -219,7 +256,10 @@ function toggleDetail(name) {
 
   panel.classList.toggle('hidden');
   if (arrow) arrow.style.transform = panel.classList.contains('hidden') ? '' : 'rotate(180deg)';
-  if (panel.classList.contains('hidden')) return;
+  if (panel.classList.contains('hidden')) {
+    requestAnimationFrame(equalizeCardHeights);
+    return;
+  }
 
   const durationSec = (calculateDurationMs(m) / 1000).toFixed(2);
   const fireMode = (m.fire_mode || 'ignore').toUpperCase();
@@ -270,8 +310,9 @@ function toggleDetail(name) {
       if (step.operation) {
         const op = step.operation;
         const opType = (op.type || '').toUpperCase();
-        const bars = op.bars || 2;
-        const bpm  = op.bpm  || 140;
+        const bars  = op.bars || 2;
+        const bpm   = op.bpm;
+        const bpmLabel = bpm === 'clock' ? '<span class="text-orange-400/80">clock</span>' : (bpm || 140);
         const curve = op.curve ? ` · ${op.curve}` : '';
         const opColors = { RAMP: 'text-amber-400', LFO: 'text-purple-400' };
         const opColor = opColors[opType] || 'text-zinc-400';
@@ -279,7 +320,7 @@ function toggleDetail(name) {
           <span class="text-zinc-500 text-xs">∿</span>
           <span class="text-orange-300 text-xs flex-1 truncate">${addr}</span>
           <span class="${opColor} text-xs font-bold">${opType}</span>
-          <span class="text-zinc-600 text-xs">${bars}b @ ${bpm}${curve}</span>
+          <span class="text-zinc-600 text-xs">${bars}b @ ${bpmLabel}${curve}</span>
         </div>`;
       } else {
         const val = step.value !== undefined ? step.value : '?';
@@ -299,7 +340,12 @@ function toggleDetail(name) {
       <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">MIDI Triggers</div>
       <div class="flex flex-wrap gap-1.5">`;
     m.midi_triggers.forEach(t => {
-      html += `<span class="text-xs font-mono bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-700">CC${t.number} ch${t.channel}</span>`;
+      const type = t.type || 'control_change';
+      let label;
+      if (type === 'note_on')       label = `NOTE ON ${t.note ?? '?'} ch${t.channel}`;
+      else if (type === 'note_off') label = `NOTE OFF ${t.note ?? '?'} ch${t.channel}`;
+      else                          label = `CC${t.number ?? '?'} ch${t.channel}`;
+      html += `<span class="text-xs font-mono bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-700">${label}</span>`;
     });
     html += `</div></div>`;
   }
@@ -408,8 +454,17 @@ function editDetail(name) {
         <div class="flex gap-2 items-center">
           <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
           <span class="text-zinc-500 text-xs shrink-0">bars @</span>
-          <input data-field="steps.${i}.operation.bpm" type="number" min="1" value="${_esc(op.bpm??140)}" class="${nc}">
-          <span class="text-zinc-500 text-xs shrink-0">BPM</span>
+          <input data-field="steps.${i}.operation.bpm" id="bpm-input-step-${i}"
+              type="${op.bpm==='clock'?'text':'number'}" min="20" max="400"
+              value="${op.bpm==='clock'?'clock':_esc(op.bpm??140)}"
+              class="${nc}" ${op.bpm==='clock'?'disabled':''}>
+          <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
+              title="Sync to live MIDI clock tempo">
+            <input type="checkbox" id="bpm-clock-cb-${i}" class="w-3 h-3 accent-orange-500"
+                ${op.bpm==='clock'?'checked':''}
+                onchange="toggleBPMClock(${i})">
+            clock
+          </label>
         </div>
       </div>`;
     } else {
@@ -421,14 +476,24 @@ function editDetail(name) {
     }
   }).join('');
 
-  // MIDI triggers
-  const midiHtml = (m.midi_triggers || []).map((t, i) => `
-    <div class="flex gap-2 items-center bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
-      <span class="text-zinc-500 text-xs shrink-0">CC</span>
-      <input data-field="midi_triggers.${i}.number" type="number" min="0" max="127" value="${_esc(t.number)}" class="${nc}">
+  // MIDI triggers — type-aware: CC uses 'number', Note On/Off use 'note'
+  const midiHtml = (m.midi_triggers || []).map((t, i) => {
+    const type    = t.type || 'control_change';
+    const isNote  = type === 'note_on' || type === 'note_off';
+    const numField = isNote ? `midi_triggers.${i}.note`   : `midi_triggers.${i}.number`;
+    const numValue = isNote ? (t.note ?? 0)               : (t.number ?? 0);
+    return `<div class="flex gap-2 items-center bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
+      <select data-field="midi_triggers.${i}.type" class="${sc} shrink-0">
+        <option value="control_change"${type==='control_change'?' selected':''}>CC</option>
+        <option value="note_on"${type==='note_on'?' selected':''}>Note On</option>
+        <option value="note_off"${type==='note_off'?' selected':''}>Note Off</option>
+      </select>
+      <span class="text-zinc-500 text-xs shrink-0">#</span>
+      <input data-field="${numField}" type="number" min="0" max="127" value="${_esc(numValue)}" class="${nc}">
       <span class="text-zinc-500 text-xs shrink-0">ch</span>
       <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   panel.innerHTML = `<div class="space-y-3 text-sm">
 
@@ -543,7 +608,26 @@ function cancelInlineEdit(name) {
   if (!panel) return;
   panel.classList.add('hidden');
   if (arrow) arrow.style.transform = '';
+  // Re-equalise now this card has collapsed
+  requestAnimationFrame(equalizeCardHeights);
 }
+
+// ── BPM clock toggle in step editor ──────────────────────────────────────────
+window.toggleBPMClock = function(stepIndex) {
+  const cb  = document.getElementById(`bpm-clock-cb-${stepIndex}`);
+  const inp = document.getElementById(`bpm-input-step-${stepIndex}`);
+  if (!cb || !inp) return;
+  if (cb.checked) {
+    inp.dataset.prevBpm = inp.value;   // stash the last numeric BPM
+    inp.type     = 'text';
+    inp.value    = 'clock';
+    inp.disabled = true;
+  } else {
+    inp.type     = 'number';
+    inp.value    = inp.dataset.prevBpm || '140';
+    inp.disabled = false;
+  }
+};
 
 // ── Settings menu ─────────────────────────────────────────────────────────────
 async function toggleSettingsMenu() {

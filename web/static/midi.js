@@ -26,6 +26,7 @@ function _processMIDIClock() {
   const bpm   = Math.round(60000 / (24 * avgMs));
   if (bpm < 20 || bpm > 400) return;
 
+  window._detectedBPM = bpm;   // exposed for fireMacro() to send with trigger
   const el = document.getElementById('midi-bpm');
   if (el) el.textContent = `${bpm} BPM`;
 }
@@ -62,26 +63,47 @@ function handleMIDIMessage(message) {
   // MIDI Clock (0xF8) — detect BPM from Cirklon/DAW timing clock
   if (status === 0xF8) { _processMIDIClock(); return; }
 
-  if ((status & 0xF0) !== 0xB0) return;   // CC only
-
+  const msgType = status & 0xF0;
   const channel = (status & 0x0F) + 1;
-  const cc      = data1;
-  const value   = data2 / 127.0;
 
-  flashMIDIActivity();
-  _trackCC(cc, channel, data2);
-
-  Object.keys(macros).forEach(name => {
-    const macro = macros[name];
-    for (const trigger of macro.midi_triggers || []) {
-      if (trigger.type === 'control_change' && trigger.number === cc && trigger.channel === channel) {
-        console.log(`[MIDI] Triggered ${name} (CC${cc} ch${channel} val=${data2})`);
-        fireMacro(name, value, false);
-        pulseLED(name, Date.now() / 1000);
-        return;
+  // ── Control Change (0xB0) ─────────────────────────────────────────────────
+  if (msgType === 0xB0) {
+    const cc    = data1;
+    const value = data2 / 127.0;
+    flashMIDIActivity();
+    _trackCC(cc, channel, data2);
+    Object.keys(macros).forEach(name => {
+      for (const trigger of macros[name].midi_triggers || []) {
+        if (trigger.type === 'control_change' && trigger.number === cc && trigger.channel === channel) {
+          console.log(`[MIDI] CC ${name} (CC${cc} ch${channel} val=${data2})`);
+          fireMacro(name, trigger.use_value_as_param ? value : 1.0);
+          pulseLED(name, Date.now() / 1000);
+          return;
+        }
       }
-    }
-  });
+    });
+    return;
+  }
+
+  // ── Note On (0x90) / Note Off (0x80) ─────────────────────────────────────
+  if (msgType === 0x90 || msgType === 0x80) {
+    const note     = data1;
+    const velocity = data2 / 127.0;
+    // Note On with velocity 0 is treated as Note Off per MIDI spec
+    const isNoteOn = msgType === 0x90 && data2 > 0;
+    const trigType = isNoteOn ? 'note_on' : 'note_off';
+
+    Object.keys(macros).forEach(name => {
+      for (const trigger of macros[name].midi_triggers || []) {
+        if (trigger.type === trigType && trigger.note === note && trigger.channel === channel) {
+          console.log(`[MIDI] ${trigType} ${name} (note ${note} ch${channel} vel=${data2})`);
+          fireMacro(name, trigger.use_value_as_param ? velocity : 1.0);
+          pulseLED(name, Date.now() / 1000);
+          return;
+        }
+      }
+    });
+  }
 }
 
 // ── MIDI init / connect / disconnect / rescan ─────────────────────────────────

@@ -96,12 +96,9 @@ async function initMappingsFromExample() {
   }
 }
 
-// ── Status header ─────────────────────────────────────────────────────────────
+// ── Status header + WS/SS nav dropdowns ──────────────────────────────────────
 function updateStatusHeader() {
-  const workspaceEl = document.getElementById('workspace');
-  const snapshotEl  = document.getElementById('snapshot');
-  if (workspaceEl) workspaceEl.textContent = `Workspace: ${currentWorkspace || '—'}`;
-  if (snapshotEl)  snapshotEl.textContent  = `Snapshot: ${currentSnapshot || '—'}`;
+  _updateNavDropdowns();
 
   const pill  = document.getElementById('midi-status');
   const dot   = document.getElementById('midi-status-dot');
@@ -122,6 +119,69 @@ function updateStatusHeader() {
     pill.classList.add('text-zinc-400', 'border-zinc-700');
   }
 }
+
+// Populate and sync the workspace / snapshot nav dropdowns.
+// A disabled '—' placeholder is always the first option. It stays selected
+// until the WebSocket delivers a confirmed workspace/snapshot from the bridge.
+function _updateNavDropdowns() {
+  const wsSel = document.getElementById('workspace-select');
+  const ssSel = document.getElementById('snapshot-select-nav');
+  if (!wsSel || !ssSel) return;
+
+  const snapMap    = window._snapshotMap || {};
+  const workspaces = Object.keys(snapMap);
+  const wsKnown    = workspaces.includes(currentWorkspace);
+
+  // Workspace dropdown — placeholder selected when state not yet confirmed
+  wsSel.innerHTML =
+    `<option value="" disabled${!wsKnown ? ' selected' : ''}>—</option>` +
+    workspaces.map(ws =>
+      `<option value="${ws}"${ws === currentWorkspace ? ' selected' : ''}>${ws}</option>`
+    ).join('');
+
+  // Snapshot dropdown — scoped to the confirmed workspace
+  const ssValues = wsKnown && snapMap[currentWorkspace]
+    ? Object.values(snapMap[currentWorkspace].snapshots || {})
+    : [];
+  const ssKnown = ssValues.some(
+    s => s.toLowerCase() === (currentSnapshot || '').toLowerCase()
+  );
+  ssSel.innerHTML =
+    `<option value="" disabled${!ssKnown ? ' selected' : ''}>—</option>` +
+    ssValues.map(ss =>
+      `<option value="${ss}"${ss.toLowerCase() === (currentSnapshot || '').toLowerCase() ? ' selected' : ''}>${ss}</option>`
+    ).join('');
+}
+
+// Called when either nav dropdown changes — fires POST /api/switch.
+// Refreshes snapshot options immediately using the newly selected workspace
+// (can't wait for WS round-trip to update currentWorkspace first).
+window.switchToFromNav = async function() {
+  const wsSel = document.getElementById('workspace-select');
+  const ssSel = document.getElementById('snapshot-select-nav');
+  const ws    = wsSel?.value;
+  const ss    = ssSel?.value;
+  if (!ws) return;
+
+  // Refresh snapshot dropdown to match the workspace the user just picked
+  const snapMap  = window._snapshotMap || {};
+  const ssValues = snapMap[ws] ? Object.values(snapMap[ws].snapshots || {}) : [];
+  if (ssSel) {
+    ssSel.innerHTML =
+      `<option value="" disabled selected>—</option>` +
+      ssValues.map(s => `<option value="${s}">${s}</option>`).join('');
+  }
+
+  try {
+    await fetch('/api/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: ws, snapshot: ss || null }),
+    });
+  } catch (e) {
+    console.error('[UI] switchToFromNav error:', e);
+  }
+};
 
 // ── Last fired display ────────────────────────────────────────────────────────
 function updateLastFired() {
@@ -146,9 +206,14 @@ function updateMacroCard(name) {
 }
 
 // ── LED helpers ───────────────────────────────────────────────────────────────
+// "last fired" hold — tracks which card carries the dim peak-hold glow
+let _lastFiredName = null;
+
 const _LED_ALL = ['bg-zinc-700','bg-white','bg-amber-400','bg-green-400','bg-red-500',
+                  'bg-cyan-400',
                   'shadow-[0_0_8px_#fff]','shadow-[0_0_8px_#fbbf24]',
-                  'shadow-[0_0_10px_#4ade80]','shadow-[0_0_8px_#ef4444]'];
+                  'shadow-[0_0_10px_#4ade80]','shadow-[0_0_8px_#ef4444]',
+                  'shadow-[0_0_8px_#22d3ee]'];
 
 function _ledSet(dot, color, shadow, durationMs) {
   if (!dot) return;
@@ -174,16 +239,38 @@ function pulseLED(name, triggerTimestamp) {
   }
 }
 
-// Amber solid — macro is executing
+// Amber solid — macro is executing. Clears peak-hold on the previous card first.
 function setLEDRunning(name) {
+  if (_lastFiredName && _lastFiredName !== name) {
+    _clearLastFired(_lastFiredName);
+  }
   const dot = document.getElementById(`led-dot-${name}`);
   _ledSet(dot, 'bg-amber-400', 'shadow-[0_0_8px_#fbbf24]', 0);
 }
 
-// Green flash — macro finished
+function _clearLastFired(name) {
+  const dot  = document.getElementById(`led-dot-${name}`);
+  const card = document.getElementById(`card-${name}`);
+  if (dot)  { dot.classList.remove(..._LED_ALL); dot.classList.add('bg-zinc-700'); }
+  if (card) card.classList.remove('!border-cyan-500', 'shadow-[0_0_14px_rgba(34,211,238,0.15)]');
+}
+
+// Green flash → cyan peak-hold on LED + card border
+// Cyan (cool) vs amber (warm) — maximum perceptual contrast between
+// "currently running" and "last fired", readable at a glance across the room.
 function flashLEDComplete(name) {
-  const dot = document.getElementById(`led-dot-${name}`);
-  _ledSet(dot, 'bg-green-400', 'shadow-[0_0_10px_#4ade80]', 600);
+  _lastFiredName = name;
+  const dot  = document.getElementById(`led-dot-${name}`);
+  const card = document.getElementById(`card-${name}`);
+  if (!dot) return;
+  dot.classList.remove(..._LED_ALL);
+  dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
+  setTimeout(() => {
+    dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
+    dot.classList.remove(..._LED_ALL);
+    dot.classList.add('bg-cyan-400', 'shadow-[0_0_8px_#22d3ee]');
+    if (card) card.classList.add('!border-cyan-500', 'shadow-[0_0_14px_rgba(34,211,238,0.15)]');
+  }, 600);
 }
 
 // Red flash — macro was skipped/dropped
@@ -198,15 +285,55 @@ async function loadSnapshotMap() {
     const res = await fetch('/api/snapshot_map');
     window._snapshotMap = await res.json();
     console.log(`[UI] Snapshot map loaded — ${Object.keys(window._snapshotMap).length} workspaces`);
+    _updateNavDropdowns();
   } catch (e) {
     console.warn('[UI] Could not load snapshot map:', e);
     window._snapshotMap = {};
   }
 }
 
+// ── Pre-fill bridge state from REST — no WebSocket wait ──────────────────────
+// /api/status already carries current_workspace and current_snapshot so we
+// can populate the nav dropdowns immediately on load rather than waiting for
+// the first WS broadcast (which can take a second or two).
+async function prefillBridgeState() {
+  try {
+    const s = await fetch('/api/status').then(r => r.json());
+    if (s.workspace) currentWorkspace = s.workspace;
+    if (s.snapshot)  currentSnapshot  = s.snapshot;
+    _updateNavDropdowns();
+    updateStatusHeader();
+  } catch (_) {}
+}
+
+// ── Health polling — MQTT and OSC status dots ─────────────────────────────────
+async function pollHealth() {
+  try {
+    const h = await fetch('/api/health').then(r => r.json());
+    _applyHealthDot('mqtt-health-dot', h.mqtt_connected, 'MQTT');
+    _applyHealthDot('osc-health-dot',  h.osc_configured,  'OSC');
+  } catch (_) {
+    _applyHealthDot('mqtt-health-dot', false, 'MQTT');
+    _applyHealthDot('osc-health-dot',  false, 'OSC');
+  }
+}
+
+function _applyHealthDot(id, ok, label) {
+  const dot = document.getElementById(id);
+  if (!dot) return;
+  dot.classList.toggle('bg-green-500',   ok);
+  dot.classList.toggle('shadow-[0_0_5px_#22c55e]', ok);
+  dot.classList.toggle('bg-zinc-700',    !ok);
+  dot.title = ok ? `${label}: connected` : `${label}: disconnected`;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   initWebMIDI();
-  loadSnapshotMap();
+  // Load snapshot map and bridge state in parallel — populate dropdowns as
+  // soon as both resolve rather than waiting for the first WS broadcast.
+  await Promise.all([loadSnapshotMap(), prefillBridgeState()]);
   checkMappingsSource();
+  pollHealth();
+  setInterval(pollHealth, 15000);
 });

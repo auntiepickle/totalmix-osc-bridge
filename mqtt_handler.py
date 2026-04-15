@@ -110,6 +110,7 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
 
     def on_connect(client, userdata, flags, rc, properties=None):
         logger.info(f"MQTT connected (rc={rc})")
+        bridge.mqtt_connected = True
         client.subscribe("totalmix/#")
         client.subscribe("totalmix/macro/#")
 
@@ -197,8 +198,13 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         except Exception as e:
             logger.error(f"on_message error on {msg.topic}: {e}", exc_info=True)
 
-    client.on_connect = on_connect
-    client.on_message = on_message
+    def on_disconnect(client, userdata, disconnect_flags, reason_code, properties=None):
+        logger.warning(f"MQTT disconnected (rc={reason_code})")
+        bridge.mqtt_connected = False
+
+    client.on_connect    = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message    = on_message
     client.username_pw_set(mqtt_user, mqtt_pass)
     client.connect(mqtt_broker, mqtt_port, 60)
 
