@@ -191,7 +191,11 @@ function updateMacroCard(name) {
 }
 
 // ── LED helpers ───────────────────────────────────────────────────────────────
+// "last fired" hold — tracks which card carries the dim peak-hold glow
+let _lastFiredName = null;
+
 const _LED_ALL = ['bg-zinc-700','bg-white','bg-amber-400','bg-green-400','bg-red-500',
+                  'bg-orange-500/30',
                   'shadow-[0_0_8px_#fff]','shadow-[0_0_8px_#fbbf24]',
                   'shadow-[0_0_10px_#4ade80]','shadow-[0_0_8px_#ef4444]'];
 
@@ -219,16 +223,32 @@ function pulseLED(name, triggerTimestamp) {
   }
 }
 
-// Amber solid — macro is executing
+// Amber solid — macro is executing. Clears peak-hold on the previous card first.
 function setLEDRunning(name) {
+  // Clear dim hold on whichever card previously ran (including this one if re-fired)
+  if (_lastFiredName) {
+    const prev = document.getElementById(`led-dot-${_lastFiredName}`);
+    if (prev && _lastFiredName !== name) {
+      prev.classList.remove(..._LED_ALL);
+      prev.classList.add('bg-zinc-700');
+    }
+  }
   const dot = document.getElementById(`led-dot-${name}`);
   _ledSet(dot, 'bg-amber-400', 'shadow-[0_0_8px_#fbbf24]', 0);
 }
 
-// Green flash — macro finished
+// Green flash → dim orange peak-hold (like a VU meter holding its peak)
 function flashLEDComplete(name) {
+  _lastFiredName = name;
   const dot = document.getElementById(`led-dot-${name}`);
-  _ledSet(dot, 'bg-green-400', 'shadow-[0_0_10px_#4ade80]', 600);
+  if (!dot) return;
+  dot.classList.remove(..._LED_ALL);
+  dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
+  setTimeout(() => {
+    dot.classList.remove('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
+    dot.classList.remove(..._LED_ALL);
+    dot.classList.add('bg-orange-500/30');   // dim hold — clears when next macro fires
+  }, 600);
 }
 
 // Red flash — macro was skipped/dropped
