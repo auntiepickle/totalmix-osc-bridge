@@ -80,7 +80,7 @@ function createMacroCardHTML(name, m) {
   const midiLabel   = getMidiTriggerLabel(m);
   const routingLabel = m.routing_label || '—';
   return `
-<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200 flex flex-col">
+<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200 flex flex-col relative">
     <!-- Header: LED · name/desc · MIDI badge -->
     <div class="flex items-center gap-3 mb-1">
         <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
@@ -112,7 +112,7 @@ function createMacroCardHTML(name, m) {
         class="mt-3 w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
         DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
-    <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+    <div id="detail-${name}" class="hidden absolute top-full left-0 right-0 z-20 mt-1 p-3 bg-zinc-900 border border-zinc-700 rounded-2xl text-xs shadow-2xl shadow-black/60"></div>
 </div>`;
 }
 
