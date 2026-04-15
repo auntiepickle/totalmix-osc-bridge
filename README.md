@@ -1,16 +1,16 @@
 # TotalMix OSC Bridge
 
-Automate RME TotalMix FX from any MIDI controller. One trigger fires multi-step macros: workspace switches, BPM-synced fader ramps, send level LFOs. Everything is delivered over OSC to TotalMix in real time.
+Nobody wants to move a fader unless they mean to. This bridge makes that a deliberate choice rather than a constant task.
 
 ---
 
 ## Why this exists
 
-TotalMix FX has OSC built in. What it lacks is automation. The built-in MIDI remote maps one CC to one fader, statically. There is no way to say "ramp the reverb send over 4 bars at current tempo, then load the breakdown snapshot." For hardware-heavy live rigs where TotalMix is the mixer, that gap is a real problem.
+If you run analog hardware through RME TotalMix, your sends are configured and left alone. You patch a synth into a reverb, dial in the level, move on. But sometimes the send itself is part of the performance: a synth that blooms into the room on a specific bar, a delay return that opens for a breakdown and closes again. TotalMix has no way to do that. You either reach for the fader or you skip it.
 
-This bridge fills it. It sits between a MIDI controller and TotalMix's OSC interface and adds what is missing: multi-step macros, tempo-synced operations, workspace orchestration, and a web UI for monitoring and config.
+This bridge adds the missing layer. One MIDI trigger fires a macro: load the right workspace and snapshot, then ramp a send over N bars in time with your sequencer clock. No fader touch required. The signal path becomes something you compose with, not just configure.
 
-**On precision:** MIDI CC is 7-bit, 128 steps. A fader ramp over MIDI is 128 discrete jumps, audible on a hardware send effect. OSC carries 32-bit floats. Ramps are smooth at any resolution. OSC over UDP on LAN is also faster and more consistent than MIDI's serial bandwidth under load. For send automation, the difference is real.
+**On OSC vs MIDI for this:** MIDI CC is 7-bit, 128 steps. A ramp over MIDI is 128 discrete jumps, audible on a hardware send. OSC carries 32-bit floats. Ramps are smooth at any resolution. For automation into analog hardware the difference is real and audible.
 
 ---
 
