@@ -206,6 +206,14 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
     client.on_disconnect = on_disconnect
     client.on_message    = on_message
     client.username_pw_set(mqtt_user, mqtt_pass)
-    client.connect(mqtt_broker, mqtt_port, 60)
+
+    # MQTT is optional — a missing/unreachable broker must not kill the app
+    # (docs/setup.md documents local mode without Home Assistant).
+    # connect_async + loop_start keeps retrying in the background if the
+    # broker comes up later.
+    try:
+        client.connect_async(mqtt_broker, mqtt_port, 60)
+    except Exception as e:
+        logger.warning(f"MQTT connect setup failed ({e}) — continuing without MQTT")
 
     threading.Thread(target=map_watcher, args=(client, bridge), daemon=True).start()

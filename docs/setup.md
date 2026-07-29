@@ -166,3 +166,20 @@ action:
       topic: totalmix/macro/reverb_send_ramp
       payload: "0.8"
 ```
+
+---
+
+## Testing
+
+The automated suite runs with no hardware, broker, or network — OSC sends go to a fake client, MQTT callbacks are invoked directly.
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
+It covers macro execution (fire modes, debounce, param clamping, workspace/snapshot resolution and state-aware switching), ramp/LFO operations including cancellation, MQTT message routing and feedback-loop suppression, and the web API.
+
+GitHub Actions runs the suite plus a Docker image build on every push to `main` and every PR (`.github/workflows/ci.yml`). **Deploy flow: push, wait for the green check, then `git pull` + `docker compose build` on the server.** A red X means the server should not pull.
+
+Hardware-in-the-loop scripts (real MQTT broker, real UFX II) live in `tests/manual/` — see the README there. pytest ignores that directory.
