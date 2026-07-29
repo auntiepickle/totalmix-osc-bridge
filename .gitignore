@@ -24,3 +24,5 @@ __pycache__/
 *.pyc
 venv/
 web/static/style.css
+# Claude Code local state (worktrees, settings)
+.claude/
