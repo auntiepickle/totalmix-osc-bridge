@@ -183,3 +183,36 @@ It covers macro execution (fire modes, debounce, param clamping, workspace/snaps
 GitHub Actions runs the suite plus a Docker image build on every push to `main` and every PR (`.github/workflows/ci.yml`). **Deploy flow: push, wait for the green check, then `git pull` + `docker compose build` on the server.** A red X means the server should not pull.
 
 Hardware-in-the-loop scripts (real MQTT broker, real UFX II) live in `tests/manual/` — see the README there. pytest ignores that directory.
+
+---
+
+## Device capture (channel-map discovery)
+
+The bridge listens for TotalMix's OSC feedback and can build `ufx2_channel_map.json` by interrogating the device — no more clicking through submixes with the log monitor.
+
+**One-time TotalMix configuration** (Options → Settings → OSC):
+
+| Setting | Value |
+|---|---|
+| In Use | checked (Remote Controller Select 1) |
+| Port incoming | `7001` (must match `OSC_PORT`) |
+| Port outgoing | `9001` (must match `OSC_LISTEN_PORT`) |
+| IP or Host Name | IP of the machine running the bridge |
+
+**Run a discovery walk:**
+
+```bash
+# Start the walk (~16s with defaults: 16 submixes x 1s settle)
+curl -X POST http://YOUR-SERVER:8088/api/device/discover \
+  -H 'Content-Type: application/json' -d '{"submix_count": 16, "settle_s": 1.0}'
+
+# Poll for the result
+curl http://YOUR-SERVER:8088/api/device/discovery
+
+# Happy with it? Promote it to the live channel map (auto-backup first)
+curl -X POST http://YOUR-SERVER:8088/api/device/discovery/apply
+```
+
+The walk selects each output submix in TotalMix (you will see the mixer switch submixes — do it while not performing), records the channel names and addresses the device reports, and writes a draft to `discovered_channel_map.json`.
+
+`GET /api/device/state` shows everything the listener has captured, including a raw dump of every OSC address TotalMix has sent — useful for finding addresses for new mapping types.

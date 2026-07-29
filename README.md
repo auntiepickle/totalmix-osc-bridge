@@ -38,6 +38,7 @@ MQTT is optional. If you run Home Assistant or a similar home automation stack, 
 - **Live web UI** — macro cards with progress bars, five-state LED indicators, real-time WebSocket updates
 - **Inline config editing** — edit any macro in the browser; changes write to disk and hot-reload without a restart
 - **MIDI clock BPM display** — reads `0xF8` timing clock messages and shows live BPM
+- **Device capture + channel-map discovery** — the bridge listens to TotalMix's OSC feedback and builds `ufx2_channel_map.json` by walking the submixes itself (`POST /api/device/discover`)
 - **MQTT integration** — optional; Home Assistant can trigger macros and receive workspace state
 - **Auto-backup** — every config save writes a timestamped copy to `backups/`
 

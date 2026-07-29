@@ -19,6 +19,13 @@ def snapshot_num_to_osc_index(snap_num: int) -> int:
 # === OSC MONITOR SETTINGS (for learning addresses) ===
 ENABLE_OSC_MONITOR = os.getenv('ENABLE_OSC_MONITOR', 'False').lower() == 'true'
 OSC_MONITOR_PORT = int(os.getenv('OSC_MONITOR_PORT', '9001'))
+
+# === OSC LISTENER (structured TotalMix feedback — device state + discovery) ===
+# Point TotalMix's OSC "Port outgoing" at this server on this port.
+# Defaults to the monitor port so existing TotalMix configs keep working;
+# the monitor and the listener cannot share the port simultaneously.
+ENABLE_OSC_LISTENER = os.getenv('ENABLE_OSC_LISTENER', 'True').lower() == 'true'
+OSC_LISTEN_PORT = int(os.getenv('OSC_LISTEN_PORT', os.getenv('OSC_MONITOR_PORT', '9001')))
 # === LOGGING SETTINGS (100 KB limit per file) ===
 BRIDGE_LOG_FILE = os.getenv('BRIDGE_LOG_FILE', 'bridge.log')
 OSC_MONITOR_LOG_FILE = os.getenv('OSC_MONITOR_LOG_FILE', 'osc_monitor.log')

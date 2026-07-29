@@ -36,7 +36,9 @@ The browser is not a thin relay. MIDI input, BPM clock detection, LED animation,
 | `operations.py` | `OperationRegistry`: pluggable ramp and LFO implementations |
 | `config.py` | Env var loading, `snapshot_num_to_osc_index()` |
 | `osc.py` | Shared OSC socket cache — one `SimpleUDPClient` per `(ip, port)`, used by both `bridge.py` and `mqtt_handler`. |
-| `osc_monitor.py` | UDP listener for discovering OSC addresses from TotalMix. Enable with `ENABLE_OSC_MONITOR=true`. |
+| `osc_listener.py` | Structured OSC feedback listener: parses TotalMix pushes into queryable `DeviceState` (submixes, channel names, fader values). On by default. |
+| `discovery.py` | Channel-map discovery walker: `/setSubmix 1..N`, capture feedback, build a `ufx2_channel_map.json` draft. |
+| `osc_monitor.py` | Legacy log-only UDP listener. Superseded by `osc_listener.py`; enable with `ENABLE_OSC_MONITOR=true` (conflicts with the listener on the same port). |
 
 ### Frontend
 
@@ -112,6 +114,27 @@ This issue only exists when MQTT is configured. Without a broker there is no fee
 FastAPI runs in asyncio. MQTT callbacks and macro threads are OS threads. `bridge.broadcast_state()` must work from both.
 
 `web_client.startup_event()` stores the running asyncio loop as `bridge.main_loop`. Sync threads call `asyncio.run_coroutine_threadsafe(self._do_broadcast(...), self.main_loop)`. Asyncio context creates a task directly. Broadcasts before FastAPI startup are silently dropped.
+
+---
+
+## Device capture and discovery
+
+TotalMix pushes its state over OSC to the configured "Port outgoing" whenever the visible bank changes: `/1/labelSubmix` (selected submix name), `/{row}/trackname{n}` (channel names), `/{row}/volume{n}` (fader positions), plus pan and dB display values. Rows: 1 = hardware input, 2 = software playback, 3 = hardware output.
+
+`osc_listener.OSCListener` receives that stream and maintains a `DeviceState`: channel data scoped per submix (row 3 output faders are submix-independent and stored under `_outputs`), plus a raw address store so unrecognized feedback is inspectable rather than lost. Volume floods are throttled to one WebSocket `device_update` event per 250ms; structural changes (submix/trackname) broadcast immediately.
+
+`discovery.discover_channel_map()` interrogates the device: send `/setSubmix i` for i = 1..N, wait `settle_s` for the feedback burst, record what came back. Empty submixes (`<Empty>`) and repeated labels (TotalMix clamps out-of-range indices to the last submix) are skipped. The result is a `ufx2_channel_map.json`-compatible draft.
+
+API surface:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/device/state` | Live captured state + raw address dump |
+| `POST /api/device/discover` | Start a discovery walk (background thread; `discovery_progress` / `discovery_complete` WS events) |
+| `GET /api/device/discovery` | Status and result of the last walk |
+| `POST /api/device/discovery/apply` | Promote the draft to the live `ufx2_channel_map.json` (auto-backup first) |
+
+The draft is also written to `discovered_channel_map.json` (git-ignored) for manual inspection.
 
 ---
 

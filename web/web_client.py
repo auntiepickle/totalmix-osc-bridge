@@ -261,6 +261,104 @@ async def save_config_snapshot_map(request: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ── Device Capture + Discovery ───────────────────────────────────────────────
+
+@app.get("/api/device/state")
+async def get_device_state():
+    """Live TotalMix state captured from OSC feedback (submixes, channels,
+    raw address dump). Requires the OSC listener and TotalMix's OSC
+    'Port outgoing' pointed at this server."""
+    if bridge.osc_listener is None or not bridge.osc_listener.running:
+        raise HTTPException(status_code=503, detail="OSC listener not running")
+    return bridge.osc_listener.state.to_dict()
+
+
+class DiscoverBody(BaseModel):
+    submix_count: int = 16
+    settle_s: float = 1.0
+
+
+@app.post("/api/device/discover")
+async def start_discovery(body: DiscoverBody = DiscoverBody()):
+    """Walk all output submixes (/setSubmix 1..N) and build a channel-map
+    draft from the feedback. Runs in a background thread — poll
+    GET /api/device/discovery or watch discovery_* WebSocket events."""
+    if bridge.osc_client is None:
+        raise HTTPException(status_code=503, detail="OSC client not configured")
+    if bridge.osc_listener is None or not bridge.osc_listener.running:
+        raise HTTPException(status_code=503, detail="OSC listener not running")
+    if bridge.discovery_state.get("status") == "running":
+        raise HTTPException(status_code=409, detail="Discovery already running")
+
+    bridge.discovery_state = {"status": "running", "progress": 0,
+                              "total": body.submix_count}
+
+    def _progress(i, total, label):
+        bridge.discovery_state.update({"progress": i, "current_label": label})
+        bridge.broadcast_state(macro_event={
+            "type": "discovery_progress", "progress": i, "total": total,
+            "label": label,
+        })
+
+    def _run():
+        from discovery import discover_channel_map
+        try:
+            channel_map, walk_log = discover_channel_map(
+                bridge.osc_client, bridge.osc_listener,
+                submix_count=body.submix_count, settle_s=body.settle_s,
+                progress_cb=_progress,
+            )
+            draft_path = os.path.join(os.path.dirname(__file__),
+                                      "../discovered_channel_map.json")
+            with open(draft_path, "w") as f:
+                json.dump(channel_map, f, indent=2)
+            bridge.discovery_state = {
+                "status": "done",
+                "channel_map": channel_map,
+                "walk_log": walk_log,
+                "submixes": len(channel_map["submixes"]),
+            }
+            logger.info(f"✅ Discovery draft saved → discovered_channel_map.json "
+                        f"({len(channel_map['submixes'])} submixes)")
+            bridge.broadcast_state(macro_event={
+                "type": "discovery_complete",
+                "submixes": len(channel_map["submixes"]),
+            })
+        except Exception as e:
+            logger.error(f"Discovery failed: {e}", exc_info=True)
+            bridge.discovery_state = {"status": "error", "error": str(e)}
+            bridge.broadcast_state(macro_event={
+                "type": "discovery_error", "error": str(e),
+            })
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "submix_count": body.submix_count,
+            "estimated_s": body.submix_count * body.settle_s}
+
+
+@app.get("/api/device/discovery")
+async def get_discovery():
+    """Status and result of the last discovery run."""
+    return bridge.discovery_state
+
+
+@app.post("/api/device/discovery/apply")
+async def apply_discovery():
+    """Promote the last discovery result to the live ufx2_channel_map.json."""
+    state = bridge.discovery_state
+    if state.get("status") != "done" or "channel_map" not in state:
+        raise HTTPException(status_code=409, detail="No completed discovery to apply")
+    backup_json_files()
+    target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
+    with open(target, "w") as f:
+        json.dump(state["channel_map"], f, indent=2)
+    bridge._load_channel_map()
+    bridge.channel_map_is_example = False
+    submixes = len(state["channel_map"]["submixes"])
+    logger.info(f"✅ Discovered channel map applied ({submixes} submixes)")
+    return {"status": "success", "submixes": submixes}
+
+
 # ── WebSocket ────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
@@ -411,5 +509,6 @@ def _keepalive():
 async def startup_event():
     threading.Thread(target=_keepalive, daemon=True).start()
     bridge.start_mqtt()
+    bridge.start_osc_listener()
     bridge.main_loop = asyncio.get_running_loop()
     print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT}) — MQTT ACTIVE")

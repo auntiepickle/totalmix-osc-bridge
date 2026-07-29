@@ -72,6 +72,28 @@ def test_patch_unknown_macro_404():
     assert r.status_code == 404
 
 
+def test_device_state_503_without_listener():
+    assert bridge_module.bridge.osc_listener is None  # startup never ran
+    r = client.get("/api/device/state")
+    assert r.status_code == 503
+
+
+def test_discover_503_without_osc():
+    r = client.post("/api/device/discover", json={})
+    assert r.status_code == 503
+
+
+def test_discovery_status_starts_idle():
+    r = client.get("/api/device/discovery")
+    assert r.status_code == 200
+    assert r.json()["status"] == "idle"
+
+
+def test_apply_discovery_409_before_any_run():
+    r = client.post("/api/device/discovery/apply")
+    assert r.status_code == 409
+
+
 def test_root_redirects_to_ui():
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (301, 302, 307)

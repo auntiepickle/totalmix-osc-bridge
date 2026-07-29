@@ -109,6 +109,8 @@ class TotalMixOSCBridge:
         self._queued_params = {}            # macro_name → float (for queue/restart modes)
         self._macro_lock = threading.Lock() # guards the three structures above (web + MQTT + queued threads)
         self.mqtt_connected = False         # set True/False by mqtt_handler callbacks
+        self.osc_listener = None            # OSCListener — set by start_osc_listener()
+        self.discovery_state = {"status": "idle"}  # channel-map discovery job state
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -491,6 +493,21 @@ class TotalMixOSCBridge:
                 logger.info(f"   → '{macro_name}' firing queued trigger (param={queued:.3f})")
                 threading.Thread(target=self.run_macro, args=(macro_name, queued), daemon=True).start()
 
+    def start_osc_listener(self):
+        """Start the structured OSC feedback listener (device state + discovery)."""
+        if not ENABLE_OSC_LISTENER:
+            logger.info("OSC listener disabled (ENABLE_OSC_LISTENER=false)")
+            return
+        from osc_listener import OSCListener
+        listener = OSCListener(
+            OSC_LISTEN_PORT,
+            broadcast_cb=lambda: self.broadcast_state(
+                macro_event={"type": "device_update"}
+            ),
+        )
+        if listener.start():
+            self.osc_listener = listener
+
     def start_mqtt(self):
         """Connect MQTT and start the client loop (web and standalone modes)."""
         logger.info("=== TOTALMIX OSC BRIDGE STARTING MQTT (web or standalone mode) ===")
@@ -516,6 +533,7 @@ logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegi
 # === BRIDGE STARTUP — CENTRALIZED MODE (for python bridge.py) ===
 if __name__ == "__main__":
     bridge.start_mqtt()   # re-uses the same function
+    bridge.start_osc_listener()
 
     try:
         while True:
