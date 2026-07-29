@@ -7,8 +7,8 @@ import threading
 import paho.mqtt.client as mqtt
 import re
 import asyncio
-from pythonosc import udp_client
 from config import *
+from osc import get_client
 from mqtt_handler import setup_mqtt
 from osc_monitor import osc_monitor
 from operations import OperationRegistry
@@ -77,9 +77,14 @@ for _mp in _MAPPINGS_PATHS:
         logger.error(f"Failed to load {_mp}: {e}")
         break
 
-# OSC client
-osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) if OSC_IP and OSC_PORT else None
-logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
+# OSC client — shared per-(ip, port) socket cache in osc.py, same one
+# mqtt_handler's send_osc() uses.
+if OSC_IP and OSC_PORT:
+    osc_client = get_client(OSC_IP, OSC_PORT)
+    logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
+else:
+    osc_client = None
+    logger.warning("OSC_IP not set — OSC disabled, macros will be skipped")
 
 # === WEBSOCKET CLIENTS (shared between bridge.py and web_client.py) ===
 ws_clients = []  # list of active FastAPI WebSocket connections
@@ -102,6 +107,7 @@ class TotalMixOSCBridge:
         self._running_macros = set()        # names of macros currently executing
         self._cancel_events = {}            # macro_name → threading.Event (for restart mode)
         self._queued_params = {}            # macro_name → float (for queue/restart modes)
+        self._macro_lock = threading.Lock() # guards the three structures above (web + MQTT + queued threads)
         self.mqtt_connected = False         # set True/False by mqtt_handler callbacks
         self._load_channel_map()
 
@@ -270,6 +276,15 @@ class TotalMixOSCBridge:
             logger.error(f"Macro '{macro_name}' not found")
             return
 
+        if self.osc_client is None:
+            logger.warning(f"Macro '{macro_name}' skipped — OSC not configured (set OSC_IP)")
+            self.broadcast_state(macro_event={
+                "type": "macro_skipped",
+                "name": macro_name,
+                "reason": "osc_not_configured",
+            })
+            return
+
         macro = self.mappings["macros"][macro_name]
         value = max(macro.get("param_range", [0.0, 1.0])[0],
                     min(macro.get("param_range", [0.0, 1.0])[1], float(param)))
@@ -298,34 +313,37 @@ class TotalMixOSCBridge:
         #   "queue"             — run once more after current completes
         #   "restart"           — cancel current immediately, re-run with new param
         fire_mode = macro.get("fire_mode", "ignore")
-        if macro_name in self._running_macros:
-            if fire_mode == "ignore":
-                logger.info(f"   → '{macro_name}' running, mode=ignore — dropped")
-                return
-            elif fire_mode == "queue":
-                self._queued_params[macro_name] = param
-                logger.info(f"   → '{macro_name}' running, mode=queue — queued (param={param:.3f})")
-                return
-            elif fire_mode == "restart":
-                self._queued_params[macro_name] = param
-                ev = self._cancel_events.get(macro_name)
-                if ev:
-                    ev.set()
-                logger.info(f"   → '{macro_name}' running, mode=restart — cancelling and re-queuing")
-                return
+        # Guard + registration are atomic: triggers arrive concurrently from the
+        # web thread, the MQTT thread, and queued re-fire threads.
+        with self._macro_lock:
+            if macro_name in self._running_macros:
+                if fire_mode == "ignore":
+                    logger.info(f"   → '{macro_name}' running, mode=ignore — dropped")
+                    return
+                elif fire_mode == "queue":
+                    self._queued_params[macro_name] = param
+                    logger.info(f"   → '{macro_name}' running, mode=queue — queued (param={param:.3f})")
+                    return
+                elif fire_mode == "restart":
+                    self._queued_params[macro_name] = param
+                    ev = self._cancel_events.get(macro_name)
+                    if ev:
+                        ev.set()
+                    logger.info(f"   → '{macro_name}' running, mode=restart — cancelling and re-queuing")
+                    return
 
-        # Optional post-completion cooldown (ms). Set "debounce_ms" in macro config.
-        debounce_ms = macro.get("debounce_ms", 0)
-        if debounce_ms > 0:
-            elapsed = (time.time() - self.macro_live_state.get(macro_name, {}).get("last_trigger", 0)) * 1000
-            if elapsed < debounce_ms:
-                logger.info(f"   → '{macro_name}' in debounce window ({elapsed:.0f}/{debounce_ms}ms) — ignored")
-                return
+            # Optional post-completion cooldown (ms). Set "debounce_ms" in macro config.
+            debounce_ms = macro.get("debounce_ms", 0)
+            if debounce_ms > 0:
+                elapsed = (time.time() - self.macro_live_state.get(macro_name, {}).get("last_trigger", 0)) * 1000
+                if elapsed < debounce_ms:
+                    logger.info(f"   → '{macro_name}' in debounce window ({elapsed:.0f}/{debounce_ms}ms) — ignored")
+                    return
 
-        self._suppress_handler = True
-        cancel_event = threading.Event()
-        self._cancel_events[macro_name] = cancel_event
-        self._running_macros.add(macro_name)
+            self._suppress_handler = True
+            cancel_event = threading.Event()
+            self._cancel_events[macro_name] = cancel_event
+            self._running_macros.add(macro_name)
 
         try:
             # === ALWAYS RESOLVE SLOTS/INDICES ===
@@ -357,7 +375,8 @@ class TotalMixOSCBridge:
 
             # Block WS/SS switch if another macro is mid-execution and force_switch is off.
             # Avoids tearing the mixer state while a ramp is running.
-            other_running = len(self._running_macros) > 1  # this macro already in set
+            with self._macro_lock:
+                other_running = len(self._running_macros) > 1  # this macro already in set
             if not already_on_target and not force_switch and other_running:
                 logger.info(
                     f"   → '{macro_name}' skipped: WS/SS switch needed but "
@@ -463,38 +482,36 @@ class TotalMixOSCBridge:
         finally:
             self._suppress_handler = False
             self._last_macro_end_time = time.time()
-            self._cancel_events.pop(macro_name, None)
-            self._running_macros.discard(macro_name)
-            # Fire any queued trigger (queue mode or restart mode)
-            queued = self._queued_params.pop(macro_name, None)
+            with self._macro_lock:
+                self._cancel_events.pop(macro_name, None)
+                self._running_macros.discard(macro_name)
+                # Fire any queued trigger (queue mode or restart mode)
+                queued = self._queued_params.pop(macro_name, None)
             if queued is not None:
                 logger.info(f"   → '{macro_name}' firing queued trigger (param={queued:.3f})")
                 threading.Thread(target=self.run_macro, args=(macro_name, queued), daemon=True).start()
+
+    def start_mqtt(self):
+        """Connect MQTT and start the client loop (web and standalone modes)."""
+        logger.info("=== TOTALMIX OSC BRIDGE STARTING MQTT (web or standalone mode) ===")
+        logger.info(f"OSC target → {OSC_IP}:{OSC_PORT}")
+        logger.info("MQTT macro namespace → totalmix/macro/<name>")
+
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, self)
+        self.mqtt_client = client
+
+        if ENABLE_OSC_MONITOR:
+            osc_monitor.start()
+
+        client.loop_start()
+        logger.info("MQTT client loop started — macro subscriptions ACTIVE")
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
 logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegistry + WebSocket live updates for Web Client v1")
-
-# === NEW: MQTT STARTUP METHOD (works in BOTH standalone + web mode) ===
-def start_mqtt(self):
-    logger.info("=== TOTALMIX OSC BRIDGE STARTING MQTT (web or standalone mode) ===")
-    logger.info(f"OSC target → {OSC_IP}:{OSC_PORT}")
-    logger.info("MQTT macro namespace → totalmix/macro/<name>")
-
-    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-    setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, self)
-    self.mqtt_client = client
-
-    if ENABLE_OSC_MONITOR:
-        osc_monitor.start()
-
-    client.loop_start()
-    logger.info("MQTT client loop started — macro subscriptions ACTIVE")
-
-# Attach the method to the bridge instance
-TotalMixOSCBridge.start_mqtt = start_mqtt
 
 # === BRIDGE STARTUP — CENTRALIZED MODE (for python bridge.py) ===
 if __name__ == "__main__":

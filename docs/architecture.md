@@ -35,7 +35,7 @@ The browser is not a thin relay. MIDI input, BPM clock detection, LED animation,
 | `mqtt_handler.py` | MQTT subscriptions, workspace/snapshot state routing, snapshot map file watcher |
 | `operations.py` | `OperationRegistry`: pluggable ramp and LFO implementations |
 | `config.py` | Env var loading, `snapshot_num_to_osc_index()` |
-| `osc.py` | Standalone OSC sender for `mqtt_handler`. Caches one `SimpleUDPClient` per `(ip, port)`. |
+| `osc.py` | Shared OSC socket cache — one `SimpleUDPClient` per `(ip, port)`, used by both `bridge.py` and `mqtt_handler`. |
 | `osc_monitor.py` | UDP listener for discovering OSC addresses from TotalMix. Enable with `ENABLE_OSC_MONITOR=true`. |
 
 ### Frontend
@@ -196,14 +196,10 @@ Use in `mappings.json`:
 
 ---
 
-## Known rough edges
+## Thread safety
 
-**`_running_macros` is not thread-safe.** Mutated from multiple threads without a lock. Safe in CPython due to the GIL, but that is an implementation detail.
+Macro triggers arrive concurrently from three places: the web API thread, the MQTT callback thread, and queued re-fire threads. `bridge._macro_lock` guards the shared trigger state (`_running_macros`, `_cancel_events`, `_queued_params`) — the fire-mode guard, debounce check, and registration run as one atomic block, and cleanup in `finally` takes the same lock.
 
-**`switch_to()` has a latent UnboundLocalError.** `snap_num` is assigned inside a loop and used after it. If the snapshot name is not found, `snap_num` is undefined. Fix: initialize `snap_num = None` before the loop and guard after.
+If OSC is not configured (`OSC_IP` unset), `run_macro()` skips at entry and broadcasts a `macro_skipped` event with reason `osc_not_configured` instead of crashing.
 
-**`run_macro()` does not guard `osc_client is None`.** If OSC is not configured and a macro fires, it will crash. Pending fix: check at entry and broadcast `macro_skipped`.
-
-**`start_mqtt` is monkey-patched onto the class.** Defined as a module-level function in `bridge.py` and attached post-definition. A historical artifact. It works but is unusual.
-
-**`osc.py` and `bridge.py` maintain separate OSC sockets.** Each caches its own `SimpleUDPClient`. Functionally correct, slightly wasteful.
+All OSC sends share one UDP socket per (ip, port) target, cached in `osc.py` (`get_client()` / `send_osc()`).
