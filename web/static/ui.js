@@ -455,8 +455,8 @@ window.updateSendPickerOptions = function (name, selectedChannel) {
   const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
   const sends = sub ? sub.sends || {} : {};
   sendSel.innerHTML = Object.keys(sends)
-    .map(sn => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)} → ${_esc(submixSel.value)}</option>`)
-    .join('') || '<option value="">no sends discovered</option>';
+    .map(sn => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)}</option>`)
+    .join('') || '<option value="">no channels discovered</option>';
 };
 
 // Current routing of the buffer's param step — used to restore picker state
@@ -640,12 +640,19 @@ function editDetail(name) {
   const routingPickerHtml = hasChannelMap ? `<div>
     <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Routing (from your device)</div>
     <div class="flex gap-2 items-center flex-wrap">
-      <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}')" class="${sc} flex-1 min-w-[120px]">
-        ${_buildSubmixPickerOptions(routing.submix)}
-      </select>
-      <select id="routing-send-${name}" class="${sc} flex-1 min-w-[160px]"></select>
+      <div class="flex-1 min-w-[120px]">
+        <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Input channel</div>
+        <select id="routing-send-${name}" class="${sc} w-full"></select>
+      </div>
+      <span class="text-zinc-500 text-xs shrink-0">→</span>
+      <div class="flex-1 min-w-[160px]">
+        <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Output submix</div>
+        <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}')" class="${sc} w-full">
+          ${_buildSubmixPickerOptions(routing.submix)}
+        </select>
+      </div>
       <button onclick="applyRouting('${name}')" title="Store this routing by name — the strip index is resolved live from device feedback when the macro fires"
-          class="shrink-0 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs px-3 py-1.5 rounded-lg transition-all">
+          class="shrink-0 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs px-3 py-2 rounded-lg transition-all">
         Set routing
       </button>
     </div>
