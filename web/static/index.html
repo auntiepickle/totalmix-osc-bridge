@@ -145,6 +145,13 @@
             In TotalMix: Options → Settings → OSC → raise <i>Number of Faders per Bank</i>, then <b>re-save the current workspace</b> (the setting is stored per workspace).</span>
         </div>
 
+        <!-- Stale-map warning (hidden unless the live device has more channels than the map knows) -->
+        <div id="stale-map-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
+            <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
+            <span class="flex-1">Your channel map covers <b id="stale-map-have">?</b> channels but the device is reporting <b id="stale-map-live">?</b> — new or renamed channels are <b>missing from the routing picker</b>.
+            Re-run discovery to refresh it (<code class="font-mono text-amber-200 bg-amber-900/40 px-1 rounded">POST /api/device/discover</code> then apply, or <code class="font-mono text-amber-200 bg-amber-900/40 px-1 rounded">validate_capture.sh --apply</code>).</span>
+        </div>
+
         <!-- Example-mappings warning banner (hidden unless server loaded the fallback) -->
         <div id="example-mappings-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
             <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>

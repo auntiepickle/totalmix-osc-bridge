@@ -110,6 +110,7 @@ class TotalMixOSCBridge:
         self._macro_lock = threading.Lock() # guards the three structures above (web + MQTT + queued threads)
         self.mqtt_connected = False         # set True/False by mqtt_handler callbacks
         self.osc_listener = None            # OSCListener — set by start_osc_listener()
+        self.state_confirmed = None         # last commanded switch confirmed by device feedback?
         self.discovery_state = {"status": "idle"}  # channel-map discovery job state
         self._load_channel_map()
 
@@ -415,7 +416,7 @@ class TotalMixOSCBridge:
                     # A workspace load triggers a full state dump (always
                     # including /1/labelSubmix) — its arrival confirms the
                     # switch, typically well under the old fixed 1.0s sleep
-                    self._wait_device(
+                    self.state_confirmed = self._wait_device(
                         lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
                         timeout=2.0, fallback_sleep=1.0,
                         what=f"workspace '{ws_name}' switch")
@@ -430,7 +431,7 @@ class TotalMixOSCBridge:
                         self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
                         logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
                     # TotalMix echoes the active snapshot's button state back
-                    self._wait_device(
+                    self.state_confirmed = self._wait_device(
                         lambda st, addr=osc_addr: (
                             st.raw.get(addr, {}).get("args") == [1.0]
                             and st.raw.get(addr, {}).get("last_seen", 0) >= t0),

@@ -38,9 +38,15 @@ class FakeBridge:
         self.mqtt_connected = False
         self._suppress_handler = False
         self._last_macro_end_time = 0.0
+        self.state_confirmed = None
         self.run_macro_calls = []
         self.workspace_updates = []
         self.snapshot_updates = []
+        self.wait_device_calls = []
+
+    def _wait_device(self, predicate, timeout, fallback_sleep, what=""):
+        self.wait_device_calls.append(what)
+        return True
 
     def run_macro(self, name, param):
         self.run_macro_calls.append((name, param))
@@ -99,6 +105,16 @@ def test_workspace_message_sends_osc_and_updates(handler):
     client.on_message(client, None, msg("totalmix/workspace", "2"))
     assert ("/loadQuickWorkspace", 2) in sent_osc
     assert bridge.workspace_updates == ["Pill_setup"]
+    # MQTT-commanded switches confirm via feedback like macro switches
+    assert any("workspace" in w for w in bridge.wait_device_calls)
+    assert bridge.state_confirmed is True
+
+
+def test_snapshot_message_confirms_via_feedback(handler):
+    client, bridge, _ = handler
+    client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    assert any("snapshot" in w for w in bridge.wait_device_calls)
+    assert bridge.state_confirmed is True
 
 
 def test_workspace_suppressed_during_macro(handler):

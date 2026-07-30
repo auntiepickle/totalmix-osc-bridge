@@ -184,3 +184,18 @@ def test_bank_width_grows_and_shrinks_at_burst_boundaries():
         s.ingest(f"/1/trackname{ch}", (f"CH {ch}",))
     s.ingest("/1/labelSubmix", ("Main",))
     assert s.bank_width == 8
+
+
+def test_real_strip_count_excludes_na_placeholders():
+    """real_strip_count feeds the stale-map warning: 48-wide bank with 23
+    real channels must report 23, not 48."""
+    s = DeviceState()
+    s.ingest("/1/labelSubmix", ("Main",))
+    for ch in range(1, 24):
+        s.ingest(f"/1/trackname{ch}", (f"CH {ch}",))
+    for ch in range(24, 49):
+        s.ingest(f"/1/trackname{ch}", ("n.a.",))
+    assert s.real_strip_count == 23
+    s.ingest("/1/labelSubmix", ("AES",))  # seal the burst
+    assert s.real_strip_count == 23
+    assert s.bank_width == 48

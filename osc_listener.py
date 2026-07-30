@@ -57,6 +57,11 @@ class DeviceState:
         # caps what OSC can see — the UI warns when it is too narrow.
         self.bank_width = None
         self._burst_max_strip = 0
+        # Real strips (trackname not 'n.a.') in the most recent burst — the
+        # UI compares this against the channel map to catch a STALE map
+        # (map under-covering the device went undetected once)
+        self.real_strip_count = None
+        self._burst_real_strips = set()
 
     # ── ingestion ─────────────────────────────────────────────────────────
 
@@ -80,6 +85,9 @@ class DeviceState:
                 if self._burst_max_strip:
                     self.bank_width = self._burst_max_strip
                 self._burst_max_strip = 0
+                if self._burst_real_strips:
+                    self.real_strip_count = len(self._burst_real_strips)
+                self._burst_real_strips = set()
                 return True  # structural change
 
             if address in _BUS_ROW and args and float(args[0]) == 1.0:
@@ -109,6 +117,10 @@ class DeviceState:
                     # Grow immediately (shrink only at burst boundaries)
                     if ch > (self.bank_width or 0):
                         self.bank_width = ch
+                    if str(args[0]).strip().lower() not in ("n.a.", "n/a"):
+                        self._burst_real_strips.add(ch)
+                        if len(self._burst_real_strips) > (self.real_strip_count or 0):
+                            self.real_strip_count = len(self._burst_real_strips)
                 return True
             if field == "volume" and args:
                 if is_val:
@@ -129,6 +141,7 @@ class DeviceState:
                 "current_submix": self.current_submix,
                 "current_row": self.current_row,
                 "bank_width": self.bank_width,
+                "real_strip_count": self.real_strip_count,
                 "submixes": {
                     name: {row: dict(chs) for row, chs in rows.items()}
                     for name, rows in self.submixes.items()

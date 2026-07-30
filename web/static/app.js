@@ -339,18 +339,35 @@ async function pollHealth() {
 // If the live bank is narrower than the channel map's highest channel, part
 // of the rig is invisible to routing — surface it instead of failing quietly.
 async function checkBankWidth() {
-  const banner = document.getElementById('bank-width-banner');
-  if (!banner) return;
+  const bankBanner  = document.getElementById('bank-width-banner');
+  const staleBanner = document.getElementById('stale-map-banner');
+  if (!bankBanner && !staleBanner) return;
   try {
     const s = await API.getStatus();
-    const width = s.osc_bank_width;
+
+    // Bank too narrow for the map — channels the map knows are unreachable
+    const width  = s.osc_bank_width;
     const needed = s.channel_map_max_channel || 0;
-    if (width != null && needed > 0 && width < needed) {
-      document.getElementById('bank-width-actual').textContent = width;
-      document.getElementById('bank-width-needed').textContent = needed;
-      banner.classList.remove('hidden');
-    } else {
-      banner.classList.add('hidden');
+    const bankTooNarrow = width != null && needed > 0 && width < needed;
+    if (bankBanner) {
+      if (bankTooNarrow) {
+        document.getElementById('bank-width-actual').textContent = width;
+        document.getElementById('bank-width-needed').textContent = needed;
+      }
+      bankBanner.classList.toggle('hidden', !bankTooNarrow);
+    }
+
+    // Map stale — the live device has more real channels than the map
+    // knows, so the picker silently under-covers the rig
+    const live = s.live_strip_count;
+    const have = s.channel_map_strip_count || 0;
+    const mapStale = !bankTooNarrow && live != null && have > 0 && live > have;
+    if (staleBanner) {
+      if (mapStale) {
+        document.getElementById('stale-map-have').textContent = have;
+        document.getElementById('stale-map-live').textContent = live;
+      }
+      staleBanner.classList.toggle('hidden', !mapStale);
     }
   } catch (_) {}
 }

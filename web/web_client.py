@@ -139,8 +139,9 @@ async def get_status():
     channel_map = bridge.channel_map or {}
     snap_map = bridge.snapshot_map or {}
     listener = bridge.osc_listener
-    bank_width = (listener.state.bank_width
-                  if listener is not None and listener.running else None)
+    listening = listener is not None and listener.running
+    bank_width = listener.state.bank_width if listening else None
+    live_strips = listener.state.real_strip_count if listening else None
     # Highest channel the map expects — if the live bank is narrower, part
     # of the rig is invisible to routing (per-workspace TotalMix setting)
     map_max_channel = max(
@@ -149,9 +150,21 @@ async def get_status():
          for s in sub.get("sends", {}).values()),
         default=0,
     )
+    # How many channels the map knows per submix — if the live device has
+    # more real strips, the map is STALE and under-covers the rig
+    map_strip_count = max(
+        (len(sub.get("sends", {}))
+         for sub in channel_map.get("submixes", {}).values()),
+        default=0,
+    )
     return {
         "osc_bank_width": bank_width,
+        "live_strip_count": live_strips,
         "channel_map_max_channel": map_max_channel,
+        "channel_map_strip_count": map_strip_count,
+        # workspace/snapshot below are the bridge's commanded belief;
+        # state_confirmed says whether the device confirmed the last switch
+        "state_confirmed": getattr(bridge, "state_confirmed", None),
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),
         "snapshot_map_workspaces": len(snap_map),

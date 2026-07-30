@@ -156,7 +156,15 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         logger.debug(f"Workspace slot {ws_slot} already active — skipping OSC")
                         bridge.update_workspace(name=ws_name)
                         return
+                    t0 = time.time()
                     send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
+                    # Confirm via feedback like macro switches do — otherwise
+                    # bridge state (and /api/status) is a commanded belief the
+                    # device may not have followed (observed live)
+                    bridge.state_confirmed = bridge._wait_device(
+                        lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
+                        timeout=2.0, fallback_sleep=0,
+                        what=f"MQTT workspace slot {ws_slot} switch")
                     bridge.update_workspace(name=ws_name or f"slot_{ws_slot}")
                 except ValueError:
                     logger.warning(f"Non-integer workspace payload ignored: {payload!r}")
@@ -166,7 +174,14 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     snap_num = int(payload)
                     if 1 <= snap_num <= 8:
                         osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
+                        t0 = time.time()
                         send_osc(osc_addr, 1.0, osc_ip, osc_port)
+                        bridge.state_confirmed = bridge._wait_device(
+                            lambda st, addr=osc_addr: (
+                                st.raw.get(addr, {}).get("args") == [1.0]
+                                and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
+                            timeout=1.0, fallback_sleep=0,
+                            what=f"MQTT snapshot #{snap_num} recall")
                         logger.info(f"Snapshot #{snap_num} recalled ({osc_addr})")
                         client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
 
