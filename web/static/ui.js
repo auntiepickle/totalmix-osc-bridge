@@ -731,12 +731,13 @@ window.applyRouting = function (name) {
   const param = paramSel ? paramSel.value : 'volume';
   if (param !== 'volume') target.param = param;
   const paramDef = PARAM_DEFS[param] || {};
-  // Mute is global-per-channel (hardware-verified, #10) — storing a submix
-  // would imply a scope that does not exist, and the bridge won't switch
-  if (param === 'mute') delete target.submix;
+  // Mute is global-per-channel (#10) and channel-detail params (EQ, #5p2)
+  // are addressed by channel — neither stores a submix
+  if (param === 'mute' || paramDef.channelDetail) delete target.submix;
   // Fallback address must match the parameter, not always the volume
   const ch = send ? send.channel : null;
   const fallbackAddr = !send ? ''
+    : paramDef.channelDetail ? paramDef.addr
     : param === 'mute' ? `/1/mute/1/${ch}`
     : param === 'pan'  ? `/1/pan${ch}`
     : send.osc_address;

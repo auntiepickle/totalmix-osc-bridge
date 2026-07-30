@@ -200,6 +200,10 @@ class TotalMixOSCBridge:
         # Name-based targets are authoritative — they never go stale
         for step in steps:
             t = step.get("target")
+            if (t and t.get("channel")
+                    and str(t.get("param", "")).lower() in self.CHANNEL_DETAIL_PARAMS):
+                pretty = str(t["param"]).replace("_", " ").title()
+                return f"{t['channel']} ({pretty})"
             if t and str(t.get("param", "")).lower() in self.GLOBAL_FX_PARAMS:
                 pretty = str(t["param"]).replace("_", " ").title()
                 return f"FX: {pretty}"
@@ -489,6 +493,13 @@ class TotalMixOSCBridge:
                     logger.error(f"   → step skipped: no osc address")
                     continue
 
+                # Channel-detail steps shift the bank window to aim page 2 —
+                # restore it right after the step so every bank-0 assumption
+                # elsewhere (volume/pan/mute resolution) stays true
+                _restore_bank = ("target" in step and
+                                 str(step["target"].get("param", "")).lower()
+                                 in self.CHANNEL_DETAIL_PARAMS)
+
                 if "operation" in step and step.get("value") == "{{param}}":
                     op_config = step["operation"]
                     # Substitute live MIDI clock BPM when the mapping uses "bpm": "clock"
@@ -504,6 +515,9 @@ class TotalMixOSCBridge:
                         op_config,
                         cancel_event=cancel_event,
                     )
+                    if _restore_bank:
+                        self.osc_client.send_message("/setBankStart", 0.0)
+                        logger.info("   → bank window restored to 0 after channel-detail step")
                     continue
 
                 # === NORMAL STATIC STEP ===
@@ -513,6 +527,9 @@ class TotalMixOSCBridge:
                     logger.info(f"   → {osc_addr} = {step_val}")
                 except Exception as e:
                     logger.error(f"OSC send failed: {e}")
+                if _restore_bank:
+                    self.osc_client.send_message("/setBankStart", 0.0)
+                    logger.info("   → bank window restored to 0 after channel-detail step")
 
             # Restore the input row if any step drove the playback row —
             # /1/volume{N} is row-relative, so leaving playback selected
@@ -610,6 +627,41 @@ class TotalMixOSCBridge:
         "echo_width":      "/3/echoWidth",
     }
 
+    # Channel-detail (page 2) parameters (#5 phase 2). Page 2 mirrors the
+    # channel at the BANK-START position (hardware-verified with fixture
+    # EQs), so resolution aims the page: pin bank 0 → resolve the strip by
+    # name → compute the strip's HARDWARE-CHANNEL offset (stereo pairs
+    # occupy two positions) → /setBankStart offset → write /2/... → restore
+    # bank 0 after the step (bankStart is shared global state every other
+    # resolve assumes is 0).
+    CHANNEL_DETAIL_PARAMS = {
+        "eq_enable":   "/2/eqEnable",
+        "eq_gain_1":   "/2/eqGain1",
+        "eq_freq_1":   "/2/eqFreq1",
+        "eq_q_1":      "/2/eqQ1",
+        "eq_gain_2":   "/2/eqGain2",
+        "eq_freq_2":   "/2/eqFreq2",
+        "eq_q_2":      "/2/eqQ2",
+        "eq_gain_3":   "/2/eqGain3",
+        "eq_freq_3":   "/2/eqFreq3",
+        "eq_q_3":      "/2/eqQ3",
+        "lowcut_freq": "/2/lowcutFreq",
+    }
+
+    _PAIR_NAME_RE = re.compile(r"\d+/\d+\s*$")
+
+    @classmethod
+    def _hw_offset_of_strip(cls, strips: dict, strip) -> int:
+        """Hardware-channel offset of a strip: the summed widths of the
+        strips before it. A stereo-pair label ('AN 1/2') is width 2."""
+        offset = 0
+        for s in sorted(strips):
+            if s >= strip:
+                break
+            name = str(strips[s].get("name", ""))
+            offset += 2 if cls._PAIR_NAME_RE.search(name) else 1
+        return offset
+
     @staticmethod
     def _param_address(param: str, strip) -> str:
         """OSC address for a parameter on a live-resolved strip. All are
@@ -674,11 +726,12 @@ class TotalMixOSCBridge:
             addr = self.GLOBAL_FX_PARAMS[param]
             logger.info(f"   → target: global FX '{param}' → {addr}")
             return None, addr, "resolved"
-        if param == "mute":
-            # Mute is GLOBAL-per-channel (hardware-verified, #4/#10): every
-            # submix's bank yields the same strip index, so no /setSubmix is
-            # sent — switching would move the user's selection for zero
-            # benefit. Only the ROW still matters.
+        channel_scoped = (param == "mute"
+                          or param in self.CHANNEL_DETAIL_PARAMS)
+        if channel_scoped:
+            # Mute is GLOBAL-per-channel (hardware-verified, #4/#10) and
+            # channel-detail params (EQ etc.) address the CHANNEL, not a
+            # submix — no /setSubmix is sent for either. Row still matters.
             index = None
         else:
             index = self._submix_index_by_name(submix_name)
@@ -705,6 +758,12 @@ class TotalMixOSCBridge:
 
         listener = self.osc_listener
         if listener is None or not listener.running:
+            if param in self.CHANNEL_DETAIL_PARAMS:
+                # An unaimed page-2 write lands on whatever channel the bank
+                # happens to show — refuse outright, never fall back
+                logger.error(f"   → no OSC listener — cannot aim the channel-detail "
+                             f"page for '{param}', refusing")
+                return None, None, "not_in_bank"
             logger.warning("   → no OSC listener — cannot live-resolve strip, using stored address")
             return index, None, "no_feedback"
 
@@ -730,8 +789,8 @@ class TotalMixOSCBridge:
         def find_strip(state):
             # No logging in here — this runs as a wait predicate on every
             # incoming message, so it would log once per evaluation
-            if param == "mute":
-                # Global param: any visible bank yields the same strip index
+            if channel_scoped:
+                # Channel-scoped param: any visible bank yields the same strip
                 names = ([state.current_submix] if state.current_submix else [])
                 names += [s for s in list(state.submixes.keys()) if s not in names]
                 for sub in names:
@@ -744,7 +803,7 @@ class TotalMixOSCBridge:
                 return None
             return _match_in(state.submix_snapshot(state.current_submix).get(row, {}))
 
-        if param == "mute":
+        if channel_scoped:
             # No submix switch happened, so there may be no fresh dump to
             # wait on. If nothing matches the already-known state, provoke a
             # dump with the probe's row-toggle trick (guaranteed change).
@@ -769,6 +828,23 @@ class TotalMixOSCBridge:
                 if strip_name.strip().lower() != wanted_ch:
                     logger.info(f"   → pair-matched '{channel_name}' to strip "
                                 f"'{strip_name}' (stereo link changed)")
+                if param in self.CHANNEL_DETAIL_PARAMS:
+                    # Aim page 2 at this channel: /setBankStart takes a
+                    # HARDWARE-CHANNEL offset (stereo pairs = two positions),
+                    # computed from the live bank the strip was found in.
+                    # run_macro restores bank 0 after the step executes.
+                    st = listener.state
+                    banks = ([st.current_submix] if st.current_submix else [])
+                    banks += [s for s in list(st.submixes.keys()) if s not in banks]
+                    strips = next((st.submix_snapshot(b).get(row, {})
+                                   for b in banks
+                                   if strip in st.submix_snapshot(b).get(row, {})), {})
+                    offset = self._hw_offset_of_strip(strips, strip)
+                    self.osc_client.send_message("/setBankStart", float(offset))
+                    addr = self.CHANNEL_DETAIL_PARAMS[param]
+                    logger.info(f"   → live-resolved '{channel_name}' {param} → strip "
+                                f"{strip}, hw offset {offset} → aimed page 2 ({addr})")
+                    return index, addr, "resolved"
                 # Write address is always page 1 — the bus selection above
                 # decides which row the write lands on
                 addr = self._param_address(param, strip)

@@ -424,3 +424,82 @@ def test_global_fx_routing_label(make_bridge, fake_osc):
         "target": {"param": "echo_feedback"}, "value": "0.4",
     }]}})
     assert b.get_routing_label("m") == "FX: Echo Feedback"
+
+
+class MixedBankTotalMix(LiveFakeTotalMix):
+    """Bank with mixed mono/stereo strips — the hw-channel offset must be
+    computed from widths, not strip counts (#5 phase 2)."""
+
+    def send_message(self, address, value):
+        self.fake_osc.send_message(address, value)
+        if address in ("/1/busInput", "/1/busPlayback"):
+            self.listener._handle(address, value)
+        if address == "/1/busInput":
+            self.listener._handle("/1/labelSubmix", "Main")
+            self.listener._handle("/1/trackname1", "AN 1/2")    # pair -> width 2
+            self.listener._handle("/1/trackname2", "Mavis")     # mono -> width 1
+            self.listener._handle("/1/trackname3", "ADAT 5/6")  # pair
+
+
+def _eq_bridge(make_bridge, fake_osc, macro):
+    from osc_listener import OSCListener
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = MixedBankTotalMix(listener, fake_osc)
+    listener._server = object()
+    # Warm the bank (device dumps on bus select during resolution otherwise)
+    b.osc_client.send_message("/1/busInput", 1.0)
+    fake_osc.clear()
+    return b
+
+
+def test_eq_target_aims_page2_with_hw_offset_and_restores(make_bridge, fake_osc):
+    """'Mavis' sits after the 'AN 1/2' pair: strip 2, hardware offset 2.
+    Resolution must aim /setBankStart 2, write /2/..., restore bank 0."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "target": {"channel": "Mavis", "param": "eq_gain_1"},
+        "value": "0.8",
+    }]})
+    b.run_macro("m", 0.0)
+    sent = fake_osc.sent
+    assert ("/2/eqGain1", 0.8) in sent
+    bank_sends = [v for a, v in sent if a == "/setBankStart"]
+    # pin 0 -> aim 2 -> restore 0, in that order
+    assert bank_sends[-3:] == [0.0, 2.0, 0.0] or bank_sends[-2:] == [2.0, 0.0]
+    aim_i = sent.index(("/setBankStart", 2.0))
+    write_i = sent.index(("/2/eqGain1", 0.8))
+    restore_i = len(sent) - 1 - sent[::-1].index(("/setBankStart", 0.0))
+    assert aim_i < write_i < restore_i
+    assert "/setSubmix" not in fake_osc.addresses()
+
+
+def test_eq_offset_counts_pair_widths(make_bridge, fake_osc):
+    """'ADAT 5/6' is strip 3 behind a pair (2) and a mono (1): offset 3."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "target": {"channel": "ADAT 5/6", "param": "eq_freq_2"},
+        "value": "0.4",
+    }]})
+    b.run_macro("m", 0.0)
+    assert ("/setBankStart", 3.0) in fake_osc.sent
+    assert ("/2/eqFreq2", 0.4) in fake_osc.sent
+
+
+def test_eq_refuses_without_listener(make_bridge, fake_osc):
+    """An unaimed page-2 write hits whatever channel the bank shows —
+    refuse outright, never fall back to a stored address."""
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1",
+        "target": {"channel": "Mavis", "param": "eq_gain_1"},
+        "value": "0.8",
+    }]}})
+    b.run_macro("m", 0.0)
+    assert "/2/eqGain1" not in fake_osc.addresses()
+
+
+def test_eq_routing_label(make_bridge, fake_osc):
+    b = make_bridge({"m": {"steps": [{
+        "target": {"channel": "Mavis", "param": "eq_gain_1"}, "value": "0.8",
+    }]}})
+    assert b.get_routing_label("m") == "Mavis (Eq Gain 1)"
