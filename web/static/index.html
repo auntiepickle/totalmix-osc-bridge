@@ -66,6 +66,13 @@
                     <span class="text-[9px] text-zinc-600 font-mono">OSC</span>
                 </div>
 
+                <!-- New Macro -->
+                <button onclick="openNewMacro()"
+                    class="flex items-center gap-2 bg-orange-500 hover:bg-orange-400 active:scale-95 text-black font-bold px-4 py-2 rounded-2xl text-sm transition-all whitespace-nowrap"
+                    title="Create a new macro">
+                    <i class="fas fa-plus text-xs"></i> New Macro
+                </button>
+
                 <!-- Settings gear — uploads + reload + editor -->
                 <div class="relative">
                     <button onclick="toggleSettingsMenu()" data-settings-toggle
@@ -143,6 +150,39 @@
 
         <!-- MACRO GRID -->
         <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start"></div>
+    </div>
+
+    <!-- ── New Macro Modal ─────────────────────────────────────────────────── -->
+    <div id="new-macro-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+         onclick="if(event.target===this) closeNewMacro()">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fas fa-plus text-orange-400 text-sm"></i> New Macro
+            </h2>
+            <div>
+                <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Name</div>
+                <input id="new-macro-name" placeholder="e.g. mavis_to_phones1_send" spellcheck="false"
+                    class="w-full bg-zinc-950 border border-zinc-700 focus:border-orange-400 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none">
+                <div id="new-macro-error" class="hidden text-red-400 text-xs mt-1"></div>
+            </div>
+            <div>
+                <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Start from</div>
+                <select id="new-macro-template"
+                    class="w-full bg-zinc-950 border border-zinc-700 focus:border-orange-400 rounded-lg px-3 py-2 text-sm text-white focus:outline-none">
+                    <option value="">Blank (send + ramp template)</option>
+                </select>
+            </div>
+            <div class="flex gap-2 pt-1">
+                <button onclick="createNewMacro()"
+                    class="flex-1 bg-orange-500 hover:bg-orange-400 active:scale-95 text-black font-bold py-2 rounded-xl text-sm transition-all">
+                    Create
+                </button>
+                <button onclick="closeNewMacro()"
+                    class="px-5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-xl text-sm transition-all">
+                    Cancel
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- ── Live Config Editor Modal ────────────────────────────────────────── -->

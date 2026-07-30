@@ -67,9 +67,11 @@ def test_save_channel_map_rejects_missing_submixes_key():
     assert r.status_code == 400
 
 
-def test_patch_unknown_macro_404():
-    r = client.patch("/api/config/macros/definitely-not-a-macro", json={})
-    assert r.status_code == 404
+def test_patch_unknown_macro_creates_it(macro_crud):
+    # PATCH is an upsert alias (api.js has always POSTed to this route)
+    r = client.patch("/api/config/macros/previously-unknown", json={"steps": []})
+    assert r.status_code == 200
+    assert r.json()["created"] is True
 
 
 def test_device_state_503_without_listener():
@@ -92,6 +94,57 @@ def test_discovery_status_starts_idle():
 def test_apply_discovery_409_before_any_run():
     r = client.post("/api/device/discovery/apply")
     assert r.status_code == 409
+
+
+@pytest.fixture
+def macro_crud(monkeypatch):
+    """Isolate macro CRUD tests: no disk writes, mappings restored after."""
+    import web.web_client as wc
+    persisted = []
+    monkeypatch.setattr(wc, "_persist_mappings", lambda: persisted.append(True))
+    saved = {k: dict(v) for k, v in bridge_module.bridge.mappings.get("macros", {}).items()}
+    yield persisted
+    bridge_module.bridge.mappings["macros"] = saved
+
+
+def test_macro_create_update_delete_cycle(macro_crud):
+    body = {"description": "test", "steps": [{"osc": "/1/volume1", "value": "{{param}}"}]}
+
+    r = client.post("/api/config/macros/crud_test_macro", json=body)
+    assert r.status_code == 200 and r.json()["created"] is True
+    assert "crud_test_macro" in bridge_module.bridge.mappings["macros"]
+    assert len(macro_crud) == 1  # persisted once
+
+    r = client.post("/api/config/macros/crud_test_macro",
+                    json={**body, "description": "changed"})
+    assert r.status_code == 200 and r.json()["created"] is False
+    assert bridge_module.bridge.mappings["macros"]["crud_test_macro"]["description"] == "changed"
+
+    r = client.delete("/api/config/macros/crud_test_macro")
+    assert r.status_code == 200
+    assert "crud_test_macro" not in bridge_module.bridge.mappings["macros"]
+
+    assert client.delete("/api/config/macros/crud_test_macro").status_code == 404
+
+
+def test_macro_create_patch_alias(macro_crud):
+    r = client.patch("/api/config/macros/patch_alias_macro", json={"steps": []})
+    assert r.status_code == 200 and r.json()["created"] is True
+
+
+def test_macro_create_rejects_bad_names(macro_crud):
+    for bad in ("has space", "a" * 65, "ünïcode"):
+        r = client.post(f"/api/config/macros/{bad}", json={"steps": []})
+        assert r.status_code == 400, bad
+    # A slash never reaches the handler — the router 404s it
+    assert client.post("/api/config/macros/slash/name", json={}).status_code == 404
+    assert len(macro_crud) == 0
+
+
+def test_macro_create_rejects_non_object_body(macro_crud):
+    r = client.post("/api/config/macros/list_body", json=["not", "a", "dict"])
+    assert r.status_code == 400
+    assert len(macro_crud) == 0
 
 
 def test_root_redirects_to_ui():

@@ -37,6 +37,10 @@ ws.onmessage = function (event) {
       updateLastFired();
     } else if (ev.type === 'macro_skipped') {
       flashLEDSkipped(ev.name);
+    } else if (ev.type === 'macro_created' || ev.type === 'macro_updated'
+               || ev.type === 'macro_deleted') {
+      // Another tab (or this one) changed the macro set — re-sync cards
+      loadMacros();
     }
   }
 
@@ -279,6 +283,17 @@ async function loadSnapshotMap() {
   }
 }
 
+// ── Channel map — fetched once for the routing picker in the macro editor ────
+async function loadChannelMap() {
+  try {
+    window._channelMap = await API.getChannelMap();
+    console.log(`[UI] Channel map loaded — ${Object.keys((window._channelMap || {}).submixes || {}).length} submixes`);
+  } catch (e) {
+    console.warn('[UI] Could not load channel map:', e);
+    window._channelMap = {};
+  }
+}
+
 // ── Pre-fill bridge state from REST — no WebSocket wait ──────────────────────
 // /api/status already carries current_workspace and current_snapshot so we
 // can populate the nav dropdowns immediately on load rather than waiting for
@@ -319,7 +334,7 @@ window.addEventListener('load', async () => {
   initWebMIDI();
   // Load snapshot map and bridge state in parallel — populate dropdowns as
   // soon as both resolve rather than waiting for the first WS broadcast.
-  await Promise.all([loadSnapshotMap(), prefillBridgeState()]);
+  await Promise.all([loadSnapshotMap(), prefillBridgeState(), loadChannelMap()]);
   checkMappingsSource();
   pollHealth();
   setInterval(pollHealth, 15000);

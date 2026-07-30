@@ -37,6 +37,15 @@ window.API = (function () {
     return res.json().catch(() => ({}));
   }
 
+  async function _delete(path) {
+    const res = await fetch(path, { method: 'DELETE' });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || `DELETE ${path} → HTTP ${res.status}`);
+    }
+    return res.json().catch(() => ({}));
+  }
+
   // ── Public API ────────────────────────────────────────────────────────────
 
   return {
@@ -78,10 +87,18 @@ window.API = (function () {
       return _post('/api/config/mappings/init-from-example');
     },
 
-    /** POST /api/config/macros/:name — save a single macro */
+    /** POST /api/config/macros/:name — create or update a single macro */
     saveMacro(name, data) {
       return _post(`/api/config/macros/${encodeURIComponent(name)}`, data);
     },
+
+    /** DELETE /api/config/macros/:name */
+    deleteMacro(name) {
+      return _delete(`/api/config/macros/${encodeURIComponent(name)}`);
+    },
+
+    /** GET /api/config/channel_map → parsed { submixes: {…} } */
+    getChannelMap() { return _get('/api/config/channel_map'); },
 
     /** POST /api/trigger/:name  { param, clock_bpm } */
     trigger(name, param = 1.0, clockBpm = null) {

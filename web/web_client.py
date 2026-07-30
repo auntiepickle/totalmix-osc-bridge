@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import datetime
 from pathlib import Path
@@ -145,25 +146,61 @@ async def get_snapshot_map():
 
 # ── Live Config Editor ────────────────────────────────────────────────────────
 
+MACRO_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+
+
+def _persist_mappings():
+    """Write bridge.mappings to mappings.json (backup first)."""
+    backup_json_files("mappings.json")
+    target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+    with open(target, "w") as f:
+        json.dump(bridge.mappings, f, indent=2)
+    bridge.mappings_is_example = False
+    bridge.mappings_source = "mappings.json"
+
+
+@app.post("/api/config/macros/{macro_name}")
 @app.patch("/api/config/macros/{macro_name}")
-async def patch_macro(macro_name: str, request: Request):
-    """Update a single macro in-place — used by the card inline editor."""
+async def upsert_macro(macro_name: str, request: Request):
+    """Create or update a single macro — used by the card editor and the
+    New Macro flow. POST and PATCH behave identically (upsert); api.js has
+    always POSTed here, so update-only PATCH semantics would 405 the editor."""
     try:
         data = await request.json()
-        if macro_name not in bridge.mappings.get("macros", {}):
-            raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
-        backup_json_files("mappings.json")
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="Macro body must be a JSON object")
+        if not MACRO_NAME_RE.match(macro_name):
+            raise HTTPException(
+                status_code=400,
+                detail="Macro name must be 1-64 chars: letters, digits, _ or -",
+            )
+        created = macro_name not in bridge.mappings.setdefault("macros", {})
         bridge.mappings["macros"][macro_name] = data
-        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
-        with open(target, "w") as f:
-            json.dump(bridge.mappings, f, indent=2)
-        logger.info(f"✅ Macro '{macro_name}' updated via inline editor")
-        return {"status": "success", "macro": macro_name}
+        _persist_mappings()
+        logger.info(f"✅ Macro '{macro_name}' {'created' if created else 'updated'} via editor")
+        bridge.broadcast_state(macro_event={
+            "type": "macro_created" if created else "macro_updated",
+            "name": macro_name,
+        })
+        return {"status": "success", "macro": macro_name, "created": created}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Inline macro save failed: {e}")
+        logger.error(f"Macro save failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/config/macros/{macro_name}")
+async def delete_macro(macro_name: str):
+    """Delete a macro (auto-backup first, hot-reloads into the bridge)."""
+    if macro_name not in bridge.mappings.get("macros", {}):
+        raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
+    del bridge.mappings["macros"][macro_name]
+    bridge.macro_live_state.pop(macro_name, None)
+    _persist_mappings()
+    logger.info(f"🗑 Macro '{macro_name}' deleted via editor")
+    bridge.broadcast_state(macro_event={"type": "macro_deleted", "name": macro_name})
+    return {"status": "success", "macro": macro_name}
 
 
 @app.get("/api/config/mappings")

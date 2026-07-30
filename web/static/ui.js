@@ -417,11 +417,107 @@ window.updateSnapshotOptions = function(name, workspace) {
   sel.innerHTML = _buildSnapshotOptions(workspace, current);
 };
 
+// Working copies while a card is being edited — lets add/remove-step buttons
+// re-render the form without losing unsaved input (harvest → mutate → render)
+window._editBuffers = window._editBuffers || {};
+
+// Runtime fields the bridge writes back into mappings.json after a run —
+// stripped when duplicating so clones start clean
+const RUNTIME_FIELDS = ['name', 'value', 'progress', 'lfo_active',
+                        'last_trigger', 'osc_preview', 'midi_trigger',
+                        'routing_label'];
+
+function _cleanMacro(m) {
+  const c = JSON.parse(JSON.stringify(m));
+  RUNTIME_FIELDS.forEach(f => delete c[f]);
+  return c;
+}
+
+// ── Routing picker (fed by the discovered channel map) ──────────────────────
+// A macro targets a send by pairing a "/setSubmix {index}" step with a
+// "/{page}/volume{ch}" step. The picker sets both from one selection.
+
+function _buildSubmixPickerOptions() {
+  const subs = (window._channelMap || {}).submixes || {};
+  return Object.values(subs)
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map(s => `<option value="${_esc(s.name)}">${_esc(s.name)} (submix ${_esc(s.index)})</option>`)
+    .join('');
+}
+
+window.updateSendPickerOptions = function (name) {
+  const submixSel = document.getElementById(`routing-submix-${name}`);
+  const sendSel   = document.getElementById(`routing-send-${name}`);
+  if (!submixSel || !sendSel) return;
+  const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
+  const sends = sub ? sub.sends || {} : {};
+  sendSel.innerHTML = Object.entries(sends)
+    .map(([sn, s]) => `<option value="${_esc(s.osc_address)}">${_esc(sn)} → ${_esc(submixSel.value)} (${_esc(s.osc_address)})</option>`)
+    .join('') || '<option value="">no sends discovered</option>';
+};
+
+window.applyRouting = function (name) {
+  const submixSel = document.getElementById(`routing-submix-${name}`);
+  const sendSel   = document.getElementById(`routing-send-${name}`);
+  if (!submixSel || !sendSel || !sendSel.value) return;
+  const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
+  if (!sub) return;
+
+  const m = _harvestEditor(name);
+  m.steps = m.steps || [];
+  // Point the /setSubmix step at the chosen submix (insert one if missing)
+  const submixStep = m.steps.find(s => s.osc === '/setSubmix');
+  if (submixStep) submixStep.value = String(sub.index);
+  else m.steps.unshift({ osc: '/setSubmix', value: String(sub.index) });
+  // Point the param-driven step at the chosen send (append one if missing)
+  const paramStep = m.steps.find(s => s.value === '{{param}}');
+  if (paramStep) paramStep.osc = sendSel.value;
+  else m.steps.push({ osc: sendSel.value, value: '{{param}}',
+                      operation: { type: 'ramp', bars: 2, bpm: 140 } });
+  editDetail(name);
+};
+
+// ── Step / trigger management (harvest → mutate buffer → re-render) ─────────
+window.addEditorStep = function (name, kind) {
+  const m = _harvestEditor(name);
+  m.steps = m.steps || [];
+  if (kind === 'operation') {
+    m.steps.push({ osc: '', value: '{{param}}',
+                   operation: { type: 'ramp', bars: 2, bpm: 140 } });
+  } else {
+    m.steps.push({ osc: '', value: '1.0' });
+  }
+  editDetail(name);
+};
+
+window.removeEditorStep = function (name, i) {
+  const m = _harvestEditor(name);
+  (m.steps || []).splice(i, 1);
+  editDetail(name);
+};
+
+window.addEditorTrigger = function (name) {
+  const m = _harvestEditor(name);
+  m.midi_triggers = m.midi_triggers || [];
+  m.midi_triggers.push({ type: 'control_change', number: 0, channel: 1,
+                         use_value_as_param: true });
+  editDetail(name);
+};
+
+window.removeEditorTrigger = function (name, i) {
+  const m = _harvestEditor(name);
+  (m.midi_triggers || []).splice(i, 1);
+  editDetail(name);
+};
+
 function editDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
-  const m = macros[name];
-  if (!panel || !m) return;
+  if (!panel || !macros[name]) return;
+  if (!window._editBuffers[name]) {
+    window._editBuffers[name] = JSON.parse(JSON.stringify(macros[name]));
+  }
+  const m = window._editBuffers[name];
 
   panel.classList.remove('hidden');
   if (arrow) arrow.style.transform = 'rotate(180deg)';
@@ -430,6 +526,10 @@ function editDetail(name) {
   const ic  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-full';
   const sc  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none';
   const nc  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-20 text-center';
+
+  // Remove-step button (shared)
+  const _removeBtn = (i) => `<button onclick="removeEditorStep('${name}',${i})" title="Remove step"
+      class="shrink-0 w-8 text-zinc-600 hover:text-red-400 transition-colors"><i class="fas fa-xmark"></i></button>`;
 
   // Steps
   const stepsHtml = (m.steps || []).map((step, i) => {
@@ -443,6 +543,7 @@ function editDetail(name) {
             <option value="ramp"${op.type==='ramp'?' selected':''}>RAMP</option>
             <option value="lfo"${op.type==='lfo'?' selected':''}>LFO</option>
           </select>
+          ${_removeBtn(i)}
         </div>
         <div class="flex gap-2 items-center">
           <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
@@ -465,6 +566,7 @@ function editDetail(name) {
       return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl flex gap-2">
         <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="OSC address">
         <input data-field="steps.${i}.value" value="${val}" class="${nc}" placeholder="value">
+        ${_removeBtn(i)}
       </div>`;
     }
   }).join('');
@@ -485,8 +587,26 @@ function editDetail(name) {
       <input data-field="${numField}" type="number" min="0" max="127" value="${_esc(numValue)}" class="${nc}">
       <span class="text-zinc-500 text-xs shrink-0">ch</span>
       <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
+      <button onclick="removeEditorTrigger('${name}',${i})" title="Remove trigger"
+          class="shrink-0 w-8 text-zinc-600 hover:text-red-400 transition-colors"><i class="fas fa-xmark"></i></button>
     </div>`;
   }).join('');
+
+  // Routing picker — only when a discovered channel map is loaded
+  const hasChannelMap = Object.keys((window._channelMap || {}).submixes || {}).length > 0;
+  const routingPickerHtml = hasChannelMap ? `<div>
+    <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Routing (from your device)</div>
+    <div class="flex gap-2 items-center flex-wrap">
+      <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}')" class="${sc} flex-1 min-w-[120px]">
+        ${_buildSubmixPickerOptions()}
+      </select>
+      <select id="routing-send-${name}" class="${sc} flex-1 min-w-[160px]"></select>
+      <button onclick="applyRouting('${name}')" title="Set the /setSubmix and send steps from this selection"
+          class="shrink-0 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs px-3 py-1.5 rounded-lg transition-all">
+        Set routing
+      </button>
+    </div>
+  </div>` : '';
 
   panel.innerHTML = `<div class="space-y-3 text-sm">
 
@@ -520,15 +640,31 @@ function editDetail(name) {
       </div>
     </div>
 
-    ${stepsHtml ? `<div>
-      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Steps</div>
-      <div class="space-y-2">${stepsHtml}</div>
-    </div>` : ''}
+    ${routingPickerHtml}
 
-    ${midiHtml ? `<div>
+    <div>
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Steps</div>
+      <div class="space-y-2">${stepsHtml || '<div class="text-zinc-600 text-xs italic">no steps yet</div>'}</div>
+      <div class="flex gap-2 mt-2">
+        <button onclick="addEditorStep('${name}','value')"
+            class="text-xs text-zinc-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
+          <i class="fas fa-plus text-[9px]"></i> value step
+        </button>
+        <button onclick="addEditorStep('${name}','operation')"
+            class="text-xs text-zinc-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
+          <i class="fas fa-plus text-[9px]"></i> ramp/LFO step
+        </button>
+      </div>
+    </div>
+
+    <div>
       <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">MIDI Triggers</div>
-      <div class="space-y-1.5">${midiHtml}</div>
-    </div>` : ''}
+      <div class="space-y-1.5">${midiHtml || '<div class="text-zinc-600 text-xs italic">no triggers — fire from the UI or MQTT only</div>'}</div>
+      <button onclick="addEditorTrigger('${name}')"
+          class="text-xs text-zinc-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800 mt-2">
+        <i class="fas fa-plus text-[9px]"></i> MIDI trigger
+      </button>
+    </div>
 
     <div class="flex gap-2 pt-2 border-t border-zinc-800">
       <button id="edit-save-${name}" onclick="saveInlineEdit('${name}')"
@@ -539,18 +675,25 @@ function editDetail(name) {
           class="px-5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-xl text-sm transition-all">
         Cancel
       </button>
+      <button onclick="deleteMacroUI('${name}')" title="Delete this macro"
+          class="px-4 bg-zinc-900 hover:bg-red-900/40 border border-zinc-800 hover:border-red-800/60 text-zinc-600 hover:text-red-400 py-2 rounded-xl text-sm transition-all">
+        <i class="fas fa-trash text-xs"></i>
+      </button>
     </div>
 
   </div>`;
+
+  // Populate the cascading send picker for the initially selected submix
+  if (hasChannelMap) updateSendPickerOptions(name);
 }
 
-async function saveInlineEdit(name) {
+// Read every [data-field] input in the open editor back into the edit buffer.
+// Returns the buffer. Skip elements with no editor open (routing picker
+// selects carry no data-field, so they never pollute the macro).
+function _harvestEditor(name) {
   const panel = document.getElementById(`detail-${name}`);
-  const btn   = document.getElementById(`edit-save-${name}`);
-  if (!panel) return;
-
-  // Deep-clone so we don't mutate macros[name] until confirmed
-  const m = JSON.parse(JSON.stringify(macros[name]));
+  const m = window._editBuffers[name];
+  if (!panel || !m) return m;
 
   panel.querySelectorAll('[data-field]').forEach(el => {
     const parts = el.dataset.field.split('.');
@@ -570,12 +713,19 @@ async function saveInlineEdit(name) {
       obj[last] = el.value;
     }
   });
+  return m;
+}
+
+async function saveInlineEdit(name) {
+  const btn = document.getElementById(`edit-save-${name}`);
+  const m = _harvestEditor(name);
+  if (!m) return;
 
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
 
   try {
     await API.saveMacro(name, m);
-    macros[name] = m;
+    macros[name] = JSON.parse(JSON.stringify(m));
     cancelInlineEdit(name);
     // Reopen in read-only mode to show the saved state
     setTimeout(() => toggleDetail(name), 30);
@@ -586,6 +736,7 @@ async function saveInlineEdit(name) {
 }
 
 function cancelInlineEdit(name) {
+  delete window._editBuffers[name];
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
   if (!panel) return;
@@ -594,6 +745,107 @@ function cancelInlineEdit(name) {
   // Re-equalise now this card has collapsed
   requestAnimationFrame(equalizeCardHeights);
 }
+
+// ── Delete macro ──────────────────────────────────────────────────────────────
+async function deleteMacroUI(name) {
+  if (!confirm(`Delete macro "${name}"?\n\nmappings.json is auto-backed-up first.`)) return;
+  try {
+    await API.deleteMacro(name);
+    delete window._editBuffers[name];
+    delete macros[name];
+    renderCards();
+  } catch (e) {
+    alert(`Delete failed: ${e.message}`);
+  }
+}
+
+// ── New Macro flow ────────────────────────────────────────────────────────────
+const MACRO_NAME_RE = /^[A-Za-z0-9_\-]{1,64}$/;
+
+function _blankMacroTemplate() {
+  const subs = Object.values((window._channelMap || {}).submixes || {})
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const first = subs[0];
+  const firstSend = first ? Object.values(first.sends || {})[0] : null;
+  return {
+    description: '',
+    force_switch: false,
+    fire_mode: 'ignore',
+    steps: [
+      { osc: '/setSubmix', value: String(first ? first.index : 1) },
+      { osc: firstSend ? firstSend.osc_address : '/1/volume1',
+        value: '{{param}}',
+        operation: { type: 'ramp', bars: 2, bpm: 140 } },
+    ],
+    midi_triggers: [],
+  };
+}
+
+function openNewMacro() {
+  const modal = document.getElementById('new-macro-modal');
+  const tmpl  = document.getElementById('new-macro-template');
+  const nameEl = document.getElementById('new-macro-name');
+  const errEl  = document.getElementById('new-macro-error');
+  if (!modal) return;
+  if (tmpl) {
+    tmpl.innerHTML = '<option value="">Blank (send + ramp template)</option>' +
+      Object.keys(macros).sort()
+        .map(n => `<option value="${_esc(n)}">Duplicate: ${_esc(n)}</option>`)
+        .join('');
+  }
+  if (errEl) errEl.classList.add('hidden');
+  if (nameEl) nameEl.value = '';
+  modal.classList.remove('hidden');
+  if (nameEl) nameEl.focus();
+}
+
+function closeNewMacro() {
+  const modal = document.getElementById('new-macro-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function createNewMacro() {
+  const nameEl = document.getElementById('new-macro-name');
+  const tmpl   = document.getElementById('new-macro-template');
+  const errEl  = document.getElementById('new-macro-error');
+  const showErr = (msg) => {
+    if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+  };
+  const name = (nameEl ? nameEl.value : '').trim();
+
+  if (!MACRO_NAME_RE.test(name)) {
+    return showErr('Name must be 1–64 chars: letters, digits, _ or -');
+  }
+  if (macros[name]) {
+    return showErr(`"${name}" already exists`);
+  }
+
+  const source = tmpl && tmpl.value ? macros[tmpl.value] : null;
+  const body = source ? _cleanMacro(source) : _blankMacroTemplate();
+
+  try {
+    await API.saveMacro(name, body);
+    macros[name] = body;
+    closeNewMacro();
+    renderCards();
+    // Scroll to the new card and open it straight in edit mode
+    requestAnimationFrame(() => {
+      const card = document.getElementById(`card-${name}`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      editDetail(name);
+    });
+  } catch (e) {
+    showErr(`Create failed: ${e.message}`);
+  }
+}
+
+// Enter key in the name field creates
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter'
+      && document.activeElement?.id === 'new-macro-name') {
+    createNewMacro();
+  }
+});
 
 // ── BPM clock toggle in step editor ──────────────────────────────────────────
 window.toggleBPMClock = function(stepIndex) {
@@ -747,7 +999,7 @@ function formatEditorJSON() {
   }
 }
 
-// Close editor on Escape key
+// Close modals on Escape key
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeEditor();
+  if (e.key === 'Escape') { closeEditor(); closeNewMacro(); }
 });

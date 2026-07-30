@@ -48,7 +48,7 @@ Load order: `api.js` -> `app.js` -> `ui.js` -> `midi.js`.
 |---|---|
 | `api.js` | `window.API.*`: centralized fetch layer. All HTTP calls go through here. Nothing else calls `fetch()` directly. |
 | `app.js` | Global state, WebSocket handler, macro loading, LED helpers, nav dropdowns, health polling |
-| `ui.js` | Card rendering, progress animation, inline editor, macro firing, settings menu, file upload |
+| `ui.js` | Card rendering, progress animation, macro editor (create/duplicate/edit/delete, step + trigger management, routing picker fed by the discovered channel map), macro firing, settings menu, file upload |
 | `midi.js` | Web MIDI init, CC/Note message handling, BPM clock detection, device selector |
 
 ---
@@ -135,6 +135,8 @@ API surface:
 | `POST /api/device/discover` | Start a discovery walk (background thread; `discovery_progress` / `discovery_complete` WS events) |
 | `GET /api/device/discovery` | Status and result of the last walk |
 | `POST /api/device/discovery/apply` | Promote the draft to the live `ufx2_channel_map.json` (auto-backup first) |
+
+Macro management builds on this: `POST`/`PATCH /api/config/macros/{name}` upserts a single macro (name validated `[A-Za-z0-9_-]{1,64}`), `DELETE /api/config/macros/{name}` removes one. Both auto-backup `mappings.json`, hot-reload the bridge, and broadcast `macro_created` / `macro_updated` / `macro_deleted` WebSocket events so every open tab re-syncs its cards. The editor's routing picker turns a channel-map selection into the `/setSubmix {index}` + send-address step pair macros use.
 
 The draft is also written to `discovered_channel_map.json` (git-ignored) for manual inspection.
 

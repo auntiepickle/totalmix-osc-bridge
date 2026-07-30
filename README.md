@@ -36,7 +36,7 @@ MQTT is optional. If you run Home Assistant or a similar home automation stack, 
 - **Workspace and snapshot switching** — macros declare target by name; the bridge resolves slot numbers and switches via OSC only when needed
 - **BPM-synced ramp and LFO** — smooth fader moves over musical time (`bars x BPM`); use `"bpm": "clock"` to follow live MIDI clock
 - **Live web UI** — macro cards with progress bars, five-state LED indicators, real-time WebSocket updates
-- **Inline config editing** — edit any macro in the browser; changes write to disk and hot-reload without a restart
+- **Macro manager** — create, duplicate, edit, and delete macros entirely in the browser; pick routing targets from your discovered channel map instead of typing OSC addresses; changes write to disk and hot-reload without a restart
 - **MIDI clock BPM display** — reads `0xF8` timing clock messages and shows live BPM
 - **Device capture + channel-map discovery** — the bridge listens to TotalMix's OSC feedback and builds `ufx2_channel_map.json` by walking the submixes itself (`POST /api/device/discover`)
 - **MQTT integration** — optional; Home Assistant can trigger macros and receive workspace state
