@@ -136,7 +136,21 @@ API surface:
 | `GET /api/device/discovery` | Status and result of the last walk |
 | `POST /api/device/discovery/apply` | Promote the draft to the live `ufx2_channel_map.json` (auto-backup first) |
 
-Macro management builds on this: `POST`/`PATCH /api/config/macros/{name}` upserts a single macro (name validated `[A-Za-z0-9_-]{1,64}`), `DELETE /api/config/macros/{name}` removes one. Both auto-backup `mappings.json`, hot-reload the bridge, and broadcast `macro_created` / `macro_updated` / `macro_deleted` WebSocket events so every open tab re-syncs its cards. The editor's routing picker turns a channel-map selection into the `/setSubmix {index}` + send-address step pair macros use.
+Macro management builds on this: `POST`/`PATCH /api/config/macros/{name}` upserts a single macro (name validated `[A-Za-z0-9_-]{1,64}`), `DELETE /api/config/macros/{name}` removes one. Both auto-backup `mappings.json`, hot-reload the bridge, and broadcast `macro_created` / `macro_updated` / `macro_deleted` WebSocket events so every open tab re-syncs its cards.
+
+### Name-based target resolution
+
+`/1/volume{N}` indexes visible fader *strips*, not hardware channels — stereo-linked pairs collapse into one strip, and link state is snapshot-dependent. Any statically captured strip index goes stale the moment the mixer state differs (this bit us: a map captured with AN 1/AN 2 unlinked mis-addressed every send in snapshots where they are linked).
+
+Steps can therefore carry a name-based target instead of trusting a stored address:
+
+```json
+{ "target": {"submix": "RE-150 In", "channel": "AN 3"},
+  "osc": "/1/volume3",
+  "value": "{{param}}", "operation": {"type": "ramp", "bars": 2, "bpm": "clock"} }
+```
+
+At fire time `bridge._resolve_target()` looks up the submix index by name (channel map), sends `/setSubmix`, waits for the listener to confirm via `/1/labelSubmix` (1.5s timeout), then matches the channel *name* against the live bank's tracknames to find today's strip index. The stored `osc` address is only a fallback for when feedback is unavailable. `get_routing_label()` prefers target names, so card labels can't go stale either. The editor's routing picker writes targets; legacy raw-address macros (explicit `/setSubmix` steps) still execute unchanged.
 
 The draft is also written to `discovered_channel_map.json` (git-ignored) for manual inspection.
 

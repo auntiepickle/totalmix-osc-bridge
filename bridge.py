@@ -194,13 +194,19 @@ class TotalMixOSCBridge:
 
     def get_routing_label(self, macro_name: str) -> str:
         """Return human-readable routing line for UI cards"""
+        steps = self.mappings.get("macros", {}).get(macro_name, {}).get("steps", [])
+        # Name-based targets are authoritative — they never go stale
+        for step in steps:
+            t = step.get("target")
+            if t and t.get("channel") and t.get("submix"):
+                return f"{t['channel']} → {t['submix']}"
         if not self.channel_map:
             self._load_channel_map()
-        # Simple match against macro steps (expandable later)
+        # Legacy: match raw addresses against the channel map
         for submix_name, submix_data in self.channel_map.get("submixes", {}).items():
             for send_name, send_data in submix_data.get("sends", {}).items():
                 if any(step.get("osc") == send_data.get("osc_address")
-                       for step in self.mappings.get("macros", {}).get(macro_name, {}).get("steps", [])):
+                       for step in steps):
                     return f"{send_name} → {submix_name}"
         return "—"
     
@@ -425,7 +431,21 @@ class TotalMixOSCBridge:
 
             # === MACRO STEPS WITH OPERATION LIBRARY ===
             for step in macro.get("steps", []):
-                osc_addr = step["osc"]
+                osc_addr = step.get("osc")
+
+                # Name-based target: live-resolve strip index via OSC feedback.
+                # Falls back to the step's stored address if resolution fails.
+                if "target" in step:
+                    _, live_addr = self._resolve_target(step["target"])
+                    if live_addr:
+                        osc_addr = live_addr
+                    elif not osc_addr:
+                        logger.error(f"   → step skipped: target unresolved and no fallback osc address")
+                        continue
+
+                if not osc_addr:
+                    logger.error(f"   → step skipped: no osc address")
+                    continue
 
                 if "operation" in step and step.get("value") == "{{param}}":
                     op_config = step["operation"]
@@ -492,6 +512,75 @@ class TotalMixOSCBridge:
             if queued is not None:
                 logger.info(f"   → '{macro_name}' firing queued trigger (param={queued:.3f})")
                 threading.Thread(target=self.run_macro, args=(macro_name, queued), daemon=True).start()
+
+    # ─────────────────────────────────────────────────────────────
+    # NAME-BASED TARGET RESOLUTION (live, via OSC feedback)
+    # ─────────────────────────────────────────────────────────────
+    # /1/volume{N} indexes visible fader STRIPS, not hardware channels —
+    # stereo-linked pairs collapse into one strip, so indices shift with
+    # link state (which is snapshot-dependent). A statically captured
+    # channel map goes stale the moment the mixer state differs.
+    # Steps may therefore carry {"target": {"submix": name, "channel": name}}:
+    # at fire time we select the submix, wait for TotalMix's feedback burst,
+    # and match the channel NAME to a live strip index.
+
+    def _submix_index_by_name(self, submix_name: str):
+        """Look up a submix's /setSubmix index by name (channel map, then
+        live listener state is not consulted — indices are stable per device)."""
+        subs = (self.channel_map or {}).get("submixes", {})
+        entry = subs.get(submix_name)
+        if entry is None:  # case-insensitive fallback
+            wanted = submix_name.strip().lower()
+            entry = next((v for k, v in subs.items()
+                          if k.strip().lower() == wanted), None)
+        return entry.get("index") if entry else None
+
+    def _resolve_target(self, target: dict, timeout: float = 1.5):
+        """Resolve {"submix": name, "channel": name} to (setsubmix_index,
+        live_osc_address). live_osc_address is None if no live match —
+        caller falls back to the step's stored address."""
+        submix_name = str(target.get("submix", "")).strip()
+        channel_name = str(target.get("channel", "")).strip()
+        row = str(target.get("row", 1))
+        index = self._submix_index_by_name(submix_name)
+        if index is None:
+            logger.warning(f"   → target submix '{submix_name}' not in channel map")
+            return None, None
+
+        self.osc_client.send_message("/setSubmix", float(index))
+        logger.info(f"   → target: /setSubmix {index} ('{submix_name}')")
+
+        listener = self.osc_listener
+        if listener is None or not listener.running:
+            logger.warning("   → no OSC listener — cannot live-resolve strip, using stored address")
+            return index, None
+
+        # Wait for TotalMix to confirm the submix switch and dump the bank
+        deadline = time.time() + timeout
+        wanted = submix_name.lower()
+        while time.time() < deadline:
+            current = (listener.state.current_submix or "").strip().lower()
+            if current == wanted:
+                break
+            time.sleep(0.05)
+        else:
+            logger.warning(f"   → no labelSubmix confirmation for '{submix_name}' "
+                           f"within {timeout}s — using stored address")
+            return index, None
+        # Small grace so the trackname/volume burst lands after the label
+        time.sleep(0.15)
+
+        strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
+        wanted_ch = channel_name.lower()
+        for strip, data in sorted(strips.items()):
+            if str(data.get("name", "")).strip().lower() == wanted_ch:
+                addr = f"/{row}/volume{strip}"
+                logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
+                return index, addr
+        logger.warning(f"   → channel '{channel_name}' not found in live bank for "
+                       f"'{submix_name}' (strips: "
+                       f"{[d.get('name') for d in strips.values()]}) — using stored address")
+        return index, None
 
     def start_osc_listener(self):
         """Start the structured OSC feedback listener (device state + discovery)."""

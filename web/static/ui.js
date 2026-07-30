@@ -299,7 +299,10 @@ function toggleDetail(name) {
       <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">Steps</div>
       <div class="space-y-1.5">`;
     m.steps.forEach(step => {
-      const addr = step.osc || '?';
+      // Name-based targets display as names — the strip index is live-resolved
+      const addr = step.target
+        ? `${step.target.channel} → ${step.target.submix} ⚡live`
+        : (step.osc || '?');
       if (step.operation) {
         const op = step.operation;
         const opType = (op.type || '').toUpperCase();
@@ -374,14 +377,13 @@ function _esc(v) {
   return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 }
 
-// Build <option> list for workspace select from loaded snapshot map
+// Build <option> list for workspace select from loaded snapshot map.
+// Always leads with a "none" option — a macro with no workspace must not
+// silently adopt the first workspace just because it renders first.
 function _buildWorkspaceOptions(current) {
   const snapMap = window._snapshotMap || {};
   const workspaces = Object.keys(snapMap);
-  if (!workspaces.length) {
-    return `<option value="${_esc(current)}">${_esc(current) || '—'}</option>`;
-  }
-  let html = '';
+  let html = `<option value=""${!current ? ' selected' : ''}>— no switch —</option>`;
   if (current && !workspaces.includes(current)) {
     html += `<option value="${_esc(current)}" selected>${_esc(current)} (custom)</option>`;
   }
@@ -391,20 +393,19 @@ function _buildWorkspaceOptions(current) {
   return html;
 }
 
-// Build <option> list for snapshot select given a workspace
+// Build <option> list for snapshot select given a workspace.
+// Matching is case-insensitive — the bridge lowercases snapshot names.
 function _buildSnapshotOptions(workspace, current) {
   const snapMap = window._snapshotMap || {};
   const wsEntry = snapMap[workspace];
   const snapshots = wsEntry ? Object.values(wsEntry.snapshots || {}) : [];
-  if (!snapshots.length) {
-    return `<option value="${_esc(current)}">${_esc(current) || '—'}</option>`;
-  }
-  let html = '';
-  if (current && !snapshots.includes(current)) {
+  const matches = (s) => String(s).toLowerCase() === String(current || '').toLowerCase();
+  let html = `<option value=""${!current ? ' selected' : ''}>— no switch —</option>`;
+  if (current && !snapshots.some(matches)) {
     html += `<option value="${_esc(current)}" selected>${_esc(current)} (custom)</option>`;
   }
   snapshots.forEach(s => {
-    html += `<option value="${_esc(s)}"${s === current ? ' selected' : ''}>${_esc(s)}</option>`;
+    html += `<option value="${_esc(s)}"${matches(s) ? ' selected' : ''}>${_esc(s)}</option>`;
   });
   return html;
 }
@@ -434,27 +435,49 @@ function _cleanMacro(m) {
 }
 
 // ── Routing picker (fed by the discovered channel map) ──────────────────────
-// A macro targets a send by pairing a "/setSubmix {index}" step with a
-// "/{page}/volume{ch}" step. The picker sets both from one selection.
+// Macros store routing as NAMES ({"target": {submix, channel}}): the bridge
+// live-resolves the strip index from OSC feedback at fire time, because
+// /1/volume{N} is strip-positional and shifts with stereo-link state.
+// The step's osc address is kept as a fallback for when feedback is absent.
 
-function _buildSubmixPickerOptions() {
+function _buildSubmixPickerOptions(selected) {
   const subs = (window._channelMap || {}).submixes || {};
   return Object.values(subs)
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-    .map(s => `<option value="${_esc(s.name)}">${_esc(s.name)} (submix ${_esc(s.index)})</option>`)
+    .map(s => `<option value="${_esc(s.name)}"${s.name === selected ? ' selected' : ''}>${_esc(s.name)} (submix ${_esc(s.index)})</option>`)
     .join('');
 }
 
-window.updateSendPickerOptions = function (name) {
+window.updateSendPickerOptions = function (name, selectedChannel) {
   const submixSel = document.getElementById(`routing-submix-${name}`);
   const sendSel   = document.getElementById(`routing-send-${name}`);
   if (!submixSel || !sendSel) return;
   const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
   const sends = sub ? sub.sends || {} : {};
-  sendSel.innerHTML = Object.entries(sends)
-    .map(([sn, s]) => `<option value="${_esc(s.osc_address)}">${_esc(sn)} → ${_esc(submixSel.value)} (${_esc(s.osc_address)})</option>`)
+  sendSel.innerHTML = Object.keys(sends)
+    .map(sn => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)} → ${_esc(submixSel.value)}</option>`)
     .join('') || '<option value="">no sends discovered</option>';
 };
+
+// Current routing of the buffer's param step — used to restore picker state
+function _currentRouting(m) {
+  const paramStep = (m.steps || []).find(s => s.value === '{{param}}');
+  if (paramStep && paramStep.target) {
+    return { submix: paramStep.target.submix, channel: paramStep.target.channel };
+  }
+  // Legacy macros: reverse-lookup /setSubmix index and the raw address
+  const subs = (window._channelMap || {}).submixes || {};
+  const submixStep = (m.steps || []).find(s => s.osc === '/setSubmix');
+  const submix = submixStep
+    ? Object.values(subs).find(s => String(s.index) === String(submixStep.value))?.name
+    : undefined;
+  let channel;
+  if (submix && paramStep) {
+    channel = Object.entries(subs[submix]?.sends || {})
+      .find(([, s]) => s.osc_address === paramStep.osc)?.[0];
+  }
+  return { submix, channel };
+}
 
 window.applyRouting = function (name) {
   const submixSel = document.getElementById(`routing-submix-${name}`);
@@ -462,18 +485,23 @@ window.applyRouting = function (name) {
   if (!submixSel || !sendSel || !sendSel.value) return;
   const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
   if (!sub) return;
+  const send = (sub.sends || {})[sendSel.value];
 
   const m = _harvestEditor(name);
   m.steps = m.steps || [];
-  // Point the /setSubmix step at the chosen submix (insert one if missing)
-  const submixStep = m.steps.find(s => s.osc === '/setSubmix');
-  if (submixStep) submixStep.value = String(sub.index);
-  else m.steps.unshift({ osc: '/setSubmix', value: String(sub.index) });
-  // Point the param-driven step at the chosen send (append one if missing)
+  // The bridge sends /setSubmix itself when resolving a target —
+  // a legacy explicit step would double-send it
+  m.steps = m.steps.filter(s => s.osc !== '/setSubmix');
   const paramStep = m.steps.find(s => s.value === '{{param}}');
-  if (paramStep) paramStep.osc = sendSel.value;
-  else m.steps.push({ osc: sendSel.value, value: '{{param}}',
-                      operation: { type: 'ramp', bars: 2, bpm: 140 } });
+  const target = { submix: submixSel.value, channel: sendSel.value };
+  const fallbackAddr = send ? send.osc_address : '';
+  if (paramStep) {
+    paramStep.target = target;
+    paramStep.osc = fallbackAddr;
+  } else {
+    m.steps.push({ osc: fallbackAddr, target, value: '{{param}}',
+                   operation: { type: 'ramp', bars: 2, bpm: 140 } });
+  }
   editDetail(name);
 };
 
@@ -534,11 +562,21 @@ function editDetail(name) {
   // Steps
   const stepsHtml = (m.steps || []).map((step, i) => {
     const addr = _esc(step.osc || '');
+    // Name-based target line — the live-resolved routing; address below is
+    // only the fallback when no OSC feedback is available
+    const targetHtml = step.target ? `<div class="flex gap-2 items-center">
+        <span class="text-[10px] text-emerald-500/90 font-bold tracking-widest shrink-0" title="Resolved live from device feedback at fire time">LIVE</span>
+        <input data-field="steps.${i}.target.channel" value="${_esc(step.target.channel ?? '')}" class="${ic}" placeholder="channel name">
+        <span class="text-zinc-500 text-xs shrink-0">→</span>
+        <input data-field="steps.${i}.target.submix" value="${_esc(step.target.submix ?? '')}" class="${ic}" placeholder="submix name">
+      </div>` : '';
+    const addrPlaceholder = step.target ? 'fallback OSC address' : 'OSC address';
     if (step.operation) {
       const op = step.operation;
       return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
+        ${targetHtml}
         <div class="flex gap-2">
-          <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="OSC address">
+          <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="${addrPlaceholder}">
           <select data-field="steps.${i}.operation.type" class="${sc} shrink-0">
             <option value="ramp"${op.type==='ramp'?' selected':''}>RAMP</option>
             <option value="lfo"${op.type==='lfo'?' selected':''}>LFO</option>
@@ -548,25 +586,28 @@ function editDetail(name) {
         <div class="flex gap-2 items-center">
           <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
           <span class="text-zinc-500 text-xs shrink-0">bars @</span>
-          <input data-field="steps.${i}.operation.bpm" id="bpm-input-step-${i}"
+          <input data-field="steps.${i}.operation.bpm" id="bpm-input-${name}-${i}"
               type="${op.bpm==='clock'?'text':'number'}" min="20" max="400"
               value="${op.bpm==='clock'?'clock':_esc(op.bpm??140)}"
               class="${nc}" ${op.bpm==='clock'?'disabled':''}>
           <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
               title="Sync to live MIDI clock tempo">
-            <input type="checkbox" id="bpm-clock-cb-${i}" class="w-3 h-3 accent-orange-500"
+            <input type="checkbox" id="bpm-clock-cb-${name}-${i}" class="w-3 h-3 accent-orange-500"
                 ${op.bpm==='clock'?'checked':''}
-                onchange="toggleBPMClock(${i})">
+                onchange="toggleBPMClock('${name}',${i})">
             clock
           </label>
         </div>
       </div>`;
     } else {
       const val = _esc(step.value ?? '');
-      return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl flex gap-2">
-        <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="OSC address">
-        <input data-field="steps.${i}.value" value="${val}" class="${nc}" placeholder="value">
-        ${_removeBtn(i)}
+      return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
+        ${targetHtml}
+        <div class="flex gap-2">
+          <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="${addrPlaceholder}">
+          <input data-field="steps.${i}.value" value="${val}" class="${nc}" placeholder="value">
+          ${_removeBtn(i)}
+        </div>
       </div>`;
     }
   }).join('');
@@ -592,16 +633,18 @@ function editDetail(name) {
     </div>`;
   }).join('');
 
-  // Routing picker — only when a discovered channel map is loaded
+  // Routing picker — restored to the macro's current routing, only when a
+  // discovered channel map is loaded
   const hasChannelMap = Object.keys((window._channelMap || {}).submixes || {}).length > 0;
+  const routing = _currentRouting(m);
   const routingPickerHtml = hasChannelMap ? `<div>
     <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Routing (from your device)</div>
     <div class="flex gap-2 items-center flex-wrap">
       <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}')" class="${sc} flex-1 min-w-[120px]">
-        ${_buildSubmixPickerOptions()}
+        ${_buildSubmixPickerOptions(routing.submix)}
       </select>
       <select id="routing-send-${name}" class="${sc} flex-1 min-w-[160px]"></select>
-      <button onclick="applyRouting('${name}')" title="Set the /setSubmix and send steps from this selection"
+      <button onclick="applyRouting('${name}')" title="Store this routing by name — the strip index is resolved live from device feedback when the macro fires"
           class="shrink-0 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs px-3 py-1.5 rounded-lg transition-all">
         Set routing
       </button>
@@ -683,8 +726,8 @@ function editDetail(name) {
 
   </div>`;
 
-  // Populate the cascading send picker for the initially selected submix
-  if (hasChannelMap) updateSendPickerOptions(name);
+  // Populate the cascading send picker, restoring the macro's current send
+  if (hasChannelMap) updateSendPickerOptions(name, routing.channel);
 }
 
 // Read every [data-field] input in the open editor back into the edit buffer.
@@ -766,17 +809,23 @@ function _blankMacroTemplate() {
   const subs = Object.values((window._channelMap || {}).submixes || {})
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   const first = subs[0];
-  const firstSend = first ? Object.values(first.sends || {})[0] : null;
+  const firstSendName = first ? Object.keys(first.sends || {})[0] : null;
+  const firstSend = firstSendName ? first.sends[firstSendName] : null;
+  const step = {
+    osc: firstSend ? firstSend.osc_address : '/1/volume1',
+    value: '{{param}}',
+    operation: { type: 'ramp', bars: 2, bpm: 140 },
+  };
+  // Name-based target — live-resolved at fire time (strip indices drift
+  // with stereo-link state, names don't)
+  if (first && firstSendName) {
+    step.target = { submix: first.name, channel: firstSendName };
+  }
   return {
     description: '',
     force_switch: false,
     fire_mode: 'ignore',
-    steps: [
-      { osc: '/setSubmix', value: String(first ? first.index : 1) },
-      { osc: firstSend ? firstSend.osc_address : '/1/volume1',
-        value: '{{param}}',
-        operation: { type: 'ramp', bars: 2, bpm: 140 } },
-    ],
+    steps: [step],
     midi_triggers: [],
   };
 }
@@ -848,9 +897,9 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── BPM clock toggle in step editor ──────────────────────────────────────────
-window.toggleBPMClock = function(stepIndex) {
-  const cb  = document.getElementById(`bpm-clock-cb-${stepIndex}`);
-  const inp = document.getElementById(`bpm-input-step-${stepIndex}`);
+window.toggleBPMClock = function(macroName, stepIndex) {
+  const cb  = document.getElementById(`bpm-clock-cb-${macroName}-${stepIndex}`);
+  const inp = document.getElementById(`bpm-input-${macroName}-${stepIndex}`);
   if (!cb || !inp) return;
   if (cb.checked) {
     inp.dataset.prevBpm = inp.value;   // stash the last numeric BPM

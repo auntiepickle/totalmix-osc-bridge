@@ -43,6 +43,12 @@ dropdown groups, no OSC strings, no JSON.
   the picker never shows the second half. Fine — but if a user hand-types the
   odd index, nothing warns them. The simple mode should only offer known-good
   indices.
+- ~~Static strip indices~~ **DONE (2026-07-30): name-based live resolution.**
+  Strip indices proved snapshot-dependent (stereo links collapse strips);
+  macros now store `target: {submix, channel}` names and the bridge resolves
+  the strip from live feedback at fire time. The simple mode should ONLY ever
+  deal in names. Remaining idea: re-run discovery automatically per snapshot
+  switch so fallback addresses stay fresh too.
 
 ## Full-surface control (user note, 2026-07-30)
 
