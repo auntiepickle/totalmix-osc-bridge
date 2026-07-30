@@ -48,6 +48,7 @@ class DeviceState:
     def __init__(self):
         self._lock = threading.Lock()
         self.raw = {}              # address -> {"args", "count", "last_seen"}
+        self.message_count = 0     # total ingested messages (liveness probes)
         self.current_submix = None # name from /1/labelSubmix
         self.current_row = "1"     # from /1/busInput|busPlayback|busOutput
         # submix name -> row -> channel -> {"name","volume","volume_db","pan"}
@@ -75,6 +76,7 @@ class DeviceState:
         now = time.time()
         with self._lock:
             self.last_message_at = now
+            self.message_count += 1
             entry = self.raw.setdefault(address, {"count": 0})
             entry["args"] = list(args)
             entry["count"] += 1
@@ -149,6 +151,7 @@ class DeviceState:
                 "current_row": self.current_row,
                 "bank_width": self.bank_width,
                 "real_strip_count": self.real_strip_count,
+                "message_count": self.message_count,
                 "submixes": {
                     name: {row: dict(chs) for row, chs in rows.items()}
                     for name, rows in self.submixes.items()

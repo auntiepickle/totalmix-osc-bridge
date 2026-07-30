@@ -140,6 +140,40 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                 logger.debug(f"Suppressed {msg.topic} (cooldown {since_last:.1f}s < 2.5s)")
                 return
 
+        # Retained deliveries replay the LAST command at every (re)connect —
+        # acting on them recalled a snapshot and loaded a workspace over the
+        # user's live mixer on every container restart (discarding unsaved
+        # state and reverting per-workspace settings like the OSC bank
+        # width). Absorb them as bridge belief only; never drive the device
+        # from a retained message.
+        if msg.retain and msg.topic.startswith("totalmix/macro/"):
+            logger.info(f"Retained macro trigger {msg.topic} ignored "
+                        f"(replays would fire macros on every restart)")
+            return
+
+        if msg.retain and msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
+            try:
+                num = int(payload)
+                if msg.topic == "totalmix/workspace":
+                    ws_name = next(
+                        (name for name, data in SNAPSHOT_MAP.items()
+                         if isinstance(data, dict) and data.get("slot") == num),
+                        None,
+                    )
+                    bridge.update_workspace(name=ws_name or f"slot_{num}")
+                else:
+                    ws = getattr(bridge, "current_workspace", None)
+                    snap_name = None
+                    if ws and ws in SNAPSHOT_MAP:
+                        snap_name = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(num))
+                    bridge.update_snapshot(name=snap_name or f"snap_{num}")
+                bridge.state_confirmed = False  # belief only, device untouched
+                logger.info(f"Retained {msg.topic} = {payload} absorbed as belief "
+                            f"(not sent to device)")
+            except ValueError:
+                logger.warning(f"Non-integer retained payload ignored: {payload!r}")
+            return
+
         if msg.topic.startswith("totalmix/macro/") or msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
             logger.info(f"MQTT ← {msg.topic} | {payload}")
 

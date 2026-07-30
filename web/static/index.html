@@ -129,6 +129,15 @@
                             <input type="file" accept=".json" class="hidden" onchange="uploadFile(this, 'channel_map')">
                         </label>
                         <div class="border-t border-zinc-700 my-1"></div>
+                        <button onclick="probeDevice(); toggleSettingsMenu()"
+                            class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left group"
+                            title="Sends a state-changing OSC command and checks feedback follows. Briefly flips the selected submix (restored after).">
+                            <i class="fas fa-stethoscope text-cyan-400 w-4"></i>
+                            <span>
+                                Check device connection
+                                <span class="block text-[10px] text-zinc-500 group-hover:text-zinc-400 transition-colors leading-tight">briefly flips the submix — avoid mid-performance</span>
+                            </span>
+                        </button>
                         <button onclick="reloadServer(); toggleSettingsMenu()"
                             class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left">
                             <i class="fas fa-sync text-green-400 w-4"></i> Reload mappings from disk
@@ -143,6 +152,13 @@
             <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
             <span class="flex-1">TotalMix is only reporting <b id="bank-width-actual">?</b> faders per bank — channels above that are <b>invisible to routing</b> (your channel map uses up to <b id="bank-width-needed">?</b>).
             In TotalMix: Options → Settings → OSC → raise <i>Number of Faders per Bank</i>, then <b>re-save the current workspace</b> (the setting is stored per workspace).</span>
+        </div>
+
+        <!-- Device-unresponsive warning (driven ONLY by a failed liveness probe — silence is not evidence) -->
+        <div id="device-dead-banner" class="hidden mb-4 flex items-center gap-3 bg-red-900/20 border border-red-800/40 text-red-400 px-5 py-3 rounded-2xl text-sm">
+            <i class="fas fa-triangle-exclamation shrink-0"></i>
+            <span class="flex-1"><b>TotalMix is not responding to OSC</b> — a liveness probe sent a state-changing command and no feedback followed.
+            On the TotalMix machine check Options → Settings → OSC → <i>In Use</i> (still ticked = OSC thread wedged, restart TotalMix; unticked = re-tick it), then run the check again from the gear menu.</span>
         </div>
 
         <!-- Stale-map warning (hidden unless the live device has more channels than the map knows) -->

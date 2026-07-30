@@ -100,6 +100,9 @@ window.API = (function () {
     /** GET /api/config/channel_map → parsed { submixes: {…} } */
     getChannelMap() { return _get('/api/config/channel_map'); },
 
+    /** POST /api/device/probe → { alive, elapsed_s, … } */
+    probeDevice() { return _post('/api/device/probe'); },
+
     /** POST /api/trigger/:name  { param, clock_bpm } */
     trigger(name, param = 1.0, clockBpm = null) {
       return _post(`/api/trigger/${encodeURIComponent(name)}`, {

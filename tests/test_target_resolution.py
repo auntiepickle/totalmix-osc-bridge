@@ -248,3 +248,54 @@ def test_playback_row_target_selects_bus_and_restores_input(make_bridge, fake_os
     assert ("/1/volume3", 0.6) in fake_osc.sent
     assert addrs.index("/1/volume3") < addrs.index("/1/busInput")
     assert fake_osc.sent[-1] != ("/1/busPlayback", 1.0)  # not left on playback
+
+
+class ProbeEchoTotalMix:
+    """Alive device for probe tests: any /setSubmix produces feedback."""
+
+    def __init__(self, listener, fake_osc):
+        self.listener = listener
+        self.fake_osc = fake_osc
+
+    def send_message(self, address, value):
+        self.fake_osc.send_message(address, value)
+        if address == "/setSubmix":
+            self.listener._handle("/1/labelSubmix", f"Sub {int(value)}")
+            self.listener._handle("/1/trackname1", "AN 1")
+
+
+def _probe_bridge(make_bridge, fake_osc, device_cls):
+    listener = OSCListener(0)
+    listener._server = object()
+    b = make_bridge({})
+    b.channel_map = {"submixes": {
+        "Main": {"index": 1}, "AES": {"index": 12},
+    }}
+    b.osc_listener = listener
+    b.osc_client = device_cls(listener, fake_osc) if device_cls else b.osc_client
+    return b, listener
+
+
+def test_probe_alive_device_and_restores_submix(make_bridge, fake_osc):
+    b, listener = _probe_bridge(make_bridge, fake_osc, ProbeEchoTotalMix)
+    listener._handle("/1/labelSubmix", "Main")  # currently on Main
+    result = b.probe_device(timeout=1.0)
+    assert result["alive"] is True
+    assert result["probe_submix"] == "AES"
+    # Probe flipped to AES (12), then restored Main (1)
+    submix_sends = [v for a, v in fake_osc.sent if a == "/setSubmix"]
+    assert submix_sends == [12.0, 1.0]
+    assert b.last_probe["alive"] is True
+
+
+def test_probe_dead_device_captures_evidence(make_bridge, fake_osc):
+    b, listener = _probe_bridge(make_bridge, fake_osc, None)  # plain fake: no echo
+    result = b.probe_device(timeout=0.3)
+    assert result["alive"] is False
+    assert "evidence" in result
+    assert b.last_probe["alive"] is False
+
+
+def test_probe_without_listener_is_unavailable(make_bridge, fake_osc):
+    b = make_bridge({})
+    assert b.probe_device()["alive"] is None

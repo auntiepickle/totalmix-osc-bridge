@@ -168,6 +168,7 @@ async def get_status():
         # workspace/snapshot below are the bridge's commanded belief;
         # state_confirmed says whether the device confirmed the last switch
         "state_confirmed": getattr(bridge, "state_confirmed", None),
+        "device_probe": getattr(bridge, "last_probe", None),
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),
         "snapshot_map_workspaces": len(snap_map),
@@ -418,6 +419,17 @@ async def start_discovery(body: DiscoverBody = DiscoverBody()):
     per_index = body.settle_s * (3 if body.include_playback else 1)
     return {"status": "started", "submix_count": body.submix_count,
             "estimated_s": body.submix_count * per_index}
+
+
+@app.post("/api/device/probe")
+async def probe_device():
+    """Liveness probe: sends a state-changing command and confirms feedback.
+    Briefly flips the selected submix (restored after) — user-triggered only,
+    never on a timer. Silence alone is NOT evidence of a freeze."""
+    result = bridge.probe_device()
+    if result.get("alive") is None:
+        raise HTTPException(status_code=503, detail=result.get("reason", "probe unavailable"))
+    return result
 
 
 @app.get("/api/device/discovery")

@@ -369,7 +369,28 @@ async function checkBankWidth() {
       }
       staleBanner.classList.toggle('hidden', !mapStale);
     }
+
+    // Device unresponsive — driven ONLY by a failed probe (an idle mixer
+    // sends nothing; silence must never fire this)
+    const deadBanner = document.getElementById('device-dead-banner');
+    if (deadBanner) {
+      const dead = s.device_probe && s.device_probe.alive === false;
+      deadBanner.classList.toggle('hidden', !dead);
+    }
   } catch (_) {}
+}
+
+// ── Device liveness probe (gear menu) ────────────────────────────────────────
+async function probeDevice() {
+  try {
+    const r = await API.probeDevice();
+    alert(r.alive
+      ? `TotalMix is responding (feedback in ${r.elapsed_s}s).`
+      : 'TotalMix is NOT responding to OSC — see the banner for what to check.');
+  } catch (e) {
+    alert(`Probe unavailable: ${e.message}`);
+  }
+  checkBankWidth();  // refresh banner state immediately
 }
 
 function _applyHealthDot(id, ok, label) {

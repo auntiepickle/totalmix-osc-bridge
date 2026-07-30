@@ -207,13 +207,23 @@ appear. Raise it, then re-run discovery. (The bridge sends `/setBankStart 0`
 before every capture/resolution so a scrolled bank cannot shift indices —
 the address is 0-based.)
 
-**This setting is saved per workspace.** Set it while the workspace you
-actually perform in is loaded, then **re-save that workspace** — otherwise
-the next workspace load (including the bridge's own startup, which restores
-the last workspace via MQTT) silently reverts it to that workspace's stored
-value. Repeat for every workspace you switch to. Separately, stereo-link
-state and channel names change per **snapshot** — the bridge handles that at
-fire time by resolving channel names against live feedback.
+**Several OSC settings are workspace-scoped and will NOT survive a workspace
+load unless you re-save the workspace after changing them.** Confirmed the
+hard way, twice:
+
+| Setting | Observed behavior |
+|---|---|
+| Number of Faders per Bank | reverted 48 → 8 on workspace load |
+| Remote Controller Address | set, then gone after a TotalMix restart |
+
+The non-obvious required step: change the setting **while the workspace you
+perform in is loaded**, then **re-save that workspace** (and every other
+workspace you switch to — each carries its own copy). Loading any workspace
+— including by a macro — restores that workspace's stored values.
+
+Separately, stereo-link state and channel names change per **snapshot** —
+the bridge handles that at fire time by resolving channel names against live
+feedback.
 
 **Run a discovery walk:**
 

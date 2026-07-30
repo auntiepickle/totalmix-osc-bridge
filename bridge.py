@@ -111,6 +111,7 @@ class TotalMixOSCBridge:
         self.mqtt_connected = False         # set True/False by mqtt_handler callbacks
         self.osc_listener = None            # OSCListener — set by start_osc_listener()
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
+        self.last_probe = None              # result of the last device liveness probe
         self.discovery_state = {"status": "idle"}  # channel-map discovery job state
         self._load_channel_map()
 
@@ -711,6 +712,62 @@ class TotalMixOSCBridge:
                      f"'{submix_name}' (live strips: {real}) — refusing the "
                      f"stored address, it may point at a different channel now")
         return index, None, "not_in_bank"
+
+    def probe_device(self, timeout: float = 2.5):
+        """Liveness probe: send a state-CHANGING command and confirm a
+        feedback dump follows, then restore the previous submix.
+
+        Silence is NOT evidence of a freeze — TotalMix emits feedback only on
+        change, so an idle mixer is indistinguishable from a dead one by
+        listening alone. This is the only sound aliveness check. Never run it
+        on a timer against a mixer someone may be performing on; it flips the
+        selected submix briefly.
+        """
+        listener = self.osc_listener
+        if listener is None or not listener.running or self.osc_client is None:
+            return {"alive": None, "reason": "no OSC listener or client"}
+
+        state = listener.state
+        original = state.current_submix
+        subs = (self.channel_map or {}).get("submixes", {})
+        target = next(((n, d.get("index")) for n, d in subs.items()
+                       if n != original and d.get("index") is not None), None)
+        if target is None:
+            return {"alive": None, "reason": "no alternate submix in channel map to probe with"}
+
+        before = state.message_count
+        t0 = time.time()
+        self.osc_client.send_message("/setSubmix", float(target[1]))
+        alive = listener.wait_for(lambda st: st.message_count > before, timeout)
+        elapsed = time.time() - t0
+
+        if original:
+            orig_idx = self._submix_index_by_name(original)
+            if orig_idx is not None:
+                self.osc_client.send_message("/setSubmix", float(orig_idx))
+
+        result = {"alive": bool(alive), "elapsed_s": round(elapsed, 3),
+                  "probe_submix": target[0], "restored_submix": original,
+                  "at": time.time()}
+        if alive:
+            logger.info(f"Device probe OK — feedback in {elapsed:.2f}s")
+        else:
+            # Auto-capture evidence while the failure is fresh
+            result["evidence"] = {
+                "last_message_at": state.last_message_at,
+                "message_count": state.message_count,
+                "current_submix": original,
+                "bank_width": state.bank_width,
+                "real_strip_count": state.real_strip_count,
+            }
+            logger.error(f"DEVICE PROBE FAILED — TotalMix is not responding to OSC. "
+                         f"Check Options → Settings → OSC → 'In Use' on the device "
+                         f"(ticked = OSC thread wedged; unticked = remote dropped). "
+                         f"Evidence: {result['evidence']}")
+        self.last_probe = result
+        self.broadcast_state(macro_event={"type": "device_probe",
+                                          "alive": result["alive"]})
+        return result
 
     def start_osc_listener(self):
         """Start the structured OSC feedback listener (device state + discovery)."""

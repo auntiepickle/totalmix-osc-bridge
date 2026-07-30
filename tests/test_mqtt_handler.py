@@ -58,8 +58,8 @@ class FakeBridge:
         self.snapshot_updates.append(name)
 
 
-def msg(topic, payload):
-    return SimpleNamespace(topic=topic, payload=payload.encode())
+def msg(topic, payload, retain=False):
+    return SimpleNamespace(topic=topic, payload=payload.encode(), retain=retain)
 
 
 @pytest.fixture
@@ -151,3 +151,30 @@ def test_non_integer_payloads_ignored(handler):
     client.on_message(client, None, msg("totalmix/workspace", "garbage"))
     client.on_message(client, None, msg("totalmix/snapshot", "garbage"))
     assert sent_osc == []
+
+
+def test_retained_workspace_absorbed_as_belief_not_sent(handler):
+    """Retained deliveries replay at every reconnect — they must inform the
+    bridge's belief but NEVER drive the device (restarts were recalling
+    snapshots and loading workspaces over the user's live mixer)."""
+    client, bridge, sent_osc = handler
+    client.on_message(client, None, msg("totalmix/workspace", "2", retain=True))
+    assert sent_osc == []                        # device untouched
+    assert bridge.workspace_updates == ["Pill_setup"]  # belief updated
+    assert bridge.state_confirmed is False
+
+
+def test_retained_snapshot_absorbed_as_belief_not_sent(handler):
+    client, bridge, sent_osc = handler
+    bridge.current_workspace = "Pill_setup"
+    client.on_message(client, None, msg("totalmix/snapshot", "1", retain=True))
+    assert sent_osc == []
+    assert bridge.snapshot_updates == ["Reset"]
+    assert bridge.state_confirmed is False
+
+
+def test_retained_macro_trigger_ignored(handler):
+    client, bridge, _ = handler
+    client.on_message(client, None,
+                      msg("totalmix/macro/known_macro", "0.5", retain=True))
+    assert bridge.run_macro_calls == []          # would fire on every restart
