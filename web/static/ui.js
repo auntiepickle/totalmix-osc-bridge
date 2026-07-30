@@ -481,6 +481,84 @@ function _currentRouting(m) {
   return { submix, channel };
 }
 
+// ── Parameter descriptors (#12) ──────────────────────────────────────────────
+// Each parameter class declares how its VALUE should be edited and shown.
+// Adding a new mod target (EQ band, gain, ...) means adding a descriptor
+// here — the step editor renders the right control generically.
+const PARAM_DEFS = {
+  volume: {
+    widget: 'slider', min: 0, max: 1, step: 0.01, default: 0.8,
+    fmt: v => `${Math.round(v * 100)}%`,
+  },
+  pan: {
+    widget: 'slider', min: 0, max: 1, step: 0.01, default: 0.5,
+    fmt: v => {
+      const d = Math.round((v - 0.5) * 200);
+      return d === 0 ? 'C' : d < 0 ? `L${-d}` : `R${d}`;
+    },
+  },
+  mute: {
+    widget: 'toggle', default: 1.0,
+    options: [['1.0', 'Muted'], ['0.0', 'Unmuted']],
+  },
+};
+
+window.fmtParamValue = function (param, v) {
+  const def = PARAM_DEFS[param];
+  return def && def.fmt ? def.fmt(parseFloat(v)) : String(v);
+};
+
+// Switch a target step between CC-driven ({{param}}) and a static value
+window.toggleFollowParam = function (name, i) {
+  const m = _harvestEditor(name);
+  const step = (m.steps || [])[i];
+  if (!step) return;
+  const def = PARAM_DEFS[(step.target && step.target.param) || 'volume'] || {};
+  step.value = step.value === '{{param}}'
+    ? String(def.default ?? 0.5)
+    : '{{param}}';
+  editDetail(name);
+};
+
+// Value control for a target step, driven by the parameter descriptor
+function _valueControl(name, i, step, nc, sc) {
+  const param = (step.target && step.target.param) || 'volume';
+  const def = PARAM_DEFS[param];
+  const follow = step.value === '{{param}}';
+  const followBox = `<label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
+      title="Value comes from the trigger (CC value / FIRE param) at fire time">
+    <input type="checkbox" class="w-3 h-3 accent-orange-500"${follow ? ' checked' : ''}
+        onchange="toggleFollowParam('${name}',${i})"> from trigger
+  </label>`;
+  if (follow || !def) {
+    return `<div class="flex gap-2 items-center flex-1">
+      ${follow ? `<span class="flex-1 text-xs text-zinc-500 font-mono px-1">value follows the trigger</span>`
+               : `<input data-field="steps.${i}.value" value="${_esc(step.value ?? '')}" class="${nc}" placeholder="value">`}
+      ${followBox}
+    </div>`;
+  }
+  const v = parseFloat(step.value);
+  const val = Number.isFinite(v) ? v : (def.default ?? 0);
+  if (def.widget === 'toggle') {
+    return `<div class="flex gap-2 items-center flex-1">
+      <select data-field="steps.${i}.value" class="${sc}">
+        ${def.options.map(([ov, ol]) =>
+          `<option value="${ov}"${parseFloat(ov) === val ? ' selected' : ''}>${ol}</option>`).join('')}
+      </select>
+      ${followBox}
+    </div>`;
+  }
+  // slider
+  return `<div class="flex gap-2 items-center flex-1">
+    <input data-field="steps.${i}.value" type="range"
+        min="${def.min}" max="${def.max}" step="${def.step}" value="${val}"
+        class="flex-1 accent-orange-500"
+        oninput="document.getElementById('val-label-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+    <span id="val-label-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(val)}</span>
+    ${followBox}
+  </div>`;
+}
+
 // Mute is global-per-channel — the submix dropdown is meaningless for it
 window.updateParamScope = function (name) {
   const paramSel  = document.getElementById(`routing-param-${name}`);
@@ -637,13 +715,19 @@ function editDetail(name) {
       </div>`;
     } else {
       const val = _esc(step.value ?? '');
+      // Target steps get a parameter-aware value control (#12): pan shows
+      // L/C/R, mute a toggle, volume a fader — raw numbers only for raw steps
+      const valueHtml = step.target
+        ? _valueControl(name, i, step, nc, sc)
+        : `<input data-field="steps.${i}.value" value="${val}" class="${nc}" placeholder="value">`;
       return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
         ${targetHtml}
         <div class="flex gap-2 items-center">
           ${addrField}
-          <input data-field="steps.${i}.value" value="${val}" class="${nc}" placeholder="value">
+          ${step.target ? '' : valueHtml}
           ${_removeBtn(i)}
         </div>
+        ${step.target ? `<div class="flex gap-2 items-center">${valueHtml}</div>` : ''}
       </div>`;
     }
   }).join('');
