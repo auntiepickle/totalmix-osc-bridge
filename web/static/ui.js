@@ -768,6 +768,7 @@ async function saveInlineEdit(name) {
 
   try {
     await API.saveMacro(name, m);
+    window._lastLocalSave = { name, ts: Date.now() };  // suppress own WS echo
     macros[name] = JSON.parse(JSON.stringify(m));
     cancelInlineEdit(name);
     // Reopen in read-only mode to show the saved state

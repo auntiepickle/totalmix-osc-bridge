@@ -39,8 +39,17 @@ ws.onmessage = function (event) {
       flashLEDSkipped(ev.name);
     } else if (ev.type === 'macro_created' || ev.type === 'macro_updated'
                || ev.type === 'macro_deleted') {
-      // Another tab (or this one) changed the macro set — re-sync cards
-      loadMacros();
+      // Another tab changed the macro set — re-sync cards. Skip when the
+      // change is this tab's own doing (already reflected locally) or an
+      // editor is open: renderCards() would wipe the just-opened panel.
+      const editing = Object.keys(window._editBuffers || {}).length > 0;
+      const alreadyApplied =
+        (ev.type === 'macro_created' && !!macros[ev.name]) ||
+        (ev.type === 'macro_deleted' && !macros[ev.name]) ||
+        (ev.type === 'macro_updated'
+          && window._lastLocalSave?.name === ev.name
+          && Date.now() - window._lastLocalSave.ts < 3000);
+      if (!editing && !alreadyApplied) loadMacros();
     }
   }
 
