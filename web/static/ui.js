@@ -512,6 +512,26 @@ window.fmtParamValue = function (param, v) {
   return def && def.fmt ? def.fmt(parseFloat(v)) : String(v);
 };
 
+// Switch a step between SET (instant value) and RAMP/LFO (trigger-driven
+// operation over time). Operations only execute with value {{param}}, and a
+// SET step is where the parameter widgets (pan slider, mute toggle) live.
+window.changeStepMode = function (name, i, mode) {
+  const m = _harvestEditor(name);
+  const step = (m.steps || [])[i];
+  if (!step) return;
+  if (mode === 'set') {
+    delete step.operation;
+    if (step.value === '{{param}}') {
+      const def = PARAM_DEFS[(step.target && step.target.param) || 'volume'];
+      step.value = String((def && def.default) ?? 1.0);
+    }
+  } else {
+    step.operation = { ...(step.operation || { bars: 2, bpm: 140 }), type: mode };
+    step.value = '{{param}}';
+  }
+  editDetail(name);
+};
+
 // Switch a target step between CC-driven ({{param}}) and a static value
 window.toggleFollowParam = function (name, i) {
   const m = _harvestEditor(name);
@@ -596,6 +616,7 @@ window.applyRouting = function (name) {
   const paramSel = document.getElementById(`routing-param-${name}`);
   const param = paramSel ? paramSel.value : 'volume';
   if (param !== 'volume') target.param = param;
+  const paramDef = PARAM_DEFS[param] || {};
   // Mute is global-per-channel (hardware-verified, #10) — storing a submix
   // would imply a scope that does not exist, and the bridge won't switch
   if (param === 'mute') delete target.submix;
@@ -608,9 +629,15 @@ window.applyRouting = function (name) {
   if (paramStep) {
     paramStep.target = target;
     paramStep.osc = fallbackAddr;
-  } else {
+  } else if (param === 'volume') {
+    // Volume defaults to a ramp — the classic send macro
     m.steps.push({ osc: fallbackAddr, target, value: '{{param}}',
                    operation: { type: 'ramp', bars: 2, bpm: 140 } });
+  } else {
+    // Pan/mute default to a SET step so their value widgets (slider,
+    // toggle) appear immediately — switch to RAMP/LFO via the mode select
+    m.steps.push({ osc: fallbackAddr, target,
+                   value: String(paramDef.default ?? 0.5) });
   }
   editDetail(name);
 };
@@ -689,16 +716,21 @@ function editDetail(name) {
     const addrField = step.target
       ? `<div class="flex-1 text-[10px] text-zinc-600 font-mono px-1 truncate" title="Machine-managed: only used when device feedback is unavailable">fallback: ${addr || '—'}</div>`
       : `<input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="OSC address">`;
+    // SET / RAMP / LFO mode select — SET removes the operation and exposes
+    // the parameter's value widget (this is how you get the pan slider)
+    const modeSel = (mode) => `<select onchange="changeStepMode('${name}',${i},this.value)" class="${sc} shrink-0"
+        title="SET writes a value instantly; RAMP/LFO animate the value from the trigger">
+        <option value="set"${mode==='set'?' selected':''}>SET</option>
+        <option value="ramp"${mode==='ramp'?' selected':''}>RAMP</option>
+        <option value="lfo"${mode==='lfo'?' selected':''}>LFO</option>
+      </select>`;
     if (step.operation) {
       const op = step.operation;
       return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
         ${targetHtml}
         <div class="flex gap-2 items-center">
           ${addrField}
-          <select data-field="steps.${i}.operation.type" class="${sc} shrink-0">
-            <option value="ramp"${op.type==='ramp'?' selected':''}>RAMP</option>
-            <option value="lfo"${op.type==='lfo'?' selected':''}>LFO</option>
-          </select>
+          ${modeSel(op.type === 'lfo' ? 'lfo' : 'ramp')}
           ${_removeBtn(i)}
         </div>
         <div class="flex gap-2 items-center">
@@ -728,7 +760,8 @@ function editDetail(name) {
         ${targetHtml}
         <div class="flex gap-2 items-center">
           ${addrField}
-          ${step.target ? '' : valueHtml}
+          ${step.target ? modeSel('set') : valueHtml}
+          ${step.target ? '' : modeSel('set')}
           ${_removeBtn(i)}
         </div>
         ${step.target ? `<div class="flex gap-2 items-center">${valueHtml}</div>` : ''}
