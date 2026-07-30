@@ -251,16 +251,22 @@ def test_playback_row_target_selects_bus_and_restores_input(make_bridge, fake_os
 
 
 class ProbeEchoTotalMix:
-    """Alive device for probe tests: any /setSubmix produces feedback."""
+    """Alive device for probe tests: a bus-row change produces a dump.
+    Tracks the selected row so an idempotent re-select stays silent —
+    exactly one of the probe's two toggles must produce feedback."""
 
     def __init__(self, listener, fake_osc):
         self.listener = listener
         self.fake_osc = fake_osc
+        self.row = "input"
 
     def send_message(self, address, value):
         self.fake_osc.send_message(address, value)
-        if address == "/setSubmix":
-            self.listener._handle("/1/labelSubmix", f"Sub {int(value)}")
+        new_row = {"/1/busPlayback": "playback", "/1/busInput": "input"}.get(address)
+        if new_row and new_row != self.row:
+            self.row = new_row
+            self.listener._handle(address, 1.0)
+            self.listener._handle("/1/labelSubmix", "Phones 1")
             self.listener._handle("/1/trackname1", "AN 1")
 
 
@@ -276,16 +282,27 @@ def _probe_bridge(make_bridge, fake_osc, device_cls):
     return b, listener
 
 
-def test_probe_alive_device_and_restores_submix(make_bridge, fake_osc):
+def test_probe_alive_device_never_touches_submix(make_bridge, fake_osc):
     b, listener = _probe_bridge(make_bridge, fake_osc, ProbeEchoTotalMix)
-    listener._handle("/1/labelSubmix", "Main")  # currently on Main
     result = b.probe_device(timeout=1.0)
     assert result["alive"] is True
-    assert result["probe_submix"] == "AES"
-    # Probe flipped to AES (12), then restored Main (1)
-    submix_sends = [v for a, v in fake_osc.sent if a == "/setSubmix"]
-    assert submix_sends == [12.0, 1.0]
+    # The whole point of the bus-toggle probe: /setSubmix is never sent,
+    # so there is nothing to restore — even on a cold listener
+    assert "/setSubmix" not in fake_osc.addresses()
+    assert fake_osc.addresses()[:2] == ["/1/busPlayback", "/1/busInput"]
     assert b.last_probe["alive"] is True
+
+
+def test_probe_works_cold_after_restart(make_bridge, fake_osc):
+    """The old /setSubmix probe left the device moved when the listener had
+    no prior submix (guaranteed after a restart). Bus toggling has no such
+    failure mode: the listener starts empty and the probe still passes."""
+    b, listener = _probe_bridge(make_bridge, fake_osc, ProbeEchoTotalMix)
+    assert listener.state.current_submix is None  # cold boot
+    result = b.probe_device(timeout=1.0)
+    assert result["alive"] is True
+    # And the probe primed the previously-blind listener for free
+    assert listener.state.current_submix == "Phones 1"
 
 
 def test_probe_dead_device_captures_evidence(make_bridge, fake_osc):

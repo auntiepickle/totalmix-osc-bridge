@@ -715,39 +715,34 @@ class TotalMixOSCBridge:
 
     def probe_device(self, timeout: float = 2.5):
         """Liveness probe: send a state-CHANGING command and confirm a
-        feedback dump follows, then restore the previous submix.
+        feedback dump follows.
 
         Silence is NOT evidence of a freeze — TotalMix emits feedback only on
         change, so an idle mixer is indistinguishable from a dead one by
-        listening alone. This is the only sound aliveness check. Never run it
-        on a timer against a mixer someone may be performing on; it flips the
-        selected submix briefly.
+        listening alone. This is the only sound aliveness check.
+
+        The probe toggles the fader ROW (/1/busPlayback then /1/busInput):
+        whatever row is currently selected, exactly one of the two is a
+        guaranteed state change, so a dump must follow. The submix is never
+        touched (a cold listener has no prior submix to restore — the old
+        /setSubmix probe left the device moved after a restart), and the
+        probe ends on the input row, the bridge's canonical state. Bonus: a
+        cold-booted listener comes out primed with the current bank.
         """
         listener = self.osc_listener
         if listener is None or not listener.running or self.osc_client is None:
             return {"alive": None, "reason": "no OSC listener or client"}
 
         state = listener.state
-        original = state.current_submix
-        subs = (self.channel_map or {}).get("submixes", {})
-        target = next(((n, d.get("index")) for n, d in subs.items()
-                       if n != original and d.get("index") is not None), None)
-        if target is None:
-            return {"alive": None, "reason": "no alternate submix in channel map to probe with"}
-
         before = state.message_count
         t0 = time.time()
-        self.osc_client.send_message("/setSubmix", float(target[1]))
+        self.osc_client.send_message("/1/busPlayback", 1.0)
+        self.osc_client.send_message("/1/busInput", 1.0)
         alive = listener.wait_for(lambda st: st.message_count > before, timeout)
         elapsed = time.time() - t0
 
-        if original:
-            orig_idx = self._submix_index_by_name(original)
-            if orig_idx is not None:
-                self.osc_client.send_message("/setSubmix", float(orig_idx))
-
         result = {"alive": bool(alive), "elapsed_s": round(elapsed, 3),
-                  "probe_submix": target[0], "restored_submix": original,
+                  "method": "bus row toggle (submix untouched, ends on input row)",
                   "at": time.time()}
         if alive:
             logger.info(f"Device probe OK — feedback in {elapsed:.2f}s")
@@ -756,7 +751,7 @@ class TotalMixOSCBridge:
             result["evidence"] = {
                 "last_message_at": state.last_message_at,
                 "message_count": state.message_count,
-                "current_submix": original,
+                "current_submix": state.current_submix,
                 "bank_width": state.bank_width,
                 "real_strip_count": state.real_strip_count,
             }

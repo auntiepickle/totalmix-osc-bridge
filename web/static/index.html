@@ -131,11 +131,11 @@
                         <div class="border-t border-zinc-700 my-1"></div>
                         <button onclick="probeDevice(); toggleSettingsMenu()"
                             class="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-zinc-800 text-sm text-white transition-all text-left group"
-                            title="Sends a state-changing OSC command and checks feedback follows. Briefly flips the selected submix (restored after).">
+                            title="Toggles the fader row and checks a feedback dump follows. The submix is never touched; ends on the input row.">
                             <i class="fas fa-stethoscope text-cyan-400 w-4"></i>
                             <span>
                                 Check device connection
-                                <span class="block text-[10px] text-zinc-500 group-hover:text-zinc-400 transition-colors leading-tight">briefly flips the submix — avoid mid-performance</span>
+                                <span class="block text-[10px] text-zinc-500 group-hover:text-zinc-400 transition-colors leading-tight">briefly toggles the fader row — submix untouched</span>
                             </span>
                         </button>
                         <button onclick="reloadServer(); toggleSettingsMenu()"

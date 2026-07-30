@@ -225,6 +225,14 @@ Separately, stereo-link state and channel names change per **snapshot** —
 the bridge handles that at fire time by resolving channel names against live
 feedback.
 
+**The bridge boots blind by design.** Since retained MQTT no longer drives
+the device, nothing provokes a feedback dump at startup —
+`/api/device/state` starts empty and `osc_bank_width` / `live_strip_count`
+are `null` until the first dump arrives. So the pre-flight check has three
+states, not two: **48 = good, 8 = the workspace's bank setting was lost,
+0/null = nothing received yet** (not a narrow bank — run the connection
+check from the gear menu, or fire any macro, to prime it).
+
 **Run a discovery walk:**
 
 ```bash
