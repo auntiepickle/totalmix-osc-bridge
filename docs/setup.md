@@ -198,6 +198,13 @@ The bridge listens for TotalMix's OSC feedback and can build `ufx2_channel_map.j
 | Port incoming | `7001` (must match `OSC_PORT`) |
 | Port outgoing | `9001` (must match `OSC_LISTEN_PORT`) |
 | IP or Host Name | IP of the machine running the bridge |
+| Number of Faders per Bank | **high enough to cover every channel** (e.g. 32) |
+
+The fader-bank size matters: TotalMix only reports the strips inside the
+current bank over OSC. At the default of 8, discovery and live resolution can
+only see the first 8 strips per row — ADAT and other higher channels never
+appear. Raise it, then re-run discovery. (The bridge sends `/setBankStart 1`
+before every capture/resolution so a scrolled bank cannot shift indices.)
 
 **Run a discovery walk:**
 

@@ -547,6 +547,9 @@ class TotalMixOSCBridge:
             logger.warning(f"   → target submix '{submix_name}' not in channel map")
             return None, None
 
+        # Normalize the bank so strip indices are absolute — a bank left
+        # scrolled (e.g. by TouchOSC) would shift every /1/volume{N}
+        self.osc_client.send_message("/setBankStart", 1.0)
         self.osc_client.send_message("/setSubmix", float(index))
         logger.info(f"   → target: /setSubmix {index} ('{submix_name}')")
 

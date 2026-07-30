@@ -108,7 +108,24 @@ function handleMIDIMessage(message) {
 
 // ── MIDI init / connect / disconnect / rescan ─────────────────────────────────
 async function initWebMIDI() {
-  if (!navigator.requestMIDIAccess || midiInput) return;
+  if (!navigator.requestMIDIAccess) {
+    // Web MIDI only exists in secure contexts — say so instead of a blank
+    // "No MIDI" (the classic trap: browsing http://:8088 instead of the
+    // HTTPS URL)
+    if (!window.isSecureContext) {
+      const label = document.getElementById('midi-status-text');
+      const pill  = document.getElementById('midi-status');
+      if (label) label.textContent = 'MIDI needs HTTPS';
+      if (pill)  pill.title = 'Web MIDI requires a secure context — open the https:// URL (see docs/setup.md) to use MIDI devices';
+      const sel = document.getElementById('midi-device-selector');
+      if (sel) {
+        sel.innerHTML = '<option>MIDI needs HTTPS</option>';
+        sel.disabled = true;
+      }
+    }
+    return;
+  }
+  if (midiInput) return;
   try {
     midiAccess = await navigator.requestMIDIAccess({ sysex: false });
     _populateSelector();
