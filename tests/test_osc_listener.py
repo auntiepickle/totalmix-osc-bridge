@@ -199,3 +199,29 @@ def test_real_strip_count_excludes_na_placeholders():
     s.ingest("/1/labelSubmix", ("AES",))  # seal the burst
     assert s.real_strip_count == 23
     assert s.bank_width == 48
+
+
+def _burst(state, label, count):
+    state.ingest("/1/labelSubmix", (label,))
+    for ch in range(1, count + 1):
+        state.ingest(f"/1/trackname{ch}", (f"CH {ch}",))
+
+
+def test_real_strip_count_survives_a_dropped_packet():
+    """One lossy burst (dropped trackname UDP packet) must not undercount —
+    an undercount suppresses the stale-map banner (observed live: 22 vs 23)."""
+    s = DeviceState()
+    _burst(s, "Main", 23)
+    _burst(s, "AES", 22)      # one trackname lost in transit
+    _burst(s, "Phones 1", 23)
+    s.ingest("/1/labelSubmix", ("Main",))  # seal the last burst
+    assert s.real_strip_count == 23
+
+
+def test_real_strip_count_accepts_genuine_shrink_after_consistent_bursts():
+    s = DeviceState()
+    _burst(s, "Main", 23)
+    for label in ("AES", "Phones 1", "Phones 2"):
+        _burst(s, label, 17)   # snapshot changed the layout for real
+    s.ingest("/1/labelSubmix", ("Main",))
+    assert s.real_strip_count == 17

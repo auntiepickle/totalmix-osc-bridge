@@ -28,6 +28,7 @@ import re
 import threading
 import time
 import logging
+from collections import deque
 
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
@@ -57,11 +58,16 @@ class DeviceState:
         # caps what OSC can see — the UI warns when it is too narrow.
         self.bank_width = None
         self._burst_max_strip = 0
-        # Real strips (trackname not 'n.a.') in the most recent burst — the
-        # UI compares this against the channel map to catch a STALE map
-        # (map under-covering the device went undetected once)
+        # Real strips (trackname not 'n.a.') — the UI compares this against
+        # the channel map to catch a STALE map (map under-covering the
+        # device went undetected once). High-water mark over the last few
+        # bursts: OSC is UDP, and a single dropped trackname packet in one
+        # burst must not undercount (an undercount SUPPRESSES the stale-map
+        # banner — fail-silent). A genuine layout shrink propagates once a
+        # few complete smaller bursts confirm it.
         self.real_strip_count = None
         self._burst_real_strips = set()
+        self._burst_history = deque(maxlen=3)
 
     # ── ingestion ─────────────────────────────────────────────────────────
 
@@ -86,7 +92,8 @@ class DeviceState:
                     self.bank_width = self._burst_max_strip
                 self._burst_max_strip = 0
                 if self._burst_real_strips:
-                    self.real_strip_count = len(self._burst_real_strips)
+                    self._burst_history.append(len(self._burst_real_strips))
+                    self.real_strip_count = max(self._burst_history)
                 self._burst_real_strips = set()
                 return True  # structural change
 
