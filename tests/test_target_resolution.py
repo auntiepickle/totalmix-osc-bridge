@@ -128,3 +128,33 @@ def test_target_with_operation_ramps_resolved_address(make_bridge, fake_osc):
 
     ramp_addrs = {a for a, _ in fake_osc.sent if a.startswith("/1/volume")}
     assert ramp_addrs == {"/1/volume2"}  # whole ramp on the live strip
+
+
+class SlowBurstTotalMix(LiveFakeTotalMix):
+    """Delivers the label immediately but the high strip's trackname late —
+    models a 48-fader bank dump still in flight when resolution starts."""
+
+    def send_message(self, address, value):
+        self.fake_osc.send_message(address, value)
+        if address == "/setSubmix" and int(value) == 14:
+            self.listener._handle("/1/labelSubmix", "RE-150 In")
+            # High strip arrives ~0.3s later, past the old 0.15s fixed grace
+            def late():
+                time.sleep(0.3)
+                self.listener._handle("/1/trackname23", "ADAT 15/16")
+            threading.Thread(target=late, daemon=True).start()
+
+
+def test_late_burst_high_strip_still_resolves(make_bridge, fake_osc):
+    macro = {"steps": [{
+        "target": {"submix": "RE-150 In", "channel": "ADAT 15/16"},
+        "value": "{{param}}",
+    }]}
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = SlowBurstTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.8)
+    assert ("/1/volume23", 0.8) in fake_osc.sent

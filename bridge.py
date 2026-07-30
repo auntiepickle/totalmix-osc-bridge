@@ -564,27 +564,34 @@ class TotalMixOSCBridge:
         # Wait for TotalMix to confirm the submix switch and dump the bank
         deadline = time.time() + timeout
         wanted = submix_name.lower()
+        confirmed = False
         while time.time() < deadline:
             current = (listener.state.current_submix or "").strip().lower()
             if current == wanted:
+                confirmed = True
                 break
             time.sleep(0.05)
-        else:
+        if not confirmed:
             logger.warning(f"   → no labelSubmix confirmation for '{submix_name}' "
                            f"within {timeout}s — using stored address")
             return index, None
-        # Small grace so the trackname/volume burst lands after the label
-        time.sleep(0.15)
 
-        strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
+        # Poll for the channel until the bank burst delivers it — a fixed
+        # grace was tuned for 8-fader banks; a 48-fader switch is ~96 UDP
+        # messages and high strips (e.g. strip 23) land late in the burst
         wanted_ch = channel_name.lower()
-        for strip, data in sorted(strips.items()):
-            if str(data.get("name", "")).strip().lower() == wanted_ch:
-                addr = f"/{row}/volume{strip}"
-                logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
-                return index, addr
+        while True:
+            strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
+            for strip, data in sorted(strips.items()):
+                if str(data.get("name", "")).strip().lower() == wanted_ch:
+                    addr = f"/{row}/volume{strip}"
+                    logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
+                    return index, addr
+            if time.time() >= deadline:
+                break
+            time.sleep(0.05)
         logger.warning(f"   → channel '{channel_name}' not found in live bank for "
-                       f"'{submix_name}' (strips: "
+                       f"'{submix_name}' within {timeout}s (strips: "
                        f"{[d.get('name') for d in strips.values()]}) — using stored address")
         return index, None
 
