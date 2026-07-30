@@ -561,35 +561,40 @@ class TotalMixOSCBridge:
             logger.warning("   → no OSC listener — cannot live-resolve strip, using stored address")
             return index, None
 
-        # Wait for TotalMix to confirm the submix switch and dump the bank
+        # Event-driven waits: the listener wakes us the instant the matching
+        # OSC message arrives — no sleeps, no polling. The deadline is only
+        # an error bound (UDP is lossy; the channel may not exist), never a
+        # pacing mechanism.
         deadline = time.time() + timeout
         wanted = submix_name.lower()
-        confirmed = False
-        while time.time() < deadline:
-            current = (listener.state.current_submix or "").strip().lower()
-            if current == wanted:
-                confirmed = True
-                break
-            time.sleep(0.05)
-        if not confirmed:
+        wanted_ch = channel_name.lower()
+
+        def find_strip(state):
+            current = (state.current_submix or "").strip().lower()
+            if current != wanted:
+                return None
+            strips = state.submix_snapshot(state.current_submix).get(row, {})
+            for strip, data in sorted(strips.items()):
+                if str(data.get("name", "")).strip().lower() == wanted_ch:
+                    return strip
+            return None
+
+        if not listener.wait_for(
+                lambda st: (st.current_submix or "").strip().lower() == wanted,
+                timeout):
             logger.warning(f"   → no labelSubmix confirmation for '{submix_name}' "
                            f"within {timeout}s — using stored address")
             return index, None
 
-        # Poll for the channel until the bank burst delivers it — a fixed
-        # grace was tuned for 8-fader banks; a 48-fader switch is ~96 UDP
-        # messages and high strips (e.g. strip 23) land late in the burst
-        wanted_ch = channel_name.lower()
-        while True:
-            strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
-            for strip, data in sorted(strips.items()):
-                if str(data.get("name", "")).strip().lower() == wanted_ch:
-                    addr = f"/{row}/volume{strip}"
-                    logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
-                    return index, addr
-            if time.time() >= deadline:
-                break
-            time.sleep(0.05)
+        remaining = max(0.0, deadline - time.time())
+        if listener.wait_for(lambda st: find_strip(st) is not None, remaining):
+            strip = find_strip(listener.state)
+            if strip is not None:
+                addr = f"/{row}/volume{strip}"
+                logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
+                return index, addr
+
+        strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
         logger.warning(f"   → channel '{channel_name}' not found in live bank for "
                        f"'{submix_name}' within {timeout}s (strips: "
                        f"{[d.get('name') for d in strips.values()]}) — using stored address")

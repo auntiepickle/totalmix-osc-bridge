@@ -142,6 +142,34 @@ class OSCListener:
         self._server = None
         self._thread = None
         self._last_broadcast = 0.0
+        self._waiters = []            # (predicate, threading.Event)
+        self._waiters_lock = threading.Lock()
+
+    def wait_for(self, predicate, timeout):
+        """Block until predicate(state) holds or timeout expires.
+
+        Event-driven, not polled: the predicate is re-evaluated on every
+        incoming OSC message and the waiter wakes the moment it turns true.
+        The timeout is an error bound only (UDP is lossy and the protocol
+        has no end-of-dump marker), not a pacing mechanism.
+        Returns True if the predicate was satisfied.
+        """
+        if predicate(self.state):
+            return True
+        ev = threading.Event()
+        entry = (predicate, ev)
+        with self._waiters_lock:
+            self._waiters.append(entry)
+        try:
+            # Close the race: a message may have landed between the first
+            # check and registration
+            if predicate(self.state):
+                return True
+            return ev.wait(timeout)
+        finally:
+            with self._waiters_lock:
+                if entry in self._waiters:
+                    self._waiters.remove(entry)
 
     def start(self):
         dispatcher = Dispatcher()
@@ -176,6 +204,19 @@ class OSCListener:
         if address == "/":
             return
         structural = self.state.ingest(address, args)
+
+        # Wake any wait_for() callers whose condition this message satisfied
+        if self._waiters:
+            with self._waiters_lock:
+                waiters = list(self._waiters)
+            for predicate, ev in waiters:
+                if not ev.is_set():
+                    try:
+                        if predicate(self.state):
+                            ev.set()
+                    except Exception:
+                        ev.set()  # broken predicate must not strand its waiter
+
         if self.broadcast_cb is None:
             return
         now = time.time()

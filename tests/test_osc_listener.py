@@ -127,3 +127,43 @@ def test_heartbeat_ignored():
     listener = OSCListener(0)
     listener._handle("/", 0.0)
     assert listener.state.raw == {}
+
+
+def test_wait_for_wakes_on_matching_message():
+    """Event-driven wait: the waiter must wake when the message lands, not
+    on a polling interval."""
+    listener = OSCListener(0)
+    result = {}
+
+    def waiter():
+        t0 = time.time()
+        ok = listener.wait_for(
+            lambda st: st.submixes.get("AES", {}).get("1", {}).get(5, {}).get("name") == "Mavis",
+            timeout=5.0)
+        result["ok"] = ok
+        result["elapsed"] = time.time() - t0
+
+    import threading as _t
+    th = _t.Thread(target=waiter)
+    th.start()
+    time.sleep(0.1)  # let the waiter block
+    listener._handle("/1/labelSubmix", "AES")
+    listener._handle("/1/trackname5", "Mavis")
+    th.join(timeout=2)
+    assert result["ok"] is True
+    # Woke promptly on arrival — nowhere near the 5s timeout
+    assert result["elapsed"] < 1.0
+
+
+def test_wait_for_immediate_when_already_true():
+    listener = OSCListener(0)
+    listener._handle("/1/labelSubmix", "AES")
+    assert listener.wait_for(lambda st: st.current_submix == "AES", 0.0) is True
+
+
+def test_wait_for_times_out_cleanly():
+    listener = OSCListener(0)
+    t0 = time.time()
+    assert listener.wait_for(lambda st: False, 0.2) is False
+    assert 0.15 < time.time() - t0 < 1.0
+    assert listener._waiters == []  # waiter deregistered
