@@ -256,12 +256,16 @@ class TotalMixOSCBridge:
             logger.warning(f"switch_to: workspace '{workspace}' has no slot")
             return False
 
+        t0 = time.time()
         self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
         self.current_workspace = workspace
         logger.info(f"switch_to: workspace '{workspace}' (slot {ws_slot})")
 
         if snapshot:
-            time.sleep(1.0)
+            self._wait_device(
+                lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
+                timeout=2.0, fallback_sleep=1.0,
+                what=f"workspace '{workspace}' switch")
             snapshots = ws_entry.get("snapshots", {})
             snap_num  = None
             for snap_key, snap_val in snapshots.items():
@@ -401,23 +405,37 @@ class TotalMixOSCBridge:
                 logger.info(f"   → Need to switch (force={force_switch} or state mismatch)")
 
                 if ws_name and ws_slot is not None:
+                    t0 = time.time()
                     self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
                     logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
                     self.current_workspace = ws_name
                     if self.mqtt_client:
                         self.mqtt_client.publish("totalmix/workspace", str(ws_slot), retain=True)
                         logger.info(f"   → Published to HA → totalmix/workspace = {ws_slot}")
-                    time.sleep(1.0)
+                    # A workspace load triggers a full state dump (always
+                    # including /1/labelSubmix) — its arrival confirms the
+                    # switch, typically well under the old fixed 1.0s sleep
+                    self._wait_device(
+                        lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
+                        timeout=2.0, fallback_sleep=1.0,
+                        what=f"workspace '{ws_name}' switch")
 
                 if snap_name and snap_num is not None:
                     osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
+                    t0 = time.time()
                     self.osc_client.send_message(osc_addr, 1.0)
                     logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
                     self.current_snapshot = snap_name
                     if self.mqtt_client:
                         self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
                         logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
-                    time.sleep(0.3)
+                    # TotalMix echoes the active snapshot's button state back
+                    self._wait_device(
+                        lambda st, addr=osc_addr: (
+                            st.raw.get(addr, {}).get("args") == [1.0]
+                            and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
+                        timeout=1.0, fallback_sleep=0.3,
+                        what=f"snapshot '{snap_name}' recall")
             else:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
@@ -523,6 +541,25 @@ class TotalMixOSCBridge:
     # Steps may therefore carry {"target": {"submix": name, "channel": name}}:
     # at fire time we select the submix, wait for TotalMix's feedback burst,
     # and match the channel NAME to a live strip index.
+
+    def _wait_device(self, predicate, timeout, fallback_sleep, what="device feedback"):
+        """Wait for device confirmation via OSC feedback (event-driven).
+
+        Falls back to the historical fixed sleep when no listener is running
+        (feedback-less deployments). On timeout, proceeds anyway — the
+        timeout is a worst-case bound, matching the old sleep behavior, but
+        confirmation typically arrives far sooner.
+        """
+        listener = self.osc_listener
+        if listener is None or not listener.running:
+            time.sleep(fallback_sleep)
+            return False
+        t0 = time.time()
+        if listener.wait_for(predicate, timeout):
+            logger.info(f"   → {what} confirmed in {time.time() - t0:.2f}s")
+            return True
+        logger.warning(f"   → {what} not confirmed within {timeout}s — proceeding")
+        return False
 
     def _submix_index_by_name(self, submix_name: str):
         """Look up a submix's /setSubmix index by name (channel map, then
