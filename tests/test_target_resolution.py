@@ -211,3 +211,40 @@ def test_refuses_stored_address_when_bank_seen_but_channel_absent(make_bridge, f
     skipped = [e["event"] for e in b.events
                if e["event"] and e["event"]["type"] == "macro_skipped"]
     assert skipped and skipped[0]["reason"] == "target_not_in_bank"
+
+
+class PlaybackRowTotalMix(LiveFakeTotalMix):
+    """Echoes bus selections into feedback (like the real device) and dumps
+    playback-row tracknames when /1/busPlayback is selected."""
+
+    def send_message(self, address, value):
+        self.fake_osc.send_message(address, value)
+        if address in ("/1/busInput", "/1/busPlayback"):
+            self.listener._handle(address, value)
+        if address == "/setSubmix" and int(value) == 14:
+            self.listener._handle("/1/labelSubmix", "RE-150 In")
+            # Current row's bank dumps after the submix confirm; the fake
+            # dumps playback names (row was selected before setSubmix)
+            self.listener._handle("/1/trackname3", "ADAT 5/6")
+
+
+def test_playback_row_target_selects_bus_and_restores_input(make_bridge, fake_osc):
+    macro = {"steps": [{
+        "target": {"submix": "RE-150 In", "channel": "ADAT 5/6", "row": 2},
+        "value": "{{param}}",
+    }]}
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = PlaybackRowTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.6)
+
+    addrs = fake_osc.addresses()
+    # Row selected before the submix, write on page 1, input row restored
+    assert ("/1/busPlayback", 1.0) in fake_osc.sent
+    assert addrs.index("/1/busPlayback") < addrs.index("/setSubmix")
+    assert ("/1/volume3", 0.6) in fake_osc.sent
+    assert addrs.index("/1/volume3") < addrs.index("/1/busInput")
+    assert fake_osc.sent[-1] != ("/1/busPlayback", 1.0)  # not left on playback

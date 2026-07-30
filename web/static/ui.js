@@ -493,7 +493,11 @@ window.applyRouting = function (name) {
   // a legacy explicit step would double-send it
   m.steps = m.steps.filter(s => s.osc !== '/setSubmix');
   const paramStep = m.steps.find(s => s.value === '{{param}}');
-  const target = { submix: submixSel.value, channel: sendSel.value };
+  // target.channel is the raw trackname (send.name); the picker KEY may
+  // carry a "(playback)" suffix that the device never reports
+  const target = { submix: submixSel.value,
+                   channel: (send && send.name) || sendSel.value };
+  if (send && send.row === 2) target.row = 2;  // software-playback send
   const fallbackAddr = send ? send.osc_address : '';
   if (paramStep) {
     paramStep.target = target;

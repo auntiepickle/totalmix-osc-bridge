@@ -16,12 +16,17 @@ EMPTY_NAMES = {"", "<empty>"}
 
 
 def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
-                         progress_cb=None):
+                         progress_cb=None, include_playback=True):
     """Walk submixes 1..submix_count and return (channel_map, walk_log).
 
     channel_map matches the ufx2_channel_map.json schema. walk_log records
     what each index resolved to, including skipped/empty slots, so the UI can
     show exactly what the device reported.
+
+    include_playback: additionally select the software-playback row
+    (/1/busPlayback) per discovered submix to capture its sends — page-1
+    feedback follows the selected row, so the playback bank is invisible
+    unless explicitly selected. The input row is restored afterwards.
     """
     found = []   # (index, submix_name)
     walk_log = []
@@ -55,6 +60,13 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
         else:
             found.append((i, name))
             dupe_run = 0
+            if include_playback:
+                # Capture the playback row for this submix, then restore the
+                # input row before the next /setSubmix dumps row-1 data
+                osc_client.send_message("/1/busPlayback", 1.0)
+                time.sleep(settle_s)
+                osc_client.send_message("/1/busInput", 1.0)
+                time.sleep(settle_s)
         prev_label = name
         walk_log.append(entry)
         if progress_cb:
@@ -78,14 +90,19 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
                 if raw_name.lower() in ("n.a.", "n/a"):
                     continue
                 send_name = raw_name or f"Row {row} Ch {ch}"
-                key = send_name
-                if key in sends:  # same trackname on both rows
+                # Playback strips often share names with inputs — suffix them
+                key = send_name if row == "1" else f"{send_name} (playback)"
+                if key in sends:
                     key = f"{send_name} (row {row})"
                 sends[key] = {
                     "row": int(row),
+                    "name": send_name,  # raw trackname, for live matching
                     "channel": ch,
-                    "osc_address": f"/{row}/volume{ch}",
-                    "description": f"{send_name} send to {name}",
+                    # The write address is always page 1 — the ROW is chosen
+                    # by /1/busInput / /1/busPlayback before writing
+                    "osc_address": f"/1/volume{ch}",
+                    "description": (f"{send_name} send to {name}" if row == "1"
+                                    else f"{send_name} (playback) send to {name}"),
                 }
         channel_map["submixes"][name] = {
             "index": index,

@@ -51,10 +51,14 @@ def test_discovers_named_submixes_and_sends():
     adat = subs["ADAT 1"]
     assert adat["index"] == 1
     assert adat["sends"]["AN 3"] == {
-        "row": 1, "channel": 2, "osc_address": "/1/volume2",
+        "row": 1, "name": "AN 3", "channel": 2, "osc_address": "/1/volume2",
         "description": "AN 3 send to ADAT 1",
     }
-    assert adat["sends"]["SPDIF PB"]["osc_address"] == "/2/volume1"
+    # Playback sends: suffixed key, page-1 write address, raw name kept
+    pb = adat["sends"]["SPDIF PB (playback)"]
+    assert pb["row"] == 2
+    assert pb["name"] == "SPDIF PB"
+    assert pb["osc_address"] == "/1/volume1"
     assert subs["AES"]["sends"]["AN 1/2"]["osc_address"] == "/1/volume1"
 
 

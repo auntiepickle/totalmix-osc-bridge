@@ -503,6 +503,14 @@ class TotalMixOSCBridge:
                 except Exception as e:
                     logger.error(f"OSC send failed: {e}")
 
+            # Restore the input row if any step drove the playback row —
+            # /1/volume{N} is row-relative, so leaving playback selected
+            # would mis-route the next hardcoded-address macro
+            if any(str(s.get("target", {}).get("row", 1)) == "2"
+                   for s in macro.get("steps", []) if "target" in s):
+                self.osc_client.send_message("/1/busInput", 1.0)
+                logger.info("   → input row restored after playback-row step")
+
             # === GUARANTEED HA SYNC ===
             if self.mqtt_client:
                 if ws_slot is not None:
@@ -632,8 +640,13 @@ class TotalMixOSCBridge:
         # starts the bank at the SECOND channel and the shift persists as
         # global device state, silently mis-targeting hardcoded macros).
         self.osc_client.send_message("/setBankStart", 0.0)
+        # Page-1 feedback AND writes follow the selected ROW — select it
+        # explicitly so a stray bus selection can't mis-route the write
+        bus_addr = {"1": "/1/busInput", "2": "/1/busPlayback",
+                    "3": "/1/busOutput"}.get(row, "/1/busInput")
+        self.osc_client.send_message(bus_addr, 1.0)
         self.osc_client.send_message("/setSubmix", float(index))
-        logger.info(f"   → target: /setSubmix {index} ('{submix_name}')")
+        logger.info(f"   → target: /setSubmix {index} ('{submix_name}') row {row}")
 
         listener = self.osc_listener
         if listener is None or not listener.running:
@@ -682,8 +695,11 @@ class TotalMixOSCBridge:
                 if strip_name.strip().lower() != wanted_ch:
                     logger.info(f"   → pair-matched '{channel_name}' to strip "
                                 f"'{strip_name}' (stereo link changed)")
-                addr = f"/{row}/volume{strip}"
-                logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
+                # Write address is always page 1 — the bus selection above
+                # decides which row the write lands on
+                addr = f"/1/volume{strip}"
+                logger.info(f"   → live-resolved '{channel_name}' → strip {strip} "
+                            f"({addr}, row {row})")
                 return index, addr, "resolved"
 
         strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
