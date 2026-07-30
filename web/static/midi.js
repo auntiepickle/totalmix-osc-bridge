@@ -106,6 +106,88 @@ function handleMIDIMessage(message) {
   }
 }
 
+// ── MIDI Emulator (#15) — a virtual test device ───────────────────────────────
+// Injects synthetic messages straight into handleMIDIMessage, exercising the
+// full pipeline (trigger matching, use_value_as_param, BPM clock detection,
+// LEDs, macro fire) with zero hardware and zero OS drivers. Works over HTTP
+// too — no Web MIDI API involved. Drivable from the panel or the console:
+//   MIDIEmu.cc(44, 100)  MIDIEmu.noteOn(60)  MIDIEmu.clockStart(140)
+window.MIDIEmu = {
+  _clockTimer: null,
+
+  connect() {
+    if (midiInput) midiInput.onmidimessage = null;
+    midiInput = null;
+    midiConnectedDevice = 'MIDI Emulator';
+    document.getElementById('midi-cc-stats')?.classList.remove('hidden');
+    document.getElementById('midi-bpm-badge')?.classList.remove('hidden');
+    console.log('[MIDI] Emulator connected (virtual device)');
+    updateStatusHeader();
+  },
+
+  _send(bytes) {
+    if (midiConnectedDevice !== 'MIDI Emulator') this.connect();
+    handleMIDIMessage({ data: bytes });
+  },
+
+  cc(number, value = 127, channel = 1) {
+    this._send([0xB0 | ((channel - 1) & 0x0F), number & 0x7F, value & 0x7F]);
+  },
+  noteOn(note, velocity = 127, channel = 1) {
+    this._send([0x90 | ((channel - 1) & 0x0F), note & 0x7F, velocity & 0x7F]);
+  },
+  noteOff(note, channel = 1) {
+    this._send([0x80 | ((channel - 1) & 0x0F), note & 0x7F, 0]);
+  },
+  clockStart(bpm = 120) {
+    this.clockStop();
+    // 24 pulses per quarter note, same as the Cirklon
+    this._clockTimer = setInterval(() => this._send([0xF8]), 60000 / (bpm * 24));
+    console.log(`[MIDI] Emulator clock started @ ${bpm} BPM`);
+  },
+  clockStop() {
+    if (this._clockTimer) { clearInterval(this._clockTimer); this._clockTimer = null; }
+  },
+};
+
+window.toggleMIDIEmuPanel = () => {
+  const panel = document.getElementById('midi-emu-panel');
+  if (!panel) return;
+  panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden')) window.MIDIEmu.connect();
+};
+
+window.emuSendCC = () => {
+  const num = parseInt(document.getElementById('emu-cc')?.value ?? 44, 10);
+  const val = parseInt(document.getElementById('emu-val')?.value ?? 127, 10);
+  const ch  = parseInt(document.getElementById('emu-ch')?.value ?? 1, 10);
+  window.MIDIEmu.cc(num, val, ch);
+};
+
+// Live mode: dragging the value slider streams CC like twisting a real knob
+window.emuValInput = () => {
+  const val = document.getElementById('emu-val')?.value ?? 0;
+  const lbl = document.getElementById('emu-val-label');
+  if (lbl) lbl.textContent = val;
+  if (document.getElementById('emu-live')?.checked) window.emuSendCC();
+};
+
+window.emuNote = (on) => {
+  const note = parseInt(document.getElementById('emu-note')?.value ?? 60, 10);
+  const ch   = parseInt(document.getElementById('emu-ch')?.value ?? 1, 10);
+  on ? window.MIDIEmu.noteOn(note, 127, ch) : window.MIDIEmu.noteOff(note, ch);
+};
+
+window.emuClock = (start) => {
+  if (start) {
+    window.MIDIEmu.clockStart(parseInt(document.getElementById('emu-bpm')?.value ?? 120, 10));
+  } else {
+    window.MIDIEmu.clockStop();
+  }
+  const st = document.getElementById('emu-clock-state');
+  if (st) st.textContent = start ? 'running' : 'stopped';
+};
+
 // ── MIDI init / connect / disconnect / rescan ─────────────────────────────────
 async function initWebMIDI() {
   if (!navigator.requestMIDIAccess) {
@@ -119,8 +201,11 @@ async function initWebMIDI() {
       if (pill)  pill.title = 'Web MIDI requires a secure context — open the https:// URL (see docs/setup.md) to use MIDI devices';
       const sel = document.getElementById('midi-device-selector');
       if (sel) {
-        sel.innerHTML = '<option>MIDI needs HTTPS</option>';
-        sel.disabled = true;
+        // Real devices need HTTPS, but the emulator works anywhere —
+        // it never touches the Web MIDI API
+        sel.innerHTML = '<option value="">MIDI needs HTTPS</option>'
+          + '<option value="__emu__">🧪 MIDI Emulator</option>';
+        sel.disabled = false;
       }
     }
     return;
@@ -148,6 +233,10 @@ function _populateSelector() {
     if (i.name === lastMidiDevice) opt.selected = true;
     selector.appendChild(opt);
   });
+  const emu = document.createElement('option');
+  emu.value = '__emu__';
+  emu.textContent = '🧪 MIDI Emulator';
+  selector.appendChild(emu);
 }
 
 function _connectInput(input) {
@@ -165,7 +254,9 @@ function _connectInput(input) {
 
 window.connectSelectedMIDI = async () => {
   const selector = document.getElementById('midi-device-selector');
-  if (!selector || !midiAccess) return;
+  if (!selector) return;
+  if (selector.value === '__emu__') { window.MIDIEmu.connect(); return; }
+  if (!midiAccess) return;
   const input = Array.from(midiAccess.inputs.values()).find(i => i.id === selector.value);
   if (input) _connectInput(input);
 };
