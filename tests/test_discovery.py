@@ -6,27 +6,28 @@ from osc_listener import OSCListener
 
 class FakeTotalMix:
     """Stands in for the real device: receiving /setSubmix i makes it 'send'
-    the new bank's feedback straight into the listener."""
+    the new bank's feedback straight into the listener. Mirrors real UFX II
+    behavior: stereo-linked outputs occupy two consecutive indices that
+    report the same label."""
 
     SUBMIXES = {
         1: ("ADAT 1", {"1": {2: "AN 3"}, "2": {1: "SPDIF PB"}}),
-        2: ("AES", {"1": {1: "AN 1/2"}, "2": {}}),
-        3: ("<Empty>", {}),
-        # Indices past the last submix: TotalMix clamps and re-reports the
-        # last valid one
+        2: ("AES", {"1": {1: "AN 1/2"}, "2": {}}),      # stereo pair 2/3
+        3: ("AES", {"1": {1: "AN 1/2"}, "2": {}}),
+        4: ("<Empty>", {}),
+        5: ("RE-150 In", {"1": {1: "AN 1/2"}, "2": {}}),  # new label after dupes
     }
-    LAST_VALID = 2
 
     def __init__(self, listener):
         self.listener = listener
+        self.set_submix_calls = []
 
     def send_message(self, address, value):
         if address != "/setSubmix":
             return
+        self.set_submix_calls.append(int(value))
         index = min(int(value), max(self.SUBMIXES))
-        if index > self.LAST_VALID and index not in self.SUBMIXES:
-            index = self.LAST_VALID
-        name, rows = self.SUBMIXES.get(index, self.SUBMIXES[self.LAST_VALID])
+        name, rows = self.SUBMIXES[index]
         self.listener._handle("/1/labelSubmix", name)
         for row, channels in rows.items():
             for ch, trackname in channels.items():
@@ -37,14 +38,15 @@ class FakeTotalMix:
 def run_discovery(submix_count=5):
     listener = OSCListener(0)  # never started — handler invoked directly
     device = FakeTotalMix(listener)
-    return discover_channel_map(device, listener,
-                                submix_count=submix_count, settle_s=0)
+    result = discover_channel_map(device, listener,
+                                  submix_count=submix_count, settle_s=0)
+    return result + (device,)
 
 
 def test_discovers_named_submixes_and_sends():
-    channel_map, _ = run_discovery()
+    channel_map, _, _ = run_discovery()
     subs = channel_map["submixes"]
-    assert set(subs) == {"ADAT 1", "AES"}
+    assert set(subs) == {"ADAT 1", "AES", "RE-150 In"}
 
     adat = subs["ADAT 1"]
     assert adat["index"] == 1
@@ -56,20 +58,29 @@ def test_discovers_named_submixes_and_sends():
     assert subs["AES"]["sends"]["AN 1/2"]["osc_address"] == "/1/volume1"
 
 
-def test_empty_and_duplicate_submixes_skipped():
-    channel_map, walk_log = run_discovery()
-    assert len(walk_log) == 5
+def test_stereo_pair_duplicates_skipped_but_walk_continues():
+    channel_map, walk_log, _ = run_discovery()
     by_index = {e["index"]: e for e in walk_log}
-    assert "skipped" in by_index[3]          # <Empty>
-    assert "skipped" in by_index[4]          # clamped duplicate of AES
-    assert "skipped" in by_index[5]
-    assert "skipped" not in by_index[1]
-    assert "skipped" not in by_index[2]
+    assert by_index[3]["skipped"] == "duplicate label (stereo pair)"
+    assert by_index[4]["skipped"] == "empty or no feedback"
+    # New label AFTER a duplicate run — proves the walk does not stop early
+    assert "skipped" not in by_index[5]
+    assert channel_map["submixes"]["RE-150 In"]["index"] == 5
+
+
+def test_prewalk_submix_restored():
+    listener = OSCListener(0)
+    device = FakeTotalMix(listener)
+    device.send_message("/setSubmix", 2.0)  # user was on AES before the walk
+    device.set_submix_calls.clear()
+    discover_channel_map(device, listener, submix_count=5, settle_s=0)
+    # Walk 1..5, then restore to AES's first index (2)
+    assert device.set_submix_calls == [1, 2, 3, 4, 5, 2]
 
 
 def test_schema_matches_existing_channel_map_consumers():
     """get_routing_label() must work against a discovered map unchanged."""
-    channel_map, _ = run_discovery()
+    channel_map, _, _ = run_discovery()
     from bridge import TotalMixOSCBridge
 
     b = TotalMixOSCBridge.__new__(TotalMixOSCBridge)

@@ -123,7 +123,9 @@ TotalMix pushes its state over OSC to the configured "Port outgoing" whenever th
 
 `osc_listener.OSCListener` receives that stream and maintains a `DeviceState`: channel data scoped per submix (row 3 output faders are submix-independent and stored under `_outputs`), plus a raw address store so unrecognized feedback is inspectable rather than lost. Volume floods are throttled to one WebSocket `device_update` event per 250ms; structural changes (submix/trackname) broadcast immediately.
 
-`discovery.discover_channel_map()` interrogates the device: send `/setSubmix i` for i = 1..N, wait `settle_s` for the feedback burst, record what came back. Empty submixes (`<Empty>`) and repeated labels (TotalMix clamps out-of-range indices to the last submix) are skipped. The result is a `ufx2_channel_map.json`-compatible draft.
+`discovery.discover_channel_map()` interrogates the device: send `/setSubmix i` for i = 1..N, wait `settle_s` for the feedback burst, record what came back. Empty submixes (`<Empty>`) and repeated labels are skipped — stereo-linked outputs occupy two consecutive indices reporting the same label, so the walk continues past duplicates rather than stopping. The pre-walk submix is restored afterward. The result is a `ufx2_channel_map.json`-compatible draft.
+
+Page-1 channel feedback (`/1/volume{n}`, `/1/trackname{n}`) refers to whichever *row* is selected via `/1/busInput` / `/1/busPlayback` / `/1/busOutput` — the listener tracks the active row and files channel data accordingly (verified against a UFX II capture: 177 distinct feedback addresses including mutes, solos, mic gains, phantom, snapshots, and the FX section).
 
 API surface:
 

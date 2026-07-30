@@ -6,12 +6,20 @@ recalls). osc_monitor.py only logged that traffic for humans to read; this
 module parses it into structured, queryable state so the API and the mapping
 UI can consume real device data.
 
-Feedback addresses parsed (row is 1=input, 2=playback, 3=output):
+Feedback addresses parsed:
     /1/labelSubmix        str    name of the currently selected submix
-    /{row}/trackname{n}   str    channel name for fader n of the visible bank
-    /{row}/volume{n}      float  fader position 0.0-1.0
-    /{row}/volume{n}Val   str    display value ("-6.0 dB")
-    /{row}/pan{n}         float  pan position
+    /1/busInput           1.0    input row selected    -> row 1
+    /1/busPlayback        1.0    playback row selected -> row 2
+    /1/busOutput          1.0    output row selected   -> row 3
+    /1/trackname{n}       str    channel name for fader n of the visible bank
+    /1/volume{n}          float  fader position 0.0-1.0
+    /1/volume{n}Val       str    display value ("-6.0 dB")
+    /1/pan{n}             float  pan position
+
+Page-1 channel messages refer to whichever ROW is currently selected via the
+bus* toggles — the page number is not the row. Channel data is filed under
+the active row (default: input). Legacy /2/... and /3/... page messages keep
+their page number as the row.
 
 Everything else still lands in the raw address store, so unknown feedback is
 visible via /api/device/state instead of lost.
@@ -28,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 _CHANNEL_RE = re.compile(r"^/([123])/(trackname|volume|pan)(\d+)(Val)?$")
 
+_BUS_ROW = {"/1/busInput": "1", "/1/busPlayback": "2", "/1/busOutput": "3"}
+
 UNKNOWN_SUBMIX = "_unselected"
 
 
@@ -38,6 +48,7 @@ class DeviceState:
         self._lock = threading.Lock()
         self.raw = {}              # address -> {"args", "count", "last_seen"}
         self.current_submix = None # name from /1/labelSubmix
+        self.current_row = "1"     # from /1/busInput|busPlayback|busOutput
         # submix name -> row -> channel -> {"name","volume","volume_db","pan"}
         self.submixes = {}
         self.last_message_at = None
@@ -60,10 +71,17 @@ class DeviceState:
                     self.submixes.setdefault(name, {})
                 return True  # structural change
 
+            if address in _BUS_ROW and args and float(args[0]) == 1.0:
+                self.current_row = _BUS_ROW[address]
+                return True  # row switch rescopes subsequent channel data
+
             m = _CHANNEL_RE.match(address)
             if not m:
                 return False
-            row, field, ch, is_val = m.group(1), m.group(2), int(m.group(3)), m.group(4)
+            page, field, ch, is_val = m.group(1), m.group(2), int(m.group(3)), m.group(4)
+            # Page 1 shows whichever row the bus* toggles selected; legacy
+            # /2 and /3 pages keep their page number as the row.
+            row = self.current_row if page == "1" else page
 
             if row == "3":
                 submix_key = "_outputs"  # output faders are not submix-scoped
@@ -93,6 +111,7 @@ class DeviceState:
         with self._lock:
             return {
                 "current_submix": self.current_submix,
+                "current_row": self.current_row,
                 "submixes": {
                     name: {row: dict(chs) for row, chs in rows.items()}
                     for name, rows in self.submixes.items()

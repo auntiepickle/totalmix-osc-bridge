@@ -26,10 +26,14 @@ docker ps --format '{{.Names}}' | grep -qx "$CONTAINER" \
 echo "ok: $CONTAINER running"
 
 say "2/5 OSC listener bound"
-if docker logs "$CONTAINER" 2>&1 | grep -i "OSC listener" | tail -3 | grep -q "started"; then
-  docker logs "$CONTAINER" 2>&1 | grep -i "OSC listener started" | tail -1
+# --tail keeps this fast on long-lived containers and immune to corruption
+# earlier in the docker json log (a full read aborts at the first bad byte)
+if docker logs --tail 300 "$CONTAINER" 2>&1 | grep -i "OSC listener" | tail -3 | grep -q "started"; then
+  docker logs --tail 300 "$CONTAINER" 2>&1 | grep -i "OSC listener started" | tail -1
+elif ss -ulnp 2>/dev/null | grep -q ":${OSC_LISTEN_PORT:-9001} "; then
+  echo "ok: UDP ${OSC_LISTEN_PORT:-9001} is bound (log line not in recent output)"
 else
-  docker logs "$CONTAINER" 2>&1 | grep -i "OSC listener" | tail -3
+  docker logs --tail 300 "$CONTAINER" 2>&1 | grep -i "OSC listener" | tail -3
   fail "listener did not start — port conflict? (check ENABLE_OSC_MONITOR, ss -ulnp | grep 9001)"
 fi
 

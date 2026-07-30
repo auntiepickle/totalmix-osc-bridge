@@ -58,6 +58,31 @@ def test_feedback_before_any_submix_goes_to_unselected():
     assert s.submixes[UNKNOWN_SUBMIX]["1"][4]["volume"] == 0.3
 
 
+def test_bus_toggle_rescopes_page1_channel_data():
+    """Page-1 messages describe whichever ROW the bus* toggles selected —
+    seen on the UFX II: /1/busInput 1.0 precedes the input-row bank dump."""
+    s = DeviceState()
+    feed(
+        s,
+        ("/1/labelSubmix", "AES"),
+        ("/1/busInput", 1.0),
+        ("/1/volume1", 0.7),        # input row -> row 1
+        ("/1/busPlayback", 1.0),
+        ("/1/volume1", 0.3),        # same address, now playback -> row 2
+        ("/1/busOutput", 1.0),
+        ("/1/volume2", 0.9),        # output row -> _outputs
+    )
+    assert s.submixes["AES"]["1"][1]["volume"] == 0.7
+    assert s.submixes["AES"]["2"][1]["volume"] == 0.3
+    assert s.submixes["_outputs"]["3"][2]["volume"] == 0.9
+
+
+def test_bus_toggle_off_is_ignored():
+    s = DeviceState()
+    feed(s, ("/1/busPlayback", 1.0), ("/1/busInput", 0.0))  # 0.0 = deselect echo
+    assert s.current_row == "2"
+
+
 def test_unknown_addresses_kept_in_raw_store():
     s = DeviceState()
     feed(s, ("/1/mastermute", 1.0), ("/1/mastermute", 0.0))

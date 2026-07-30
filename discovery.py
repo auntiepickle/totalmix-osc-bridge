@@ -25,6 +25,7 @@ def discover_channel_map(osc_client, listener, submix_count=16, settle_s=1.0,
     """
     found = []   # (index, submix_name)
     walk_log = []
+    initial_submix = listener.state.current_submix  # restore after the walk
 
     for i in range(1, submix_count + 1):
         osc_client.send_message("/setSubmix", float(i))
@@ -34,14 +35,21 @@ def discover_channel_map(osc_client, listener, submix_count=16, settle_s=1.0,
         if not name or name.strip().lower() in EMPTY_NAMES:
             entry["skipped"] = "empty or no feedback"
         elif any(n == name for _, n in found):
-            # TotalMix clamps out-of-range indices to the last submix — once a
-            # name repeats we have walked off the end
-            entry["skipped"] = "duplicate label (end of submixes)"
+            # Stereo-linked outputs occupy two consecutive indices that report
+            # the same label (e.g. /setSubmix 2 and 3 are both "AN 3/4").
+            # Keep walking — new submixes can follow a run of duplicates.
+            entry["skipped"] = "duplicate label (stereo pair)"
         else:
             found.append((i, name))
         walk_log.append(entry)
         if progress_cb:
             progress_cb(i, submix_count, name)
+
+    # Put TotalMix back on the submix that was selected before the walk
+    restore = next((i for i, n in found if n == initial_submix), None)
+    if restore is not None and initial_submix != listener.state.current_submix:
+        osc_client.send_message("/setSubmix", float(restore))
+        logger.info(f"Restored pre-walk submix '{initial_submix}' (index {restore})")
 
     channel_map = {"submixes": {}}
     for index, name in found:
