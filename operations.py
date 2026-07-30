@@ -26,6 +26,24 @@ class OperationRegistry:
             return
         cls._ops[name](osc_client, osc_addr, param, config, cancel_event)
 
+def shape_value(val: float, config: dict) -> float:
+    """Map a raw 0..1 operation value through per-parameter shaping (#13).
+
+    range: [lo, hi] — the sweep window (an EQ ramp between two points, a
+           pan LFO around center). Defaults to the full 0..1.
+    threshold: t   — binarize AFTER the range map (the gate point for mute
+                     and other binary params).
+    """
+    rng = config.get("range")
+    if rng:
+        lo, hi = float(rng[0]), float(rng[1])
+        val = lo + val * (hi - lo)
+    t = config.get("threshold")
+    if t is not None:
+        val = 1.0 if val >= float(t) else 0.0
+    return val
+
+
 # ====================== BUILT-IN OPERATIONS ======================
 
 @OperationRegistry.register("ramp")
@@ -49,7 +67,7 @@ def ramp_op(osc_client, osc_addr: str, param: float, config: dict,
 
     for _ in range(total_steps):
         if cancel_event and cancel_event.is_set():
-            osc_client.send_message(osc_addr, 0.0)
+            osc_client.send_message(osc_addr, shape_value(0.0, config))
             logger.info(f"   → {osc_addr} ramp cancelled (restart/mode)")
             return
         t = min((time.time() - start_t) / duration, 1.0)
@@ -57,11 +75,11 @@ def ramp_op(osc_client, osc_addr: str, param: float, config: dict,
             val = 2.0 * t if t < 0.5 else 2.0 - (2.0 * t)
         else:  # linear
             val = t
-        osc_client.send_message(osc_addr, float(val))
+        osc_client.send_message(osc_addr, float(shape_value(val, config)))
         time.sleep(1.0 / steps_per_sec)
 
-    osc_client.send_message(osc_addr, 0.0)
-    logger.info(f"   → {osc_addr} ramp finished at 0.0")
+    osc_client.send_message(osc_addr, shape_value(0.0, config))
+    logger.info(f"   → {osc_addr} ramp finished")
 
 
 @OperationRegistry.register("lfo")
@@ -81,14 +99,14 @@ def lfo_op(osc_client, osc_addr: str, param: float, config: dict,
 
     for _ in range(total_steps):
         if cancel_event and cancel_event.is_set():
-            osc_client.send_message(osc_addr, 0.0)
+            osc_client.send_message(osc_addr, shape_value(0.0, config))
             logger.info(f"   → {osc_addr} LFO cancelled (restart/mode)")
             return
         t = (time.time() - start_t) / duration
         phase = t * 2 * math.pi * (bpm / 60) * 4
         val = (math.sin(phase) * 0.5 + 0.5) * depth
-        osc_client.send_message(osc_addr, float(val))
+        osc_client.send_message(osc_addr, float(shape_value(val, config)))
         time.sleep(1.0 / steps_per_sec)
 
-    osc_client.send_message(osc_addr, 0.0)
-    logger.info(f"   → {osc_addr} LFO finished at 0.0")
+    osc_client.send_message(osc_addr, shape_value(0.0, config))
+    logger.info(f"   → {osc_addr} LFO finished")

@@ -489,6 +489,7 @@ const PARAM_DEFS = {
   volume: {
     widget: 'slider', min: 0, max: 1, step: 0.01, default: 0.8,
     fmt: v => `${Math.round(v * 100)}%`,
+    mod: { range: true },       // ramps/LFOs sweep a window, not always 0..1
   },
   pan: {
     // step 0.005: a 0.01 step moved the ×200 L/R readout in twos, making
@@ -498,14 +499,54 @@ const PARAM_DEFS = {
       const d = Math.round((v - 0.5) * 200);
       return d === 0 ? 'C' : d < 0 ? `L${-d}` : `R${d}`;
     },
+    mod: { range: true },       // e.g. an auto-pan between L60 and R30
   },
   mute: {
     // default UNMUTED: unchecking 'from trigger' must not arm a mute as a
     // side effect of an editor interaction
     widget: 'toggle', default: 0.0,
     options: [['1.0', 'Muted'], ['0.0', 'Unmuted']],
+    mod: { threshold: true },   // gate point: where the LFO trips on/off
   },
 };
+
+// Extra operation controls per parameter (#13): a mute LFO exposes its gate
+// threshold; continuous params expose the sweep range, formatted per param
+function _modControls(name, i, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  const def = PARAM_DEFS[param];
+  const op = step.operation || {};
+  if (!def || !def.mod) return '';
+  let html = '';
+  if (def.mod.threshold) {
+    const t = Number.isFinite(parseFloat(op.threshold)) ? parseFloat(op.threshold) : 0.5;
+    html += `<div class="flex gap-2 items-center">
+      <span class="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">gate point</span>
+      <input data-field="steps.${i}.operation.threshold" type="range" min="0" max="1" step="0.01" value="${t}"
+          class="flex-1 accent-orange-500"
+          oninput="document.getElementById('mod-thr-${name}-${i}').textContent = Math.round(this.value*100)+'%'">
+      <span id="mod-thr-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${Math.round(t * 100)}%</span>
+    </div>`;
+  }
+  if (def.mod.range) {
+    const rng = Array.isArray(op.range) ? op.range : [def.min, def.max];
+    const lo = Number.isFinite(parseFloat(rng[0])) ? parseFloat(rng[0]) : def.min;
+    const hi = Number.isFinite(parseFloat(rng[1])) ? parseFloat(rng[1]) : def.max;
+    html += `<div class="flex gap-2 items-center">
+      <span class="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">sweep</span>
+      <input data-field="steps.${i}.operation.range.0" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${lo}"
+          class="flex-1 accent-orange-500"
+          oninput="document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+      <span id="mod-lo-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(lo)}</span>
+      <span class="text-zinc-600 text-xs shrink-0">→</span>
+      <input data-field="steps.${i}.operation.range.1" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${hi}"
+          class="flex-1 accent-orange-500"
+          oninput="document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+      <span id="mod-hi-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(hi)}</span>
+    </div>`;
+  }
+  return html;
+}
 
 window.fmtParamValue = function (param, v) {
   const def = PARAM_DEFS[param];
@@ -519,15 +560,20 @@ window.changeStepMode = function (name, i, mode) {
   const m = _harvestEditor(name);
   const step = (m.steps || [])[i];
   if (!step) return;
+  const def = PARAM_DEFS[(step.target && step.target.param) || 'volume'] || {};
   if (mode === 'set') {
     delete step.operation;
     if (step.value === '{{param}}') {
-      const def = PARAM_DEFS[(step.target && step.target.param) || 'volume'];
-      step.value = String((def && def.default) ?? 1.0);
+      step.value = String(def.default ?? 1.0);
     }
   } else {
     step.operation = { ...(step.operation || { bars: 2, bpm: 140 }), type: mode };
     step.value = '{{param}}';
+    // Seed the parameter's modulation shaping controls (#13)
+    if (def.mod?.threshold && step.operation.threshold == null) step.operation.threshold = 0.5;
+    if (def.mod?.range && !Array.isArray(step.operation.range)) {
+      step.operation.range = [def.min ?? 0, def.max ?? 1];
+    }
   }
   editDetail(name);
 };
@@ -646,11 +692,41 @@ window.applyRouting = function (name) {
 window.addEditorStep = function (name, kind) {
   const m = _harvestEditor(name);
   m.steps = m.steps || [];
-  if (kind === 'operation') {
-    m.steps.push({ osc: '', value: '{{param}}',
-                   operation: { type: 'ramp', bars: 2, bpm: 140 } });
-  } else {
+  if (kind === 'raw') {
+    // Advanced escape hatch — the only place a bare address is typed
     m.steps.push({ osc: '', value: '1.0' });
+    editDetail(name);
+    return;
+  }
+  // New steps are born ROUTED (#14): mapping addresses is the bridge's job.
+  // The step takes the routing picker's CURRENT selections.
+  const submixSel = document.getElementById(`routing-submix-${name}`);
+  const sendSel   = document.getElementById(`routing-send-${name}`);
+  const paramSel  = document.getElementById(`routing-param-${name}`);
+  const sub  = submixSel ? ((window._channelMap || {}).submixes || {})[submixSel.value] : null;
+  const send = sub && sendSel ? (sub.sends || {})[sendSel.value] : null;
+  const param = paramSel ? paramSel.value : 'volume';
+  const def = PARAM_DEFS[param] || {};
+  if (!send) {  // no channel map loaded — raw fallback is all we can offer
+    m.steps.push({ osc: '', value: kind === 'operation' ? '{{param}}' : '1.0',
+                   ...(kind === 'operation' ? { operation: { type: 'ramp', bars: 2, bpm: 140 } } : {}) });
+    editDetail(name);
+    return;
+  }
+  const target = { channel: send.name || sendSel.value };
+  if (param !== 'volume') target.param = param;
+  if (param !== 'mute') target.submix = submixSel.value;
+  if (send.row === 2) target.row = 2;
+  const ch = send.channel;
+  const fallback = param === 'mute' ? `/1/mute/1/${ch}`
+    : param === 'pan' ? `/1/pan${ch}` : send.osc_address;
+  if (kind === 'operation') {
+    const op = { type: 'ramp', bars: 2, bpm: 140 };
+    if (def.mod?.threshold) op.threshold = 0.5;
+    if (def.mod?.range) op.range = [def.min ?? 0, def.max ?? 1];
+    m.steps.push({ osc: fallback, target, value: '{{param}}', operation: op });
+  } else {
+    m.steps.push({ osc: fallback, target, value: String(def.default ?? 1.0) });
   }
   editDetail(name);
 };
@@ -748,6 +824,7 @@ function editDetail(name) {
             clock
           </label>
         </div>
+        ${step.target ? _modControls(name, i, step) : ''}
       </div>`;
     } else {
       const val = _esc(step.value ?? '');
@@ -860,14 +937,21 @@ function editDetail(name) {
     <div>
       <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Steps</div>
       <div class="space-y-2">${stepsHtml || '<div class="text-zinc-600 text-xs italic">no steps yet</div>'}</div>
-      <div class="flex gap-2 mt-2">
+      <div class="flex gap-2 mt-2 flex-wrap">
         <button onclick="addEditorStep('${name}','value')"
+            title="Adds a SET step targeting the routing picker's current channel/parameter — no address needed"
             class="text-xs text-zinc-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
-          <i class="fas fa-plus text-[9px]"></i> value step
+          <i class="fas fa-plus text-[9px]"></i> set step
         </button>
         <button onclick="addEditorStep('${name}','operation')"
+            title="Adds a RAMP step targeting the routing picker's current channel/parameter"
             class="text-xs text-zinc-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
           <i class="fas fa-plus text-[9px]"></i> ramp/LFO step
+        </button>
+        <button onclick="addEditorStep('${name}','raw')"
+            title="Advanced: a step with a hand-typed OSC address"
+            class="text-xs text-zinc-700 hover:text-zinc-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
+          <i class="fas fa-plus text-[9px]"></i> raw OSC step
         </button>
       </div>
     </div>

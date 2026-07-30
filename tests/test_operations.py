@@ -57,3 +57,31 @@ def test_lfo_cancel_stops_immediately(fake_osc):
 def test_unknown_operation_is_noop(fake_osc):
     run_op("warp-drive", fake_osc, {})
     assert fake_osc.sent == []
+
+
+def test_ramp_range_maps_sweep_window(fake_osc):
+    """range [lo, hi] confines the sweep (#13) — e.g. an auto-pan L60→R30."""
+    run_op("ramp", fake_osc, {"duration": 0.2, "steps_per_sec": 20,
+                              "curve": "linear", "range": [0.2, 0.65]})
+    values = [v for _, v in fake_osc.sent]
+    assert min(values) >= 0.2 - 1e-9
+    assert max(values) <= 0.65 + 1e-9
+    assert values[-1] == 0.2  # parks at the window's low end, not raw 0
+
+
+def test_lfo_threshold_gates_binary_params(fake_osc):
+    """threshold binarizes the LFO — a mute gate with a controllable duty
+    point (#13). String config values (from UI sliders) must coerce."""
+    run_op("lfo", fake_osc, {"bars": 1, "bpm": 480, "steps_per_sec": 40,
+                             "threshold": "0.5"})
+    values = {v for _, v in fake_osc.sent}
+    assert values <= {0.0, 1.0}
+    assert 1.0 in values and 0.0 in values  # it actually gates both ways
+
+
+def test_range_then_threshold_compose(fake_osc):
+    from operations import shape_value
+    # range maps 0..1 → 0.4..0.6; threshold 0.5 splits the middle
+    assert shape_value(0.0, {"range": ["0.4", "0.6"], "threshold": 0.5}) == 0.0
+    assert shape_value(1.0, {"range": ["0.4", "0.6"], "threshold": 0.5}) == 1.0
+    assert shape_value(0.5, {}) == 0.5  # no shaping config = passthrough
