@@ -138,7 +138,20 @@ async def get_status():
     """Return currently-loaded config summary for the gear menu."""
     channel_map = bridge.channel_map or {}
     snap_map = bridge.snapshot_map or {}
+    listener = bridge.osc_listener
+    bank_width = (listener.state.bank_width
+                  if listener is not None and listener.running else None)
+    # Highest channel the map expects — if the live bank is narrower, part
+    # of the rig is invisible to routing (per-workspace TotalMix setting)
+    map_max_channel = max(
+        (s.get("channel", 0)
+         for sub in channel_map.get("submixes", {}).values()
+         for s in sub.get("sends", {}).values()),
+        default=0,
+    )
     return {
+        "osc_bank_width": bank_width,
+        "channel_map_max_channel": map_max_channel,
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),
         "snapshot_map_workspaces": len(snap_map),

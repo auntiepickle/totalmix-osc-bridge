@@ -151,3 +151,11 @@ def test_root_redirects_to_ui():
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (301, 302, 307)
     assert "/static/index.html" in r.headers["location"]
+
+
+def test_status_reports_bank_width_fields():
+    r = client.get("/api/status")
+    body = r.json()
+    assert "osc_bank_width" in body          # None without a listener
+    assert body["osc_bank_width"] is None
+    assert body["channel_map_max_channel"] >= 0

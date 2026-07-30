@@ -52,6 +52,11 @@ class DeviceState:
         # submix name -> row -> channel -> {"name","volume","volume_db","pan"}
         self.submixes = {}
         self.last_message_at = None
+        # Bank width estimate: highest trackname index in the most recent
+        # dump burst. TotalMix's per-WORKSPACE 'Number of Faders per Bank'
+        # caps what OSC can see — the UI warns when it is too narrow.
+        self.bank_width = None
+        self._burst_max_strip = 0
 
     # ── ingestion ─────────────────────────────────────────────────────────
 
@@ -69,6 +74,12 @@ class DeviceState:
                 if name:
                     self.current_submix = name
                     self.submixes.setdefault(name, {})
+                # A label marks a new dump burst — the finished burst's max
+                # strip is the authoritative bank width (may shrink after a
+                # workspace load reverts the faders-per-bank setting)
+                if self._burst_max_strip:
+                    self.bank_width = self._burst_max_strip
+                self._burst_max_strip = 0
                 return True  # structural change
 
             if address in _BUS_ROW and args and float(args[0]) == 1.0:
@@ -93,6 +104,11 @@ class DeviceState:
 
             if field == "trackname" and args:
                 channels["name"] = str(args[0])
+                if page == "1":
+                    self._burst_max_strip = max(self._burst_max_strip, ch)
+                    # Grow immediately (shrink only at burst boundaries)
+                    if ch > (self.bank_width or 0):
+                        self.bank_width = ch
                 return True
             if field == "volume" and args:
                 if is_val:
@@ -112,6 +128,7 @@ class DeviceState:
             return {
                 "current_submix": self.current_submix,
                 "current_row": self.current_row,
+                "bank_width": self.bank_width,
                 "submixes": {
                     name: {row: dict(chs) for row, chs in rows.items()}
                     for name, rows in self.submixes.items()

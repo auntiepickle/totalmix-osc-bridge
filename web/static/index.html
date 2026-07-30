@@ -138,6 +138,13 @@
             </div>
         </div>
 
+        <!-- Bank-width warning (hidden unless TotalMix reports fewer faders than the channel map needs) -->
+        <div id="bank-width-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
+            <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
+            <span class="flex-1">TotalMix is only reporting <b id="bank-width-actual">?</b> faders per bank — channels above that are <b>invisible to routing</b> (your channel map uses up to <b id="bank-width-needed">?</b>).
+            In TotalMix: Options → Settings → OSC → raise <i>Number of Faders per Bank</i>, then <b>re-save the current workspace</b> (the setting is stored per workspace).</span>
+        </div>
+
         <!-- Example-mappings warning banner (hidden unless server loaded the fallback) -->
         <div id="example-mappings-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
             <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>

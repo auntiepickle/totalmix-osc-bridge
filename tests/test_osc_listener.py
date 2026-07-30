@@ -167,3 +167,20 @@ def test_wait_for_times_out_cleanly():
     assert listener.wait_for(lambda st: False, 0.2) is False
     assert 0.15 < time.time() - t0 < 1.0
     assert listener._waiters == []  # waiter deregistered
+
+
+def test_bank_width_grows_and_shrinks_at_burst_boundaries():
+    """Width grows immediately, shrinks only when a full narrower burst
+    completes — detects a workspace load reverting faders-per-bank to 8."""
+    s = DeviceState()
+    s.ingest("/1/labelSubmix", ("Main",))
+    for ch in range(1, 24):
+        s.ingest(f"/1/trackname{ch}", (f"CH {ch}",))
+    assert s.bank_width == 23
+    # Narrow burst: boundary, 8 strips, next boundary seals it
+    s.ingest("/1/labelSubmix", ("AES",))
+    assert s.bank_width == 23  # previous burst was 23 wide
+    for ch in range(1, 9):
+        s.ingest(f"/1/trackname{ch}", (f"CH {ch}",))
+    s.ingest("/1/labelSubmix", ("Main",))
+    assert s.bank_width == 8

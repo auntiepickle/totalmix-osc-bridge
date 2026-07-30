@@ -331,6 +331,28 @@ async function pollHealth() {
     _applyHealthDot('mqtt-health-dot', false, 'MQTT');
     _applyHealthDot('osc-health-dot',  false, 'OSC');
   }
+  checkBankWidth();
+}
+
+// ── Bank-width warning ────────────────────────────────────────────────────────
+// TotalMix's per-WORKSPACE 'Number of Faders per Bank' caps what OSC can see.
+// If the live bank is narrower than the channel map's highest channel, part
+// of the rig is invisible to routing — surface it instead of failing quietly.
+async function checkBankWidth() {
+  const banner = document.getElementById('bank-width-banner');
+  if (!banner) return;
+  try {
+    const s = await API.getStatus();
+    const width = s.osc_bank_width;
+    const needed = s.channel_map_max_channel || 0;
+    if (width != null && needed > 0 && width < needed) {
+      document.getElementById('bank-width-actual').textContent = width;
+      document.getElementById('bank-width-needed').textContent = needed;
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+  } catch (_) {}
 }
 
 function _applyHealthDot(id, ok, label) {
