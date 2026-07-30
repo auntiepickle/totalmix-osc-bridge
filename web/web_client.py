@@ -323,7 +323,9 @@ async def get_device_state():
 
 
 class DiscoverBody(BaseModel):
-    submix_count: int = 16
+    # Stereo-paired outputs take two indices each, so real submixes can sit
+    # well past 16 (seen live: ADAT outputs above index 16 on a UFX II)
+    submix_count: int = 32
     settle_s: float = 1.0
 
 

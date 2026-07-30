@@ -1,5 +1,20 @@
 # Simplification notes — toward the walk-up "simple patch" mode
 
+## Guiding principle (user, 2026-07-30)
+
+> "Things were all hardcoded before because we were learning the protocol.
+> Ideally we just know the info from the machine and its current state."
+
+The config files are scaffolding from the protocol-learning era. The device
+broadcasts its entire state; live feedback is the source of truth and files
+are at most a bootstrap/cache. Concretely: snapshots re-pair and rename
+strips (hardware-observed), so ANY stored strip data goes stale — resolution
+already trusts the live bank over the stored address (refusing the fallback
+when they contradict), and the routing picker should eventually read live
+device state per submix instead of the discovered file. Next steps down this
+road: refresh per-submix bank data opportunistically on snapshot/workspace
+feedback, and derive the submix list itself live.
+
 Decision (2026-07-30): ship the **advanced** editor first (full step lists,
 raw OSC visible) and collect notes here on what a simplified patch model
 should look like. Revisit once the advanced manager has real usage.

@@ -158,3 +158,56 @@ def test_late_burst_high_strip_still_resolves(make_bridge, fake_osc):
     listener._server = object()
     b.run_macro("m", 0.8)
     assert ("/1/volume23", 0.8) in fake_osc.sent
+
+
+class RepairedBankTotalMix(LiveFakeTotalMix):
+    """Models a snapshot having re-paired strips: 'AN 2' no longer exists,
+    the linked strip 'AN 1/2' covers it (hardware-observed on snapshot
+    recall)."""
+
+    def send_message(self, address, value):
+        self.fake_osc.send_message(address, value)
+        if address == "/setSubmix" and int(value) == 14:
+            self.listener._handle("/1/labelSubmix", "RE-150 In")
+            self.listener._handle("/1/trackname1", "AN 1/2")
+            self.listener._handle("/1/trackname2", "RE-101")
+
+
+def test_pair_match_when_snapshot_relinked_strips(make_bridge, fake_osc):
+    """Target 'AN 2' must match the covering pair strip 'AN 1/2' — its
+    fader controls both halves."""
+    macro = {"steps": [{
+        "osc": "/1/volume9",  # stale — must not be used
+        "target": {"submix": "RE-150 In", "channel": "AN 2"},
+        "value": "{{param}}",
+    }]}
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = RepairedBankTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.8)
+    assert ("/1/volume1", 0.8) in fake_osc.sent   # the pair strip
+    assert "/1/volume9" not in fake_osc.addresses()
+
+
+def test_refuses_stored_address_when_bank_seen_but_channel_absent(make_bridge, fake_osc):
+    """The live bank is visible and the channel is NOT in it: writing to the
+    stored address would hit a different channel — the step must be skipped."""
+    macro = {"steps": [{
+        "osc": "/1/volume2",  # now points at RE-101 in this bank — wrong
+        "target": {"submix": "RE-150 In", "channel": "Ghost Channel"},
+        "value": "{{param}}",
+    }]}
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = RepairedBankTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.8)
+    assert "/1/volume2" not in fake_osc.addresses()  # refusal, not fallback
+    skipped = [e["event"] for e in b.events
+               if e["event"] and e["event"]["type"] == "macro_skipped"]
+    assert skipped and skipped[0]["reason"] == "target_not_in_bank"

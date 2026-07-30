@@ -51,9 +51,9 @@ fi
 echo "ok: $COUNT distinct OSC addresses captured"
 echo "$STATE" | { python3 -c 'import json,sys; d=json.load(sys.stdin); print("current submix:", d["current_submix"]); print("submixes seen:", list(d["submixes"]))' 2>/dev/null || true; }
 
-say "4/5 Discovery walk (~20s — TotalMix will flip through submixes)"
+say "4/5 Discovery walk (~35s — TotalMix will flip through submixes)"
 curl -sf -X POST "$BASE/api/device/discover" \
-  -H 'Content-Type: application/json' -d '{"submix_count": 16, "settle_s": 1.0}' | json \
+  -H 'Content-Type: application/json' -d '{"submix_count": 32, "settle_s": 1.0}' | json \
   || fail "could not start discovery (409 = already running; wait and retry)"
 for _ in $(seq 1 30); do
   sleep 2

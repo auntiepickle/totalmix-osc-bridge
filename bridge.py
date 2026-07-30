@@ -452,13 +452,25 @@ class TotalMixOSCBridge:
                 osc_addr = step.get("osc")
 
                 # Name-based target: live-resolve strip index via OSC feedback.
-                # Falls back to the step's stored address if resolution fails.
+                # Stored-address fallback ONLY when feedback is unavailable —
+                # if the live bank is visible and the channel is absent, the
+                # stored address may point at a different channel (snapshots
+                # re-pair strips), so the step is skipped instead.
                 if "target" in step:
-                    _, live_addr = self._resolve_target(step["target"])
-                    if live_addr:
+                    _, live_addr, status = self._resolve_target(step["target"])
+                    if status == "resolved":
                         osc_addr = live_addr
-                    elif not osc_addr:
-                        logger.error(f"   → step skipped: target unresolved and no fallback osc address")
+                    elif status == "no_feedback" and osc_addr:
+                        logger.warning(f"   → using stored address {osc_addr} (no feedback)")
+                    else:
+                        logger.error(f"   → step skipped: target "
+                                     f"{step['target'].get('channel')}@"
+                                     f"{step['target'].get('submix')} unresolved ({status})")
+                        self.broadcast_state(macro_event={
+                            "type": "macro_skipped",
+                            "name": macro_name,
+                            "reason": f"target_{status}",
+                        })
                         continue
 
                 if not osc_addr:
@@ -561,6 +573,26 @@ class TotalMixOSCBridge:
         logger.warning(f"   → {what} not confirmed within {timeout}s — proceeding")
         return False
 
+    @staticmethod
+    def _names_cover(strip_name: str, wanted: str) -> bool:
+        """True when a strip label covers the wanted channel name across
+        stereo-link changes. Snapshots re-pair strips: 'AN 2' disappears when
+        AN 1+2 link into one 'AN 1/2' strip (whose fader controls both), and
+        vice versa. Pair labels look like '<prefix> <a>/<b>'."""
+        s = strip_name.strip().lower()
+        w = wanted.strip().lower()
+        if s == w:
+            return True
+        pair = re.match(r"^(.*?)\s*(\d+)/(\d+)$", s)
+        if pair and w in (f"{pair.group(1).strip()} {pair.group(2)}",
+                          f"{pair.group(1).strip()} {pair.group(3)}"):
+            return True  # strip is the linked pair containing wanted
+        pair = re.match(r"^(.*?)\s*(\d+)/(\d+)$", w)
+        if pair and s in (f"{pair.group(1).strip()} {pair.group(2)}",
+                          f"{pair.group(1).strip()} {pair.group(3)}"):
+            return True  # wanted was a pair, strip is one (unlinked) half
+        return False
+
     def _submix_index_by_name(self, submix_name: str):
         """Look up a submix's /setSubmix index by name (channel map, then
         live listener state is not consulted — indices are stable per device)."""
@@ -573,16 +605,25 @@ class TotalMixOSCBridge:
         return entry.get("index") if entry else None
 
     def _resolve_target(self, target: dict, timeout: float = 1.5):
-        """Resolve {"submix": name, "channel": name} to (setsubmix_index,
-        live_osc_address). live_osc_address is None if no live match —
-        caller falls back to the step's stored address."""
+        """Resolve {"submix": name, "channel": name} to
+        (setsubmix_index, live_osc_address, status).
+
+        status:
+          "resolved"    — live match (exact or stereo-pair covering)
+          "no_feedback" — no listener / no confirmation; caller MAY fall
+                          back to the stored address (we know nothing)
+          "not_in_bank" — the live bank was seen and the channel is NOT in
+                          it; caller MUST NOT write to the stored address
+                          (snapshots re-pair strips, so it now points at a
+                          different channel — hardware-observed)
+        """
         submix_name = str(target.get("submix", "")).strip()
         channel_name = str(target.get("channel", "")).strip()
         row = str(target.get("row", 1))
         index = self._submix_index_by_name(submix_name)
         if index is None:
             logger.warning(f"   → target submix '{submix_name}' not in channel map")
-            return None, None
+            return None, None, "not_in_bank"
 
         # Normalize the bank so strip indices are absolute — a bank left
         # scrolled (e.g. by TouchOSC) would shift every /1/volume{N}.
@@ -596,7 +637,7 @@ class TotalMixOSCBridge:
         listener = self.osc_listener
         if listener is None or not listener.running:
             logger.warning("   → no OSC listener — cannot live-resolve strip, using stored address")
-            return index, None
+            return index, None, "no_feedback"
 
         # Event-driven waits: the listener wakes us the instant the matching
         # OSC message arrives — no sleeps, no polling. The deadline is only
@@ -611,8 +652,15 @@ class TotalMixOSCBridge:
             if current != wanted:
                 return None
             strips = state.submix_snapshot(state.current_submix).get(row, {})
+            # Exact name first, stereo-pair cover second — a pair strip's
+            # fader controls both halves, so it is a correct target
             for strip, data in sorted(strips.items()):
                 if str(data.get("name", "")).strip().lower() == wanted_ch:
+                    return strip
+            for strip, data in sorted(strips.items()):
+                if self._names_cover(str(data.get("name", "")), channel_name):
+                    logger.info(f"   → pair-matched '{channel_name}' to strip "
+                                f"'{data.get('name')}' (stereo link changed)")
                     return strip
             return None
 
@@ -621,7 +669,7 @@ class TotalMixOSCBridge:
                 timeout):
             logger.warning(f"   → no labelSubmix confirmation for '{submix_name}' "
                            f"within {timeout}s — using stored address")
-            return index, None
+            return index, None, "no_feedback"
 
         remaining = max(0.0, deadline - time.time())
         if listener.wait_for(lambda st: find_strip(st) is not None, remaining):
@@ -629,13 +677,14 @@ class TotalMixOSCBridge:
             if strip is not None:
                 addr = f"/{row}/volume{strip}"
                 logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
-                return index, addr
+                return index, addr, "resolved"
 
         strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
-        logger.warning(f"   → channel '{channel_name}' not found in live bank for "
-                       f"'{submix_name}' within {timeout}s (strips: "
-                       f"{[d.get('name') for d in strips.values()]}) — using stored address")
-        return index, None
+        logger.error(f"   → channel '{channel_name}' is NOT in the live bank for "
+                     f"'{submix_name}' (strips: "
+                     f"{[d.get('name') for d in strips.values()]}) — refusing the "
+                     f"stored address, it may point at a different channel now")
+        return index, None, "not_in_bank"
 
     def start_osc_listener(self):
         """Start the structured OSC feedback listener (device state + discovery)."""

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 EMPTY_NAMES = {"", "<empty>"}
 
 
-def discover_channel_map(osc_client, listener, submix_count=16, settle_s=1.0,
+def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
                          progress_cb=None):
     """Walk submixes 1..submix_count and return (channel_map, walk_log).
 
