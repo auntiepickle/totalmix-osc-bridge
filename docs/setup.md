@@ -203,8 +203,17 @@ The bridge listens for TotalMix's OSC feedback and can build `ufx2_channel_map.j
 The fader-bank size matters: TotalMix only reports the strips inside the
 current bank over OSC. At the default of 8, discovery and live resolution can
 only see the first 8 strips per row — ADAT and other higher channels never
-appear. Raise it, then re-run discovery. (The bridge sends `/setBankStart 1`
-before every capture/resolution so a scrolled bank cannot shift indices.)
+appear. Raise it, then re-run discovery. (The bridge sends `/setBankStart 0`
+before every capture/resolution so a scrolled bank cannot shift indices —
+the address is 0-based.)
+
+**This setting is saved per workspace.** Set it while the workspace you
+actually perform in is loaded, then **re-save that workspace** — otherwise
+the next workspace load (including the bridge's own startup, which restores
+the last workspace via MQTT) silently reverts it to that workspace's stored
+value. Repeat for every workspace you switch to. Separately, stereo-link
+state and channel names change per **snapshot** — the bridge handles that at
+fire time by resolving channel names against live feedback.
 
 **Run a discovery walk:**
 
