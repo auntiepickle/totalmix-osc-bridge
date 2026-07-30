@@ -566,21 +566,25 @@ function editDetail(name) {
   // Steps
   const stepsHtml = (m.steps || []).map((step, i) => {
     const addr = _esc(step.osc || '');
-    // Name-based target line — the live-resolved routing; address below is
-    // only the fallback when no OSC feedback is available
+    // Name-based target: read-only display — the routing picker above is
+    // how it changes, and duplicating it as editable fields was confusing
     const targetHtml = step.target ? `<div class="flex gap-2 items-center">
         <span class="text-[10px] text-emerald-500/90 font-bold tracking-widest shrink-0" title="Resolved live from device feedback at fire time">LIVE</span>
-        <input data-field="steps.${i}.target.channel" value="${_esc(step.target.channel ?? '')}" class="${ic}" placeholder="channel name">
-        <span class="text-zinc-500 text-xs shrink-0">→</span>
-        <input data-field="steps.${i}.target.submix" value="${_esc(step.target.submix ?? '')}" class="${ic}" placeholder="submix name">
+        <span class="text-sm text-white font-mono flex-1 truncate">${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}</span>
+        <span class="text-[10px] text-zinc-600 shrink-0">set via Routing above</span>
       </div>` : '';
-    const addrPlaceholder = step.target ? 'fallback OSC address' : 'OSC address';
+    // For target steps the address is machine-managed bookkeeping (used only
+    // when device feedback is down) — show it muted, not as an input nobody
+    // can be expected to decode
+    const addrField = step.target
+      ? `<div class="flex-1 text-[10px] text-zinc-600 font-mono px-1 truncate" title="Machine-managed: only used when device feedback is unavailable">fallback: ${addr || '—'}</div>`
+      : `<input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="OSC address">`;
     if (step.operation) {
       const op = step.operation;
       return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
         ${targetHtml}
-        <div class="flex gap-2">
-          <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="${addrPlaceholder}">
+        <div class="flex gap-2 items-center">
+          ${addrField}
           <select data-field="steps.${i}.operation.type" class="${sc} shrink-0">
             <option value="ramp"${op.type==='ramp'?' selected':''}>RAMP</option>
             <option value="lfo"${op.type==='lfo'?' selected':''}>LFO</option>
@@ -607,8 +611,8 @@ function editDetail(name) {
       const val = _esc(step.value ?? '');
       return `<div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
         ${targetHtml}
-        <div class="flex gap-2">
-          <input data-field="steps.${i}.osc" value="${addr}" class="${ic}" placeholder="${addrPlaceholder}">
+        <div class="flex gap-2 items-center">
+          ${addrField}
           <input data-field="steps.${i}.value" value="${val}" class="${nc}" placeholder="value">
           ${_removeBtn(i)}
         </div>

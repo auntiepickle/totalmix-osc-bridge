@@ -65,6 +65,21 @@ dropdown groups, no OSC strings, no JSON.
   deal in names. Remaining idea: re-run discovery automatically per snapshot
   switch so fallback addresses stay fresh too.
 
+## Next targets beyond sends (user, 2026-07-30)
+
+> "We are focused on sends atm but I'd like to tackle mutes and modulating
+> the EQ params."
+
+The capture already shows the raw material arriving as feedback: per-strip
+mutes (`/1/mute/1/{n}`), solos, mic gains (`/1/micgain{n}`), phantom, and the
+FX section (`/3/reverb*`, `/3/echo*`). Channel EQ params likely appear on the
+channel-strip page when a channel is selected (same select-then-read pattern
+as submixes/rows). Design direction: the routing picker grows a *parameter*
+dimension (send volume / mute / gain / EQ band ...), each with its own
+resolve rule — mutes are strip-scoped like volumes (live-resolvable by name);
+FX/EQ params are global or selected-channel-scoped. Steps likely become
+`target: {submix?, channel?, param: "mute"|"volume"|...}`.
+
 ## Full-surface control (user note, 2026-07-30)
 
 The RME reports essentially *all* signals over OSC feedback — 177 addresses
