@@ -117,7 +117,11 @@ function updateStatusHeader() {
     pill.classList.remove('text-zinc-400', 'border-zinc-700');
     pill.classList.add('text-white', 'border-green-700');
   } else {
-    label.textContent = 'No MIDI';
+    // Web MIDI needs a secure context — say so instead of a bare 'No MIDI'
+    // (midi.js sets this once at init, but this function runs on every WS
+    // message and would clobber it)
+    label.textContent = (!navigator.requestMIDIAccess && !window.isSecureContext)
+      ? 'MIDI needs HTTPS' : 'No MIDI';
     dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
     dot.classList.add('bg-zinc-600');
     pill.classList.remove('text-white', 'border-green-700');

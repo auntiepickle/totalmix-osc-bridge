@@ -29,6 +29,18 @@ print(f"DEBUG: Files found: {list(Path(static_dir).glob('*'))}")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+@app.middleware("http")
+async def static_no_cache(request: Request, call_next):
+    """Force revalidation of static assets. Browsers heuristically cache JS
+    for hours, so after a deploy the UI kept running stale code until a hard
+    refresh (observed live: a pulled midi.js fix was invisible). ETag/304
+    keeps revalidation cheap."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/")
 async def root():
     return RedirectResponse(url="/static/index.html")
