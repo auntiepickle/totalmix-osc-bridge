@@ -87,3 +87,21 @@ def test_schema_matches_existing_channel_map_consumers():
     b.channel_map = channel_map
     b.mappings = {"macros": {"m": {"steps": [{"osc": "/1/volume2"}]}}}
     assert b.get_routing_label("m") == "AN 3 → ADAT 1"
+
+
+def test_na_strips_beyond_hardware_filtered_out():
+    """A 48-wide OSC bank reports 'n.a.' for strips past the device's
+    channel count — they must not become sends."""
+    listener = OSCListener(0)
+    device = FakeTotalMix(listener)
+    listener._handle("/1/labelSubmix", "ADAT 1")
+    listener._handle("/1/trackname1", "AN 3")
+    listener._handle("/1/volume1", 0.5)
+    for ch in range(24, 27):
+        listener._handle(f"/1/trackname{ch}", "n.a.")
+        listener._handle(f"/1/volume{ch}", 0.0)
+    channel_map, _ = discover_channel_map(device, listener,
+                                          submix_count=1, settle_s=0)
+    sends = channel_map["submixes"]["ADAT 1"]["sends"]
+    assert "AN 3" in sends
+    assert not [k for k in sends if "n.a." in k.lower()]

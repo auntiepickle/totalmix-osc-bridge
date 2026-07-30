@@ -63,7 +63,12 @@ def discover_channel_map(osc_client, listener, submix_count=16, settle_s=1.0,
         rows = listener.state.submix_snapshot(name)
         for row in ("1", "2"):
             for ch, data in sorted(rows.get(row, {}).items()):
-                send_name = (data.get("name") or "").strip() or f"Row {row} Ch {ch}"
+                raw_name = (data.get("name") or "").strip()
+                # Strips past the device's channel count report "n.a." when
+                # the OSC bank is wider than the hardware — not real sends
+                if raw_name.lower() in ("n.a.", "n/a"):
+                    continue
+                send_name = raw_name or f"Row {row} Ch {ch}"
                 key = send_name
                 if key in sends:  # same trackname on both rows
                     key = f"{send_name} (row {row})"
