@@ -318,23 +318,63 @@ def test_probe_without_listener_is_unavailable(make_bridge, fake_osc):
     assert b.probe_device()["alive"] is None
 
 
-def test_mute_target_resolves_to_mute_grid_address(make_bridge, fake_osc):
-    """param: 'mute' rides the same live strip resolution but writes to the
-    /1/mute/1/{strip} grid (issue #4)."""
+def test_mute_target_resolves_without_touching_submix(make_bridge, fake_osc):
+    """Mute is global-per-channel (#10): resolution uses whatever bank is
+    already visible and NEVER sends /setSubmix — the user's selected submix
+    stays put."""
     macro = {"steps": [{
-        "target": {"submix": "RE-150 In", "channel": "AN 3", "param": "mute"},
+        "target": {"channel": "AN 3", "param": "mute"},  # no submix at all
         "value": "1.0",
     }]}
     listener = OSCListener(0)
+    # Warm state: some earlier dump already showed the bank
+    listener._handle("/1/labelSubmix", "Phones 1")
+    listener._handle("/1/trackname2", "AN 3")
     b = make_bridge({"m": macro})
     b.channel_map = CHANNEL_MAP
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.0)
-    # AN 3 lives at strip 2 in the live bank → mute grid slot 2
     assert ("/1/mute/1/2", 1.0) in fake_osc.sent
+    assert "/setSubmix" not in fake_osc.addresses()
     assert not [a for a in fake_osc.addresses() if a.startswith("/1/volume")]
+
+
+class ToggleDumpTotalMix:
+    """Dumps the bank only on a genuine bus-row change — models a cold
+    listener being primed by the mute path's row-toggle trick."""
+
+    def __init__(self, listener, fake_osc):
+        self.listener = listener
+        self.fake_osc = fake_osc
+        self.row = "input"
+
+    def send_message(self, address, value):
+        self.fake_osc.send_message(address, value)
+        new_row = {"/1/busPlayback": "playback", "/1/busInput": "input"}.get(address)
+        if new_row and new_row != self.row:
+            self.row = new_row
+            self.listener._handle(address, 1.0)
+            if new_row == "input":
+                self.listener._handle("/1/labelSubmix", "Phones 1")
+                self.listener._handle("/1/trackname2", "AN 3")
+
+
+def test_mute_target_cold_listener_self_primes(make_bridge, fake_osc):
+    macro = {"steps": [{
+        "target": {"channel": "AN 3", "param": "mute"},
+        "value": "1.0",
+    }]}
+    listener = OSCListener(0)  # completely cold
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = ToggleDumpTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.0)
+    assert ("/1/mute/1/2", 1.0) in fake_osc.sent
+    assert "/setSubmix" not in fake_osc.addresses()
 
 
 def test_pan_target_resolves_to_pan_address(make_bridge, fake_osc):
@@ -352,9 +392,11 @@ def test_pan_target_resolves_to_pan_address(make_bridge, fake_osc):
     assert ("/1/pan2", 0.25) in fake_osc.sent
 
 
-def test_routing_label_shows_non_volume_param(make_bridge, fake_osc):
+def test_routing_label_mute_has_no_submix_scope(make_bridge, fake_osc):
+    """'AN 3 → RE-150 In (mute)' implied a per-submix scope that does not
+    exist (#10) — mute labels name only the channel."""
     b = make_bridge({"m": {"steps": [{
-        "target": {"submix": "RE-150 In", "channel": "AN 3", "param": "mute"},
+        "target": {"channel": "AN 3", "param": "mute"},
         "value": "1.0",
     }]}})
-    assert b.get_routing_label("m") == "AN 3 → RE-150 In (mute)"
+    assert b.get_routing_label("m") == "AN 3 (mute)"

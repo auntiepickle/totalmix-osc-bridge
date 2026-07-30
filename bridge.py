@@ -200,10 +200,15 @@ class TotalMixOSCBridge:
         # Name-based targets are authoritative — they never go stale
         for step in steps:
             t = step.get("target")
-            if t and t.get("channel") and t.get("submix"):
+            if t and t.get("channel"):
                 param = str(t.get("param", "volume")).lower()
-                suffix = f" ({param})" if param != "volume" else ""
-                return f"{t['channel']} → {t['submix']}{suffix}"
+                if param == "mute":
+                    # Mute is global-per-channel — naming a submix would
+                    # imply a scope that does not exist (#10)
+                    return f"{t['channel']} (mute)"
+                if t.get("submix"):
+                    suffix = f" ({param})" if param != "volume" else ""
+                    return f"{t['channel']} → {t['submix']}{suffix}"
         if not self.channel_map:
             self._load_channel_map()
         # Legacy: match raw addresses against the channel map
@@ -644,10 +649,17 @@ class TotalMixOSCBridge:
         channel_name = str(target.get("channel", "")).strip()
         row = str(target.get("row", 1))
         param = str(target.get("param", "volume")).strip().lower()
-        index = self._submix_index_by_name(submix_name)
-        if index is None:
-            logger.warning(f"   → target submix '{submix_name}' not in channel map")
-            return None, None, "not_in_bank"
+        if param == "mute":
+            # Mute is GLOBAL-per-channel (hardware-verified, #4/#10): every
+            # submix's bank yields the same strip index, so no /setSubmix is
+            # sent — switching would move the user's selection for zero
+            # benefit. Only the ROW still matters.
+            index = None
+        else:
+            index = self._submix_index_by_name(submix_name)
+            if index is None:
+                logger.warning(f"   → target submix '{submix_name}' not in channel map")
+                return None, None, "not_in_bank"
 
         # Normalize the bank so strip indices are absolute — a bank left
         # scrolled (e.g. by TouchOSC) would shift every /1/volume{N}.
@@ -660,8 +672,11 @@ class TotalMixOSCBridge:
         bus_addr = {"1": "/1/busInput", "2": "/1/busPlayback",
                     "3": "/1/busOutput"}.get(row, "/1/busInput")
         self.osc_client.send_message(bus_addr, 1.0)
-        self.osc_client.send_message("/setSubmix", float(index))
-        logger.info(f"   → target: /setSubmix {index} ('{submix_name}') row {row}")
+        if index is not None:
+            self.osc_client.send_message("/setSubmix", float(index))
+            logger.info(f"   → target: /setSubmix {index} ('{submix_name}') row {row}")
+        else:
+            logger.info(f"   → target: {param} '{channel_name}' row {row} (no submix switch)")
 
         listener = self.osc_listener
         if listener is None or not listener.running:
@@ -676,13 +691,7 @@ class TotalMixOSCBridge:
         wanted = submix_name.lower()
         wanted_ch = channel_name.lower()
 
-        def find_strip(state):
-            # No logging in here — this runs as a wait predicate on every
-            # incoming message, so it would log once per evaluation
-            current = (state.current_submix or "").strip().lower()
-            if current != wanted:
-                return None
-            strips = state.submix_snapshot(state.current_submix).get(row, {})
+        def _match_in(strips):
             # Exact name first, stereo-pair cover second — a pair strip's
             # fader controls both halves, so it is a correct target
             for strip, data in sorted(strips.items()):
@@ -693,7 +702,32 @@ class TotalMixOSCBridge:
                     return strip
             return None
 
-        if not listener.wait_for(
+        def find_strip(state):
+            # No logging in here — this runs as a wait predicate on every
+            # incoming message, so it would log once per evaluation
+            if param == "mute":
+                # Global param: any visible bank yields the same strip index
+                names = ([state.current_submix] if state.current_submix else [])
+                names += [s for s in list(state.submixes.keys()) if s not in names]
+                for sub in names:
+                    strip = _match_in(state.submix_snapshot(sub).get(row, {}))
+                    if strip is not None:
+                        return strip
+                return None
+            current = (state.current_submix or "").strip().lower()
+            if current != wanted:
+                return None
+            return _match_in(state.submix_snapshot(state.current_submix).get(row, {}))
+
+        if param == "mute":
+            # No submix switch happened, so there may be no fresh dump to
+            # wait on. If nothing matches the already-known state, provoke a
+            # dump with the probe's row-toggle trick (guaranteed change).
+            if find_strip(listener.state) is None:
+                other = "/1/busPlayback" if bus_addr == "/1/busInput" else "/1/busInput"
+                self.osc_client.send_message(other, 1.0)
+                self.osc_client.send_message(bus_addr, 1.0)
+        elif not listener.wait_for(
                 lambda st: (st.current_submix or "").strip().lower() == wanted,
                 timeout):
             logger.warning(f"   → no labelSubmix confirmation for '{submix_name}' "

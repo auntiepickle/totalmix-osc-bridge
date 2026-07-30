@@ -481,6 +481,17 @@ function _currentRouting(m) {
   return { submix, channel };
 }
 
+// Mute is global-per-channel — the submix dropdown is meaningless for it
+window.updateParamScope = function (name) {
+  const paramSel  = document.getElementById(`routing-param-${name}`);
+  const submixSel = document.getElementById(`routing-submix-${name}`);
+  if (!paramSel || !submixSel) return;
+  const isMute = paramSel.value === 'mute';
+  submixSel.disabled = isMute;
+  submixSel.title = isMute
+    ? 'Mute is global per channel — no submix applies' : '';
+};
+
 window.applyRouting = function (name) {
   const submixSel = document.getElementById(`routing-submix-${name}`);
   const sendSel   = document.getElementById(`routing-send-${name}`);
@@ -503,6 +514,9 @@ window.applyRouting = function (name) {
   const paramSel = document.getElementById(`routing-param-${name}`);
   const param = paramSel ? paramSel.value : 'volume';
   if (param !== 'volume') target.param = param;
+  // Mute is global-per-channel (hardware-verified, #10) — storing a submix
+  // would imply a scope that does not exist, and the bridge won't switch
+  if (param === 'mute') delete target.submix;
   // Fallback address must match the parameter, not always the volume
   const ch = send ? send.channel : null;
   const fallbackAddr = !send ? ''
@@ -580,7 +594,11 @@ function editDetail(name) {
     // how it changes, and duplicating it as editable fields was confusing
     const targetHtml = step.target ? `<div class="flex gap-2 items-center">
         <span class="text-[10px] text-emerald-500/90 font-bold tracking-widest shrink-0" title="Resolved live from device feedback at fire time">LIVE</span>
-        <span class="text-sm text-white font-mono flex-1 truncate">${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}${step.target.param && step.target.param !== 'volume' ? ` <span class="text-purple-400 text-xs">${_esc(step.target.param)}</span>` : ''}</span>
+        <span class="text-sm text-white font-mono flex-1 truncate">${
+          step.target.param === 'mute'
+            ? `${_esc(step.target.channel ?? '')} <span class="text-purple-400 text-xs">mute</span>${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}`
+            : `${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}${step.target.param && step.target.param !== 'volume' ? ` <span class="text-purple-400 text-xs">${_esc(step.target.param)}</span>` : ''}`
+        }</span>
         <span class="text-[10px] text-zinc-600 shrink-0">set via Routing above</span>
       </div>` : '';
     // For target steps the address is machine-managed bookkeeping (used only
@@ -671,7 +689,7 @@ function editDetail(name) {
       </div>
       <div class="shrink-0">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Parameter</div>
-        <select id="routing-param-${name}" class="${sc}">
+        <select id="routing-param-${name}" onchange="updateParamScope('${name}')" class="${sc}">
           <option value="volume"${(routing.param || 'volume') === 'volume' ? ' selected' : ''}>Volume</option>
           <option value="mute"${routing.param === 'mute' ? ' selected' : ''}>Mute</option>
           <option value="pan"${routing.param === 'pan' ? ' selected' : ''}>Pan</option>
@@ -759,8 +777,12 @@ function editDetail(name) {
 
   </div>`;
 
-  // Populate the cascading send picker, restoring the macro's current send
-  if (hasChannelMap) updateSendPickerOptions(name, routing.channel);
+  // Populate the cascading send picker, restoring the macro's current send,
+  // and set the submix dropdown's enabled state for the current parameter
+  if (hasChannelMap) {
+    updateSendPickerOptions(name, routing.channel);
+    updateParamScope(name);
+  }
 }
 
 // Read every [data-field] input in the open editor back into the edit buffer.
