@@ -65,6 +65,10 @@ def test_live_resolution_overrides_stale_address(make_bridge, fake_osc):
     b.run_macro("m", 0.8)
 
     assert ("/setSubmix", 14.0) in fake_osc.sent
+    # /setBankStart is 0-BASED — 1.0 shifts the bank one strip left and the
+    # shift persists on the device (hardware-verified regression)
+    assert ("/setBankStart", 0.0) in fake_osc.sent
+    assert ("/setBankStart", 1.0) not in fake_osc.sent
     # Live bank says AN 3 is strip 2 now — captured map said 3
     assert ("/1/volume2", 0.8) in fake_osc.sent
     assert "/1/volume3" not in fake_osc.addresses()

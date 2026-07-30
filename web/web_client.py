@@ -421,7 +421,9 @@ def backup_json_files(files=("mappings.json", "ufx2_channel_map.json")):
     """
     if isinstance(files, str):
         files = (files,)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Millisecond precision — two writes in the same second (easy with the
+    # macro editor) were overwriting each other's backup (observed live)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
     backup_dir = os.path.join(os.path.dirname(__file__), "../backups")
     os.makedirs(backup_dir, exist_ok=True)
     for fn in files:

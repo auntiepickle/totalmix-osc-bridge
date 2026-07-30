@@ -27,11 +27,12 @@ def discover_channel_map(osc_client, listener, submix_count=16, settle_s=1.0,
     walk_log = []
     initial_submix = listener.state.current_submix  # restore after the walk
 
-    # Normalize the bank to channel 1 so strip indices are absolute. The bank
-    # only spans "Number of Faders per Bank" strips (TotalMix Options →
-    # Settings → OSC, default 8) — set it high enough to cover every channel
-    # or discovery will only see the first bank.
-    osc_client.send_message("/setBankStart", 1.0)
+    # Normalize the bank to the first channel so strip indices are absolute.
+    # /setBankStart is 0-BASED (hardware-verified: 1.0 shifts the bank one
+    # strip left). The bank only spans "Number of Faders per Bank" strips
+    # (TotalMix Options → Settings → OSC, default 8) — set it high enough to
+    # cover every channel or discovery will only see the first bank.
+    osc_client.send_message("/setBankStart", 0.0)
 
     for i in range(1, submix_count + 1):
         osc_client.send_message("/setSubmix", float(i))

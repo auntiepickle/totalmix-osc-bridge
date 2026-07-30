@@ -548,8 +548,11 @@ class TotalMixOSCBridge:
             return None, None
 
         # Normalize the bank so strip indices are absolute — a bank left
-        # scrolled (e.g. by TouchOSC) would shift every /1/volume{N}
-        self.osc_client.send_message("/setBankStart", 1.0)
+        # scrolled (e.g. by TouchOSC) would shift every /1/volume{N}.
+        # /setBankStart is 0-BASED (hardware-verified on a UFX II: 1.0
+        # starts the bank at the SECOND channel and the shift persists as
+        # global device state, silently mis-targeting hardcoded macros).
+        self.osc_client.send_message("/setBankStart", 0.0)
         self.osc_client.send_message("/setSubmix", float(index))
         logger.info(f"   → target: /setSubmix {index} ('{submix_name}')")
 
