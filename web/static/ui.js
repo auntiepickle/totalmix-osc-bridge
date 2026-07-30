@@ -463,7 +463,9 @@ window.updateSendPickerOptions = function (name, selectedChannel) {
 function _currentRouting(m) {
   const paramStep = (m.steps || []).find(s => s.value === '{{param}}');
   if (paramStep && paramStep.target) {
-    return { submix: paramStep.target.submix, channel: paramStep.target.channel };
+    return { submix: paramStep.target.submix,
+             channel: paramStep.target.channel,
+             param: paramStep.target.param || 'volume' };
   }
   // Legacy macros: reverse-lookup /setSubmix index and the raw address
   const subs = (window._channelMap || {}).submixes || {};
@@ -498,7 +500,15 @@ window.applyRouting = function (name) {
   const target = { submix: submixSel.value,
                    channel: (send && send.name) || sendSel.value };
   if (send && send.row === 2) target.row = 2;  // software-playback send
-  const fallbackAddr = send ? send.osc_address : '';
+  const paramSel = document.getElementById(`routing-param-${name}`);
+  const param = paramSel ? paramSel.value : 'volume';
+  if (param !== 'volume') target.param = param;
+  // Fallback address must match the parameter, not always the volume
+  const ch = send ? send.channel : null;
+  const fallbackAddr = !send ? ''
+    : param === 'mute' ? `/1/mute/1/${ch}`
+    : param === 'pan'  ? `/1/pan${ch}`
+    : send.osc_address;
   if (paramStep) {
     paramStep.target = target;
     paramStep.osc = fallbackAddr;
@@ -570,7 +580,7 @@ function editDetail(name) {
     // how it changes, and duplicating it as editable fields was confusing
     const targetHtml = step.target ? `<div class="flex gap-2 items-center">
         <span class="text-[10px] text-emerald-500/90 font-bold tracking-widest shrink-0" title="Resolved live from device feedback at fire time">LIVE</span>
-        <span class="text-sm text-white font-mono flex-1 truncate">${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}</span>
+        <span class="text-sm text-white font-mono flex-1 truncate">${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}${step.target.param && step.target.param !== 'volume' ? ` <span class="text-purple-400 text-xs">${_esc(step.target.param)}</span>` : ''}</span>
         <span class="text-[10px] text-zinc-600 shrink-0">set via Routing above</span>
       </div>` : '';
     // For target steps the address is machine-managed bookkeeping (used only
@@ -657,6 +667,14 @@ function editDetail(name) {
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Output submix</div>
         <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}')" class="${sc} w-full">
           ${_buildSubmixPickerOptions(routing.submix)}
+        </select>
+      </div>
+      <div class="shrink-0">
+        <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Parameter</div>
+        <select id="routing-param-${name}" class="${sc}">
+          <option value="volume"${(routing.param || 'volume') === 'volume' ? ' selected' : ''}>Volume</option>
+          <option value="mute"${routing.param === 'mute' ? ' selected' : ''}>Mute</option>
+          <option value="pan"${routing.param === 'pan' ? ' selected' : ''}>Pan</option>
         </select>
       </div>
       <button onclick="applyRouting('${name}')" title="Store this routing by name — the strip index is resolved live from device feedback when the macro fires"

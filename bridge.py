@@ -201,7 +201,9 @@ class TotalMixOSCBridge:
         for step in steps:
             t = step.get("target")
             if t and t.get("channel") and t.get("submix"):
-                return f"{t['channel']} → {t['submix']}"
+                param = str(t.get("param", "volume")).lower()
+                suffix = f" ({param})" if param != "volume" else ""
+                return f"{t['channel']} → {t['submix']}{suffix}"
         if not self.channel_map:
             self._load_channel_map()
         # Legacy: match raw addresses against the channel map
@@ -584,6 +586,17 @@ class TotalMixOSCBridge:
         return False
 
     @staticmethod
+    def _param_address(param: str, strip) -> str:
+        """OSC address for a parameter on a live-resolved strip. All are
+        page-1, row-relative (the bus selection picks the row):
+        volume /1/volume{n} · mute /1/mute/1/{n} · pan /1/pan{n}."""
+        if param == "mute":
+            return f"/1/mute/1/{strip}"
+        if param == "pan":
+            return f"/1/pan{strip}"
+        return f"/1/volume{strip}"
+
+    @staticmethod
     def _names_cover(strip_name: str, wanted: str) -> bool:
         """True when a strip label covers the wanted channel name across
         stereo-link changes. Snapshots re-pair strips: 'AN 2' disappears when
@@ -630,6 +643,7 @@ class TotalMixOSCBridge:
         submix_name = str(target.get("submix", "")).strip()
         channel_name = str(target.get("channel", "")).strip()
         row = str(target.get("row", 1))
+        param = str(target.get("param", "volume")).strip().lower()
         index = self._submix_index_by_name(submix_name)
         if index is None:
             logger.warning(f"   → target submix '{submix_name}' not in channel map")
@@ -698,8 +712,8 @@ class TotalMixOSCBridge:
                                 f"'{strip_name}' (stereo link changed)")
                 # Write address is always page 1 — the bus selection above
                 # decides which row the write lands on
-                addr = f"/1/volume{strip}"
-                logger.info(f"   → live-resolved '{channel_name}' → strip {strip} "
+                addr = self._param_address(param, strip)
+                logger.info(f"   → live-resolved '{channel_name}' {param} → strip {strip} "
                             f"({addr}, row {row})")
                 return index, addr, "resolved"
 

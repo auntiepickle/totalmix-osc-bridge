@@ -225,3 +225,15 @@ def test_real_strip_count_accepts_genuine_shrink_after_consistent_bursts():
         _burst(s, label, 17)   # snapshot changed the layout for real
     s.ingest("/1/labelSubmix", ("Main",))
     assert s.real_strip_count == 17
+
+
+def test_mute_grid_feedback_scoped_like_volumes():
+    """/1/mute/1/{strip} follows the selected row and submix, same as
+    volume/trackname feedback."""
+    s = DeviceState()
+    feed(s, ("/1/labelSubmix", "AES"), ("/1/busInput", 1.0),
+         ("/1/mute/1/3", 1.0))
+    assert s.submixes["AES"]["1"][3]["mute"] == 1.0
+    feed(s, ("/1/busPlayback", 1.0), ("/1/mute/1/3", 0.0))
+    assert s.submixes["AES"]["2"][3]["mute"] == 0.0
+    assert s.submixes["AES"]["1"][3]["mute"] == 1.0  # row 1 untouched

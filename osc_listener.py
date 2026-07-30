@@ -36,6 +36,7 @@ from pythonosc.osc_server import ThreadingOSCUDPServer
 logger = logging.getLogger(__name__)
 
 _CHANNEL_RE = re.compile(r"^/([123])/(trackname|volume|pan)(\d+)(Val)?$")
+_MUTE_RE = re.compile(r"^/1/mute/1/(\d+)$")
 
 _BUS_ROW = {"/1/busInput": "1", "/1/busPlayback": "2", "/1/busOutput": "3"}
 
@@ -102,6 +103,18 @@ class DeviceState:
             if address in _BUS_ROW and args and float(args[0]) == 1.0:
                 self.current_row = _BUS_ROW[address]
                 return True  # row switch rescopes subsequent channel data
+
+            # Mute grid: /1/mute/1/{strip} — page-1, follows the selected row
+            mm = _MUTE_RE.match(address)
+            if mm and args:
+                ch = int(mm.group(1))
+                row_key = self.current_row
+                submix_key = ("_outputs" if row_key == "3"
+                              else self.current_submix or UNKNOWN_SUBMIX)
+                (self.submixes.setdefault(submix_key, {})
+                     .setdefault(row_key, {})
+                     .setdefault(ch, {}))["mute"] = float(args[0])
+                return False
 
             m = _CHANNEL_RE.match(address)
             if not m:

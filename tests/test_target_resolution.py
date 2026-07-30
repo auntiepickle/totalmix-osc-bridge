@@ -316,3 +316,45 @@ def test_probe_dead_device_captures_evidence(make_bridge, fake_osc):
 def test_probe_without_listener_is_unavailable(make_bridge, fake_osc):
     b = make_bridge({})
     assert b.probe_device()["alive"] is None
+
+
+def test_mute_target_resolves_to_mute_grid_address(make_bridge, fake_osc):
+    """param: 'mute' rides the same live strip resolution but writes to the
+    /1/mute/1/{strip} grid (issue #4)."""
+    macro = {"steps": [{
+        "target": {"submix": "RE-150 In", "channel": "AN 3", "param": "mute"},
+        "value": "1.0",
+    }]}
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.0)
+    # AN 3 lives at strip 2 in the live bank → mute grid slot 2
+    assert ("/1/mute/1/2", 1.0) in fake_osc.sent
+    assert not [a for a in fake_osc.addresses() if a.startswith("/1/volume")]
+
+
+def test_pan_target_resolves_to_pan_address(make_bridge, fake_osc):
+    macro = {"steps": [{
+        "target": {"submix": "RE-150 In", "channel": "AN 3", "param": "pan"},
+        "value": "{{param}}",
+    }]}
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.25)
+    assert ("/1/pan2", 0.25) in fake_osc.sent
+
+
+def test_routing_label_shows_non_volume_param(make_bridge, fake_osc):
+    b = make_bridge({"m": {"steps": [{
+        "target": {"submix": "RE-150 In", "channel": "AN 3", "param": "mute"},
+        "value": "1.0",
+    }]}})
+    assert b.get_routing_label("m") == "AN 3 → RE-150 In (mute)"
