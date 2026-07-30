@@ -105,3 +105,23 @@ def test_na_strips_beyond_hardware_filtered_out():
     sends = channel_map["submixes"]["ADAT 1"]["sends"]
     assert "AN 3" in sends
     assert not [k for k in sends if "n.a." in k.lower()]
+
+
+def test_walk_saturation_labeled_past_last_submix():
+    """One consecutive duplicate = stereo pair half; further repeats mean
+    TotalMix is clamping past its last submix (seen live at indices 29-32)."""
+    class SaturatingFake(FakeTotalMix):
+        SUBMIXES = {
+            1: ("Main", {}),
+            2: ("ADAT 15/16", {}),  # pair: indices 2+3 share the label
+            3: ("ADAT 15/16", {}),
+        }
+
+    listener = OSCListener(0)
+    device = SaturatingFake(listener)
+    _, walk_log = discover_channel_map(device, listener,
+                                       submix_count=6, settle_s=0)
+    by_index = {e["index"]: e for e in walk_log}
+    assert by_index[3]["skipped"] == "duplicate label (stereo pair)"
+    for i in (4, 5, 6):  # clamped — device keeps reporting the last label
+        assert by_index[i]["skipped"] == "past last submix (label repeating)"

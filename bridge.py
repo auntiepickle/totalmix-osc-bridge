@@ -648,6 +648,8 @@ class TotalMixOSCBridge:
         wanted_ch = channel_name.lower()
 
         def find_strip(state):
+            # No logging in here — this runs as a wait predicate on every
+            # incoming message, so it would log once per evaluation
             current = (state.current_submix or "").strip().lower()
             if current != wanted:
                 return None
@@ -659,8 +661,6 @@ class TotalMixOSCBridge:
                     return strip
             for strip, data in sorted(strips.items()):
                 if self._names_cover(str(data.get("name", "")), channel_name):
-                    logger.info(f"   → pair-matched '{channel_name}' to strip "
-                                f"'{data.get('name')}' (stereo link changed)")
                     return strip
             return None
 
@@ -675,14 +675,23 @@ class TotalMixOSCBridge:
         if listener.wait_for(lambda st: find_strip(st) is not None, remaining):
             strip = find_strip(listener.state)
             if strip is not None:
+                strip_name = str(listener.state.submix_snapshot(
+                    listener.state.current_submix).get(row, {})
+                    .get(strip, {}).get("name", ""))
+                if strip_name.strip().lower() != wanted_ch:
+                    logger.info(f"   → pair-matched '{channel_name}' to strip "
+                                f"'{strip_name}' (stereo link changed)")
                 addr = f"/{row}/volume{strip}"
                 logger.info(f"   → live-resolved '{channel_name}' → strip {strip} ({addr})")
                 return index, addr, "resolved"
 
         strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
+        # Filter the placeholder strips past the hardware channel count —
+        # a 48-wide bank would otherwise bury the real names in 30x 'n.a.'
+        real = [d.get('name') for d in strips.values()
+                if str(d.get('name', '')).strip().lower() not in ('n.a.', 'n/a')]
         logger.error(f"   → channel '{channel_name}' is NOT in the live bank for "
-                     f"'{submix_name}' (strips: "
-                     f"{[d.get('name') for d in strips.values()]}) — refusing the "
+                     f"'{submix_name}' (live strips: {real}) — refusing the "
                      f"stored address, it may point at a different channel now")
         return index, None, "not_in_bank"
 

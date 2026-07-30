@@ -34,6 +34,8 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
     # cover every channel or discovery will only see the first bank.
     osc_client.send_message("/setBankStart", 0.0)
 
+    prev_label = None
+    dupe_run = 0
     for i in range(1, submix_count + 1):
         osc_client.send_message("/setSubmix", float(i))
         time.sleep(settle_s)
@@ -41,13 +43,19 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
         entry = {"index": i, "label": name}
         if not name or name.strip().lower() in EMPTY_NAMES:
             entry["skipped"] = "empty or no feedback"
+            dupe_run = 0
         elif any(n == name for _, n in found):
-            # Stereo-linked outputs occupy two consecutive indices that report
-            # the same label (e.g. /setSubmix 2 and 3 are both "AN 3/4").
-            # Keep walking — new submixes can follow a run of duplicates.
-            entry["skipped"] = "duplicate label (stereo pair)"
+            # One consecutive duplicate = the second half of a stereo-linked
+            # output (pairs occupy two indices). A longer run means the walk
+            # has saturated past the last real submix — TotalMix clamps
+            # out-of-range indices and keeps reporting the final label.
+            dupe_run = dupe_run + 1 if name == prev_label else 1
+            entry["skipped"] = ("duplicate label (stereo pair)" if dupe_run == 1
+                                else "past last submix (label repeating)")
         else:
             found.append((i, name))
+            dupe_run = 0
+        prev_label = name
         walk_log.append(entry)
         if progress_cb:
             progress_cb(i, submix_count, name)
