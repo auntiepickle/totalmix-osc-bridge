@@ -210,7 +210,7 @@
                     class="flex-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs py-1 rounded-lg transition-all">Send CC</button>
             </div>
             <div class="flex gap-2 items-center">
-                <input id="emu-val" type="range" min="0" max="127" value="127" class="flex-1 accent-orange-500" oninput="emuValInput()">
+                <input id="emu-val" type="range" min="0" max="127" value="127" class="flex-1 accent-orange-500" title="double-click resets to 127" oninput="emuValInput()" ondblclick="this.value=127; emuValInput()">
                 <span id="emu-val-label" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">127</span>
                 <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
                     title="Stream CC while dragging — like twisting a real knob">

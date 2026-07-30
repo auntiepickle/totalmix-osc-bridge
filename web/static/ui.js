@@ -523,8 +523,9 @@ function _modControls(name, i, step) {
     html += `<div class="flex gap-2 items-center">
       <span class="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">gate point</span>
       <input data-field="steps.${i}.operation.threshold" type="range" min="0" max="1" step="0.01" value="${t}"
-          class="flex-1 accent-orange-500"
-          oninput="document.getElementById('mod-thr-${name}-${i}').textContent = Math.round(this.value*100)+'%'">
+          class="flex-1 accent-orange-500" title="double-click resets to 50%"
+          oninput="document.getElementById('mod-thr-${name}-${i}').textContent = Math.round(this.value*100)+'%'"
+          ondblclick="this.value=0.5; document.getElementById('mod-thr-${name}-${i}').textContent='50%'">
       <span id="mod-thr-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${Math.round(t * 100)}%</span>
     </div>`;
   }
@@ -535,13 +536,15 @@ function _modControls(name, i, step) {
     html += `<div class="flex gap-2 items-center">
       <span class="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">sweep</span>
       <input data-field="steps.${i}.operation.range.0" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${lo}"
-          class="flex-1 accent-orange-500"
-          oninput="document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+          class="flex-1 accent-orange-500" title="double-click resets to ${def.fmt(def.min)}"
+          oninput="document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
+          ondblclick="this.value=${def.min}; document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
       <span id="mod-lo-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(lo)}</span>
       <span class="text-zinc-600 text-xs shrink-0">→</span>
       <input data-field="steps.${i}.operation.range.1" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${hi}"
-          class="flex-1 accent-orange-500"
-          oninput="document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+          class="flex-1 accent-orange-500" title="double-click resets to ${def.fmt(def.max)}"
+          oninput="document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
+          ondblclick="this.value=${def.max}; document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
       <span id="mod-hi-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(hi)}</span>
     </div>`;
   }
@@ -622,8 +625,9 @@ function _valueControl(name, i, step, nc, sc) {
   return `<div class="flex gap-2 items-center flex-1">
     <input data-field="steps.${i}.value" type="range"
         min="${def.min}" max="${def.max}" step="${def.step}" value="${val}"
-        class="flex-1 accent-orange-500"
-        oninput="document.getElementById('val-label-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+        class="flex-1 accent-orange-500" title="double-click resets to ${def.fmt(def.default)}"
+        oninput="document.getElementById('val-label-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
+        ondblclick="this.value=${def.default}; document.getElementById('val-label-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
     <span id="val-label-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(val)}</span>
     ${followBox}
   </div>`;
