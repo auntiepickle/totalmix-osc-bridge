@@ -63,6 +63,26 @@ function handleMIDIMessage(message) {
   // MIDI Clock (0xF8) — detect BPM from Cirklon/DAW timing clock
   if (status === 0xF8) { _processMIDIClock(); return; }
 
+  // MIDI-learn (#7): an armed learn callback consumes the next CC or note
+  // instead of firing macros — works with real devices and the emulator
+  if (window._midiLearn) {
+    const t = status & 0xF0;
+    const ch = (status & 0x0F) + 1;
+    let captured = null;
+    if (t === 0xB0) {
+      captured = { type: 'control_change', number: data1, channel: ch };
+    } else if (t === 0x90 || t === 0x80) {
+      captured = { type: (t === 0x90 && data2 > 0) ? 'note_on' : 'note_off',
+                   note: data1, channel: ch };
+    }
+    if (captured) {
+      const cb = window._midiLearn;
+      window._midiLearn = null;
+      cb(captured);
+      return;
+    }
+  }
+
   const msgType = status & 0xF0;
   const channel = (status & 0x0F) + 1;
 

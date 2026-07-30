@@ -510,6 +510,42 @@ const PARAM_DEFS = {
   },
 };
 
+// Global FX-section parameters (#5 phase 1) — fixed /3/... addresses, no
+// channel/submix scope. Device values are normalized 0..1; shown as % until
+// unit mappings are captured. Channel EQ pends its hardware scope check.
+const _pct = v => `${Math.round(v * 100)}%`;
+const _fxSlider = (label, addr, dflt = 0.5) => ({
+  widget: 'slider', min: 0, max: 1, step: 0.01, default: dflt, fmt: _pct,
+  mod: { range: true }, global: true, label, addr,
+});
+Object.assign(PARAM_DEFS, {
+  reverb_enable: { widget: 'toggle', default: 1.0, global: true,
+                   label: 'Reverb On/Off', addr: '/3/reverbEnable',
+                   options: [['1.0', 'On'], ['0.0', 'Off']],
+                   mod: { threshold: true } },
+  reverb_time:     _fxSlider('Reverb Time', '/3/reverbTime'),
+  reverb_volume:   _fxSlider('Reverb Volume', '/3/reverbVolume', 0.8),
+  reverb_width:    _fxSlider('Reverb Width', '/3/reverbWidth'),
+  reverb_predelay: _fxSlider('Reverb Predelay', '/3/reverbPredelay', 0.0),
+  echo_enable: { widget: 'toggle', default: 1.0, global: true,
+                 label: 'Echo On/Off', addr: '/3/echoEnable',
+                 options: [['1.0', 'On'], ['0.0', 'Off']],
+                 mod: { threshold: true } },
+  echo_time:     _fxSlider('Echo Time', '/3/echoDelaytime'),
+  echo_feedback: _fxSlider('Echo Feedback', '/3/echoFeedback', 0.2),
+  echo_volume:   _fxSlider('Echo Volume', '/3/echoVolume', 0.8),
+  echo_width:    _fxSlider('Echo Width', '/3/echoWidth'),
+});
+
+function _buildParamOptions(selected) {
+  const chan = ['volume', 'mute', 'pan'];
+  const chanOpts = chan.map(p =>
+    `<option value="${p}"${p === (selected || 'volume') ? ' selected' : ''}>${p[0].toUpperCase() + p.slice(1)}</option>`).join('');
+  const fxOpts = Object.entries(PARAM_DEFS).filter(([, d]) => d.global)
+    .map(([p, d]) => `<option value="${p}"${p === selected ? ' selected' : ''}>${d.label}</option>`).join('');
+  return `<optgroup label="Channel">${chanOpts}</optgroup><optgroup label="FX (global)">${fxOpts}</optgroup>`;
+}
+
 // Extra operation controls per parameter (#13): a mute LFO exposes its gate
 // threshold; continuous params expose the sweep range, formatted per param
 function _modControls(name, i, step) {
@@ -643,16 +679,38 @@ function _valueControl(name, i, step, nc, sc) {
 window.updateParamScope = function (name) {
   const paramSel  = document.getElementById(`routing-param-${name}`);
   const submixSel = document.getElementById(`routing-submix-${name}`);
+  const sendSel   = document.getElementById(`routing-send-${name}`);
   if (!paramSel || !submixSel) return;
+  const def = PARAM_DEFS[paramSel.value] || {};
   const isMute = paramSel.value === 'mute';
-  submixSel.disabled = isMute;
-  submixSel.title = isMute
-    ? 'Mute is global per channel — no submix applies' : '';
+  const isGlobal = !!def.global;
+  submixSel.disabled = isMute || isGlobal;
+  submixSel.title = isGlobal ? 'Global FX parameter — no routing applies'
+    : isMute ? 'Mute is global per channel — no submix applies' : '';
+  if (sendSel) {
+    sendSel.disabled = isGlobal;
+    sendSel.title = isGlobal ? 'Global FX parameter — no routing applies' : '';
+  }
 };
 
 window.applyRouting = function (name) {
   const submixSel = document.getElementById(`routing-submix-${name}`);
   const sendSel   = document.getElementById(`routing-send-${name}`);
+  const paramSel0 = document.getElementById(`routing-param-${name}`);
+  const def0 = PARAM_DEFS[paramSel0 ? paramSel0.value : ''] || {};
+  if (def0.global) {
+    // Global FX parameter — no channel/submix, fixed address fallback
+    const g = _harvestEditor(name);
+    g.steps = (g.steps || []).filter(s => s.osc !== '/setSubmix');
+    const pStep = g.steps.find(s => s.value === '{{param}}');
+    const gTarget = { param: paramSel0.value };
+    if (pStep) { pStep.target = gTarget; pStep.osc = def0.addr; }
+    else g.steps.push({ osc: def0.addr, target: gTarget, value: '{{param}}',
+                        operation: { type: 'ramp', bars: 2, bpm: 140,
+                                     range: [0, 1] } });
+    editDetail(name);
+    return;
+  }
   if (!submixSel || !sendSel || !sendSel.value) return;
   const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
   if (!sub) return;
@@ -747,6 +805,31 @@ window.removeEditorStep = function (name, i) {
   editDetail(name);
 };
 
+// MIDI-learn (#7): arm a one-shot capture — the next CC or note from any
+// connected device (or MIDIEmu) fills this trigger's type/number/channel
+window.learnTrigger = function (name, i) {
+  const btn = document.getElementById(`learn-btn-${name}-${i}`);
+  if (window._midiLearn) {          // second click cancels
+    window._midiLearn = null;
+    if (btn) btn.textContent = 'learn';
+    return;
+  }
+  if (btn) btn.textContent = 'waiting…';
+  window._midiLearn = (captured) => {
+    const m = _harvestEditor(name);
+    const trig = (m.midi_triggers || [])[i];
+    if (trig) {
+      trig.type = captured.type;
+      trig.channel = captured.channel;
+      delete trig.number;
+      delete trig.note;
+      if (captured.type === 'control_change') trig.number = captured.number;
+      else trig.note = captured.note;
+    }
+    editDetail(name);
+  };
+};
+
 window.addEditorTrigger = function (name) {
   const m = _harvestEditor(name);
   m.midi_triggers = m.midi_triggers || [];
@@ -790,7 +873,9 @@ function editDetail(name) {
     const targetHtml = step.target ? `<div class="flex gap-2 items-center">
         <span class="text-[10px] text-emerald-500/90 font-bold tracking-widest shrink-0" title="Resolved live from device feedback at fire time">LIVE</span>
         <span class="text-sm text-white font-mono flex-1 truncate">${
-          step.target.param === 'mute'
+          (PARAM_DEFS[step.target.param] || {}).global
+            ? `${_esc((PARAM_DEFS[step.target.param] || {}).label || step.target.param)} <span class="text-purple-400 text-xs">fx</span>`
+            : step.target.param === 'mute'
             ? `${_esc(step.target.channel ?? '')} <span class="text-purple-400 text-xs">mute</span>${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}`
             : `${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}${step.target.param && step.target.param !== 'volume' ? ` <span class="text-purple-400 text-xs">${_esc(step.target.param)}</span>` : ''}`
         }</span>
@@ -872,6 +957,9 @@ function editDetail(name) {
       <input data-field="${numField}" type="number" min="0" max="127" value="${_esc(numValue)}" class="${nc}">
       <span class="text-zinc-500 text-xs shrink-0">ch</span>
       <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
+      <button id="learn-btn-${name}-${i}" onclick="learnTrigger('${name}',${i})"
+          title="Capture the next CC or note from any device (or the MIDI emulator)"
+          class="shrink-0 text-xs px-2 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-cyan-400 hover:text-white transition-all">learn</button>
       <button onclick="removeEditorTrigger('${name}',${i})" title="Remove trigger"
           class="shrink-0 w-8 text-zinc-600 hover:text-red-400 transition-colors"><i class="fas fa-xmark"></i></button>
     </div>`;
@@ -898,9 +986,7 @@ function editDetail(name) {
       <div class="shrink-0">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Parameter</div>
         <select id="routing-param-${name}" onchange="updateParamScope('${name}')" class="${sc}">
-          <option value="volume"${(routing.param || 'volume') === 'volume' ? ' selected' : ''}>Volume</option>
-          <option value="mute"${routing.param === 'mute' ? ' selected' : ''}>Mute</option>
-          <option value="pan"${routing.param === 'pan' ? ' selected' : ''}>Pan</option>
+          ${_buildParamOptions(routing.param)}
         </select>
       </div>
       <button onclick="applyRouting('${name}')" title="Store this routing by name — the strip index is resolved live from device feedback when the macro fires"

@@ -400,3 +400,27 @@ def test_routing_label_mute_has_no_submix_scope(make_bridge, fake_osc):
         "value": "1.0",
     }]}})
     assert b.get_routing_label("m") == "AN 3 (mute)"
+
+
+def test_global_fx_param_resolves_to_fixed_address(make_bridge, fake_osc):
+    """FX-section params (#5 phase 1) have fixed global addresses — no
+    submix, no channel, no feedback required, works on a cold bridge."""
+    macro = {"steps": [{
+        "target": {"param": "reverb_time"},
+        "value": "{{param}}",
+        "operation": {"type": "ramp", "duration": 0.2, "steps_per_sec": 20,
+                      "range": [0.3, 0.7]},
+    }]}
+    b = make_bridge({"m": macro})
+    b.run_macro("m", 1.0)  # no listener, no channel map needed
+    addrs = {a for a, _ in fake_osc.sent}
+    assert addrs == {"/3/reverbTime"}
+    values = [v for _, v in fake_osc.sent]
+    assert min(values) >= 0.3 - 1e-9 and max(values) <= 0.7 + 1e-9
+
+
+def test_global_fx_routing_label(make_bridge, fake_osc):
+    b = make_bridge({"m": {"steps": [{
+        "target": {"param": "echo_feedback"}, "value": "0.4",
+    }]}})
+    assert b.get_routing_label("m") == "FX: Echo Feedback"

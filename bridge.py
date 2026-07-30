@@ -200,6 +200,9 @@ class TotalMixOSCBridge:
         # Name-based targets are authoritative — they never go stale
         for step in steps:
             t = step.get("target")
+            if t and str(t.get("param", "")).lower() in self.GLOBAL_FX_PARAMS:
+                pretty = str(t["param"]).replace("_", " ").title()
+                return f"FX: {pretty}"
             if t and t.get("channel"):
                 param = str(t.get("param", "volume")).lower()
                 if param == "mute":
@@ -590,6 +593,23 @@ class TotalMixOSCBridge:
         logger.warning(f"   → {what} not confirmed within {timeout}s — proceeding")
         return False
 
+    # Global FX-section parameters (#5 phase 1). These addresses are FIXED —
+    # captured from live feedback, page 3, no channel/submix/row scope — so
+    # resolution is deterministic and needs no feedback at all. Channel EQ is
+    # NOT here: its scope needs a hardware measurement first (design law).
+    GLOBAL_FX_PARAMS = {
+        "reverb_enable":   "/3/reverbEnable",
+        "reverb_time":     "/3/reverbTime",
+        "reverb_volume":   "/3/reverbVolume",
+        "reverb_width":    "/3/reverbWidth",
+        "reverb_predelay": "/3/reverbPredelay",
+        "echo_enable":     "/3/echoEnable",
+        "echo_time":       "/3/echoDelaytime",
+        "echo_feedback":   "/3/echoFeedback",
+        "echo_volume":     "/3/echoVolume",
+        "echo_width":      "/3/echoWidth",
+    }
+
     @staticmethod
     def _param_address(param: str, strip) -> str:
         """OSC address for a parameter on a live-resolved strip. All are
@@ -649,6 +669,11 @@ class TotalMixOSCBridge:
         channel_name = str(target.get("channel", "")).strip()
         row = str(target.get("row", 1))
         param = str(target.get("param", "volume")).strip().lower()
+        if param in self.GLOBAL_FX_PARAMS:
+            # Fixed global address — no submix, no channel, no feedback needed
+            addr = self.GLOBAL_FX_PARAMS[param]
+            logger.info(f"   → target: global FX '{param}' → {addr}")
+            return None, addr, "resolved"
         if param == "mute":
             # Mute is GLOBAL-per-channel (hardware-verified, #4/#10): every
             # submix's bank yields the same strip index, so no /setSubmix is
