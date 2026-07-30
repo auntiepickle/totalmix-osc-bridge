@@ -51,11 +51,14 @@ fi
 echo "ok: $COUNT distinct OSC addresses captured"
 echo "$STATE" | { python3 -c 'import json,sys; d=json.load(sys.stdin); print("current submix:", d["current_submix"]); print("submixes seen:", list(d["submixes"]))' 2>/dev/null || true; }
 
-say "4/5 Discovery walk (~35s — TotalMix will flip through submixes)"
+say "4/5 Discovery walk (up to ~100s — includes per-submix playback capture)"
 curl -sf -X POST "$BASE/api/device/discover" \
   -H 'Content-Type: application/json' -d '{"submix_count": 32, "settle_s": 1.0}' | json \
   || fail "could not start discovery (409 = already running; wait and retry)"
-for _ in $(seq 1 30); do
+# Playback capture triples the per-real-submix time — poll generously and
+# stop on completion, not on a guessed duration (bailing early once left
+# --apply silently unexecuted at 29/32)
+for _ in $(seq 1 90); do
   sleep 2
   STATUS=$(curl -sf "$BASE/api/device/discovery" | { python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' 2>/dev/null || echo unknown; })
   [ "$STATUS" != "running" ] && break

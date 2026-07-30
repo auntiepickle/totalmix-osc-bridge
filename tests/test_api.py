@@ -159,3 +159,18 @@ def test_status_reports_bank_width_fields():
     assert "osc_bank_width" in body          # None without a listener
     assert body["osc_bank_width"] is None
     assert body["channel_map_max_channel"] >= 0
+
+
+def test_map_strip_count_counts_input_row_only(monkeypatch):
+    """Playback sends must not inflate the stale-map comparison — counting
+    them masked a real stale map (17 live vs '39 total' stayed silent)."""
+    monkeypatch.setattr(bridge_module.bridge, "channel_map", {
+        "submixes": {"Main": {"index": 1, "name": "Main", "sends": {
+            "AN 1": {"row": 1, "channel": 1, "osc_address": "/1/volume1"},
+            "AN 2": {"row": 1, "channel": 2, "osc_address": "/1/volume2"},
+            "AN 1/2 (playback)": {"row": 2, "channel": 1,
+                                  "osc_address": "/1/volume1"},
+        }}},
+    })
+    body = client.get("/api/status").json()
+    assert body["channel_map_strip_count"] == 2  # input rows only

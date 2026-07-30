@@ -150,10 +150,13 @@ async def get_status():
          for s in sub.get("sends", {}).values()),
         default=0,
     )
-    # How many channels the map knows per submix — if the live device has
-    # more real strips, the map is STALE and under-covers the rig
+    # How many INPUT-row channels the map knows per submix — compared against
+    # live_strip_count, which only ever reflects the currently selected row
+    # (input in practice). Counting playback sends here masked a real stale
+    # map once: 17 live vs '39 total' stayed silent while 16 mapped input
+    # channels didn't exist on the device.
     map_strip_count = max(
-        (len(sub.get("sends", {}))
+        (sum(1 for s in sub.get("sends", {}).values() if s.get("row", 1) == 1)
          for sub in channel_map.get("submixes", {}).values()),
         default=0,
     )
@@ -353,6 +356,7 @@ class DiscoverBody(BaseModel):
     # well past 16 (seen live: ADAT outputs above index 16 on a UFX II)
     submix_count: int = 32
     settle_s: float = 1.0
+    include_playback: bool = True
 
 
 @app.post("/api/device/discover")
@@ -383,7 +387,7 @@ async def start_discovery(body: DiscoverBody = DiscoverBody()):
             channel_map, walk_log = discover_channel_map(
                 bridge.osc_client, bridge.osc_listener,
                 submix_count=body.submix_count, settle_s=body.settle_s,
-                progress_cb=_progress,
+                progress_cb=_progress, include_playback=body.include_playback,
             )
             draft_path = os.path.join(os.path.dirname(__file__),
                                       "../discovered_channel_map.json")
@@ -409,8 +413,11 @@ async def start_discovery(body: DiscoverBody = DiscoverBody()):
             })
 
     threading.Thread(target=_run, daemon=True).start()
+    # Playback capture adds two extra settles per REAL submix; the real count
+    # is unknown up front, so estimate the worst case (every index real)
+    per_index = body.settle_s * (3 if body.include_playback else 1)
     return {"status": "started", "submix_count": body.submix_count,
-            "estimated_s": body.submix_count * body.settle_s}
+            "estimated_s": body.submix_count * per_index}
 
 
 @app.get("/api/device/discovery")
