@@ -152,7 +152,7 @@ async def patch_macro(macro_name: str, request: Request):
         data = await request.json()
         if macro_name not in bridge.mappings.get("macros", {}):
             raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
-        backup_json_files()
+        backup_json_files("mappings.json")
         bridge.mappings["macros"][macro_name] = data
         target = os.path.join(os.path.dirname(__file__), "../mappings.json")
         with open(target, "w") as f:
@@ -179,7 +179,7 @@ async def save_config_mappings(request: Request):
         data = await request.json()
         if "macros" not in data:
             raise HTTPException(status_code=400, detail="Invalid mappings.json: missing 'macros' key")
-        backup_json_files()
+        backup_json_files("mappings.json")
         target = os.path.join(os.path.dirname(__file__), "../mappings.json")
         with open(target, "w") as f:
             json.dump(data, f, indent=2)
@@ -208,7 +208,7 @@ async def save_config_channel_map(request: Request):
         data = await request.json()
         if "submixes" not in data:
             raise HTTPException(status_code=400, detail="Invalid channel_map: missing 'submixes' key")
-        backup_json_files()
+        backup_json_files("ufx2_channel_map.json")
         target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
         with open(target, "w") as f:
             json.dump(data, f, indent=2)
@@ -348,7 +348,7 @@ async def apply_discovery():
     state = bridge.discovery_state
     if state.get("status") != "done" or "channel_map" not in state:
         raise HTTPException(status_code=409, detail="No completed discovery to apply")
-    backup_json_files()
+    backup_json_files("ufx2_channel_map.json")
     target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
     with open(target, "w") as f:
         json.dump(state["channel_map"], f, indent=2)
@@ -375,12 +375,19 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ── File Upload + Auto-Backup ────────────────────────────────────────────────
 
-def backup_json_files():
-    """Auto-backup mappings + channel map before every upload."""
+def backup_json_files(files=("mappings.json", "ufx2_channel_map.json")):
+    """Auto-backup the config file(s) about to be overwritten.
+
+    Pass the specific filename being written — backing up both regardless
+    fills backups/ with redundant copies and makes a backup's timestamp
+    meaningless as an edit marker.
+    """
+    if isinstance(files, str):
+        files = (files,)
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_dir = os.path.join(os.path.dirname(__file__), "../backups")
     os.makedirs(backup_dir, exist_ok=True)
-    for fn in ["mappings.json", "ufx2_channel_map.json"]:
+    for fn in files:
         src = os.path.join(os.path.dirname(__file__), "../" + fn)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(backup_dir, f"{fn}.{timestamp}"))
@@ -392,7 +399,7 @@ async def upload_mappings(file: UploadFile = File(...)):
     if not file.filename.endswith(".json"):
         raise HTTPException(status_code=400, detail="Only .json files allowed")
     try:
-        backup_json_files()
+        backup_json_files("mappings.json")
         contents = await file.read()
         data = json.loads(contents)
         if "macros" not in data:
@@ -415,7 +422,7 @@ async def upload_channel_map(file: UploadFile = File(...)):
     if not file.filename.endswith(".json"):
         raise HTTPException(status_code=400, detail="Only .json files allowed")
     try:
-        backup_json_files()
+        backup_json_files("ufx2_channel_map.json")
         contents = await file.read()
         data = json.loads(contents)
         if "submixes" not in data:

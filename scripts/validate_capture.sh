@@ -64,21 +64,27 @@ RESULT=$(curl -sf "$BASE/api/device/discovery")
 [ "$STATUS" = "done" ] || { echo "$RESULT" | json; fail "discovery ended with status '$STATUS'"; }
 
 say "5/5 Result"
-echo "$RESULT" | { python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-print(f"submixes discovered: {d[\"submixes\"]}")
+# heredoc, not python3 -c: backslash-escaped quotes inside a single-quoted -c
+# string reach Python as literal backslashes and SyntaxError silently
+if ! RESULT_JSON="$RESULT" python3 <<'PYEOF'
+import json, os
+d = json.loads(os.environ["RESULT_JSON"])
+print(f"submixes discovered: {d['submixes']}")
 for e in d["walk_log"]:
-    mark = f"SKIPPED ({e[\"skipped\"]})" if "skipped" in e else "ok"
-    print(f"  index {e[\"index\"]:>2}: {str(e.get(\"label\")):<20} {mark}")
+    mark = f"SKIPPED ({e['skipped']})" if "skipped" in e else "ok"
+    print(f"  index {e['index']:>2}: {str(e.get('label')):<20} {mark}")
 fallback = sum(1 for s in d["channel_map"]["submixes"].values()
                for name in s["sends"] if name.startswith("Row "))
 total = sum(len(s["sends"]) for s in d["channel_map"]["submixes"].values())
 print(f"sends: {total} total, {fallback} with fallback names")
 if fallback:
-    print("NOTE: fallback names mean tracknames were not parsed — share")
+    print("NOTE: fallback names mean tracknames were not parsed - share")
     print("      /api/device/state raw_addresses so the parser can be adapted.")
-' 2>/dev/null || echo "$RESULT" | json | head -60; }
+PYEOF
+then
+  echo "(summary rendering failed - raw result follows)"
+  echo "$RESULT" | json | head -60
+fi
 echo
 echo "Draft saved to discovered_channel_map.json"
 
