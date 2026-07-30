@@ -491,14 +491,18 @@ const PARAM_DEFS = {
     fmt: v => `${Math.round(v * 100)}%`,
   },
   pan: {
-    widget: 'slider', min: 0, max: 1, step: 0.01, default: 0.5,
+    // step 0.005: a 0.01 step moved the ×200 L/R readout in twos, making
+    // odd values (L31) unreachable by dragging
+    widget: 'slider', min: 0, max: 1, step: 0.005, default: 0.5,
     fmt: v => {
       const d = Math.round((v - 0.5) * 200);
       return d === 0 ? 'C' : d < 0 ? `L${-d}` : `R${d}`;
     },
   },
   mute: {
-    widget: 'toggle', default: 1.0,
+    // default UNMUTED: unchecking 'from trigger' must not arm a mute as a
+    // side effect of an editor interaction
+    widget: 'toggle', default: 0.0,
     options: [['1.0', 'Muted'], ['0.0', 'Unmuted']],
   },
 };
