@@ -746,9 +746,11 @@ def test_eq_output_first_output_offset_zero(make_bridge, fake_osc):
     assert ("/2/eqGain1", 0.6) in fake_osc.sent
 
 
-def test_eq_output_refuses_mono_output_layouts(make_bridge, fake_osc):
-    """The 23-strip layout has MONO outputs (index deltas of 1 mid-list) —
-    the all-stereo rule is unverified there, so aiming must refuse."""
+def test_eq_output_mono_layout_aims_at_index(make_bridge, fake_osc):
+    """Hardware-verified on the mono-containing layout: RE-150 In (index
+    14) reads at offset 14 ONLY, with mono ADAT 2 owning 15 — mono and
+    stereo alike, offset = walked index. Here the mono-adjacent stereo
+    output at index 4 aims at 4."""
     mono_map = {"submixes": {
         "Main":   {"index": 1, "name": "Main",   "sends": {}},
         "AN 3/4": {"index": 2, "name": "AN 3/4", "sends": {}},
@@ -762,11 +764,38 @@ def test_eq_output_refuses_mono_output_layouts(make_bridge, fake_osc):
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
-        "target": {"channel": "Solo A", "param": "eq_gain_1", "row": 3},
+        "target": {"channel": "Solo B", "param": "eq_gain_1", "row": 3},
     }]}})
     b.channel_map = mono_map
     b.osc_listener = listener
     b.osc_client = MonoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.5)
+    assert ("/1/busOutput", 1.0) in fake_osc.sent
+    assert ("/setBankStart", 5.0) in fake_osc.sent  # mono output, index 5
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+
+
+def test_eq_output_refuses_malformed_index_spacing(make_bridge, fake_osc):
+    """A delta above 2 cannot be a real output width — the map is
+    malformed or from a different device state. Refuse."""
+    weird_map = {"submixes": {
+        "Main":   {"index": 1, "name": "Main",   "sends": {}},
+        "AN 3/4": {"index": 2, "name": "AN 3/4", "sends": {}},
+        "Ghost":  {"index": 7, "name": "Ghost",  "sends": {}},  # delta 5
+    }}
+
+    class WeirdOutputsTotalMix(LiveFakeTotalMix):
+        OUTPUT_NAMES = ["Main", "AN 3/4", "Ghost"]
+
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "Ghost", "param": "eq_gain_1", "row": 3},
+    }]}})
+    b.channel_map = weird_map
+    b.osc_listener = listener
+    b.osc_client = WeirdOutputsTotalMix(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.5)
     assert "/2/eqGain1" not in fake_osc.addresses()

@@ -819,17 +819,16 @@ class TotalMixOSCBridge:
                          f"and outputs only)")
             return None, None, "not_in_bank"
         if param in self.CHANNEL_DETAIL_PARAMS and row == "3":
-            # OUTPUT EQ (hardware-measured 2026-08-01): page 2 follows the
-            # selected row, and the page-2 offset is the output's first hw
-            # channel — which IS the walked submix index, except the first
-            # output where the index is clamped to 1 (Main occupies
-            # offsets 0-1 with index 1; RE-150 In index 14 measured at
-            # offsets 14-15). ENABLED only for all-stereo output layouts
-            # (index deltas [1,2,2,...]), where this equals the verified
-            # 2*(pos-1) rule; layouts with MONO outputs (later deltas of
-            # 1, e.g. the 23-strip layout) REFUSE until the unclamped-
-            # index rule is verified there. Width assumptions have
-            # mis-aimed three times — equivalence-or-refuse only.
+            # OUTPUT EQ (hardware-measured on BOTH layout types): page 2
+            # follows the selected row, and the page-2 offset is the
+            # output's first hw channel — the walked submix index, except
+            # the first output whose index is clamped to 1 (aims 0).
+            # Verified on an all-stereo layout (Main 0-1, RE-150 In 14-15)
+            # AND on a mono-containing one (RE-150 In index 14 at offset
+            # 14 ONLY, mono ADAT 2 owning 15; Main 0-1; stereo Phones 1 at
+            # 8-9). Mono and stereo alike: offset = index. Index sanity
+            # (first == 1, deltas 1 or 2) still gates against a malformed
+            # map; the live-outputs match gates against a stale one.
             subs = (self.channel_map or {}).get("submixes", {})
             entries = sorted(
                 ((int(s["index"]), str(s.get("name", "")).strip())
@@ -843,14 +842,13 @@ class TotalMixOSCBridge:
                 return None, None, "not_in_bank"
             indices = [i for i, _ in entries]
             deltas = [b - a for a, b in zip(indices, indices[1:])]
-            uniform_stereo = (indices[0] == 1
-                              and (not deltas or deltas[0] == 1)
-                              and all(d == 2 for d in deltas[1:]))
-            if not uniform_stereo:
-                logger.error(f"   → output layout has non-stereo spacing "
-                             f"(index deltas {deltas}) — output EQ aiming "
-                             f"is only verified for all-stereo layouts, "
-                             f"refusing rather than mis-aim")
+            sane = (indices[0] == 1
+                    and all(d in (1, 2) for d in deltas))
+            if not sane:
+                logger.error(f"   → output index spacing looks malformed "
+                             f"(first {indices[0]}, deltas {deltas}) — "
+                             f"refusing rather than mis-aim; re-run "
+                             f"discovery")
                 return None, None, "not_in_bank"
             live_outputs = self._live_output_names()
             map_outputs = {n for _, n in entries}
@@ -864,8 +862,8 @@ class TotalMixOSCBridge:
             self.osc_client.send_message("/setBankStart", float(offset))
             addr = self.CHANNEL_DETAIL_PARAMS[param]
             logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
-                        f"hw offset {offset} (measured rule, all-stereo "
-                        f"layout) → aimed page 2 ({addr})")
+                        f"hw offset {offset} (offset = walked index, "
+                        f"first output = 0) → aimed page 2 ({addr})")
             return idx_of[channel_name], addr, "resolved"
         if channel_scoped:
             # Mute is GLOBAL-per-channel (hardware-verified, #4/#10) and
