@@ -690,6 +690,18 @@ class TotalMixOSCBridge:
         "eq_freq_3":   "/2/eqFreq3",
         "eq_q_3":      "/2/eqQ3",
         "lowcut_freq": "/2/lowcutFreq",
+        # Dynamics / Auto-Level / input stage (#20) — same page-2 aiming.
+        # First tranche: addresses confirmed in the original 90-address
+        # probe. The full Dynamics inventory (comp/exp threshold, ratio,
+        # attack, release, enable) lands after the device inventory round.
+        "dyn_gain":       "/2/compexpGain",
+        "alev_enable":    "/2/alevEnable",
+        "alev_headroom":  "/2/alevHeadroom",
+        "alev_maxgain":   "/2/alevMaxgain",
+        "input_gain":     "/2/gain",
+        "input_gain_r":   "/2/gainRight",
+        "phase":          "/2/phase",
+        "phase_r":        "/2/phaseRight",
     }
 
     @staticmethod

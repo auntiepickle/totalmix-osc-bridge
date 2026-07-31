@@ -817,3 +817,21 @@ def test_eq_output_refuses_on_layout_drift(make_bridge, fake_osc):
     b.run_macro("m", 0.5)
     assert "/2/eqGain1" not in fake_osc.addresses()
     assert "/setBankStart" not in fake_osc.addresses()
+
+
+def test_dynamics_params_share_eq_aiming(make_bridge, fake_osc):
+    """#20 first tranche: dynamics/auto-level/gain/phase are page-2
+    channel-detail params — same verified-width aiming, refusal and bank
+    restore as EQ, just different addresses."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/2/compexpGain", "value": "0.7",
+        "target": {"channel": "ADAT 5/6", "param": "dyn_gain"},
+    }]}, widths=VERIFIED_WIDTHS)
+    b.run_macro("m", 0.5)
+    assert ("/setBankStart", 4.0) in fake_osc.sent
+    assert ("/2/compexpGain", 0.7) in fake_osc.sent
+    # and the whole class is registered
+    from bridge import TotalMixOSCBridge
+    for p in ("dyn_gain", "alev_enable", "alev_headroom", "alev_maxgain",
+              "input_gain", "input_gain_r", "phase", "phase_r"):
+        assert p in TotalMixOSCBridge.CHANNEL_DETAIL_PARAMS

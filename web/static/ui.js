@@ -590,15 +590,37 @@ Object.assign(PARAM_DEFS, {
   lowcut_freq: _eqSlider('Low Cut Freq',   '/2/lowcutFreq', 0.0),
 });
 
+// Dynamics / Auto-Level / input stage (#20) — same page-2 machinery as EQ.
+// First tranche (probe-confirmed addresses); comp/exp threshold, ratio,
+// attack, release follow once the device inventory round lands.
+const _detailToggle = (label, addr, dflt = 0.0) => ({
+  widget: 'toggle', default: dflt, channelDetail: true, label, addr,
+  options: [['1.0', 'On'], ['0.0', 'Off']], mod: { threshold: true },
+});
+Object.assign(PARAM_DEFS, {
+  dyn_gain:      _eqSlider('Dynamics Gain',       '/2/compexpGain'),
+  alev_enable:   _detailToggle('Auto Level On/Off', '/2/alevEnable'),
+  alev_headroom: _eqSlider('Auto Level Headroom', '/2/alevHeadroom'),
+  alev_maxgain:  _eqSlider('Auto Level Max Gain', '/2/alevMaxgain'),
+  input_gain:    _eqSlider('Input Gain',          '/2/gain', 0.0),
+  input_gain_r:  _eqSlider('Input Gain R',        '/2/gainRight', 0.0),
+  phase:         _detailToggle('Phase Invert',    '/2/phase'),
+  phase_r:       _detailToggle('Phase Invert R',  '/2/phaseRight'),
+});
+
 function _buildParamOptions(selected) {
   const chan = ['volume', 'mute', 'pan'];
   const chanOpts = chan.map(p =>
     `<option value="${p}"${p === (selected || 'volume') ? ' selected' : ''}>${p[0].toUpperCase() + p.slice(1)}</option>`).join('');
   const fxOpts = Object.entries(PARAM_DEFS).filter(([, d]) => d.global)
     .map(([p, d]) => `<option value="${p}"${p === selected ? ' selected' : ''}>${d.label}</option>`).join('');
-  const eqOpts = Object.entries(PARAM_DEFS).filter(([, d]) => d.channelDetail)
-    .map(([p, d]) => `<option value="${p}"${p === selected ? ' selected' : ''}>${d.label}</option>`).join('');
-  return `<optgroup label="Channel">${chanOpts}</optgroup><optgroup label="Channel EQ">${eqOpts}</optgroup><optgroup label="FX (global)">${fxOpts}</optgroup>`;
+  const _opt = ([p, d]) => `<option value="${p}"${p === selected ? ' selected' : ''}>${d.label}</option>`;
+  const isEq = p => p.startsWith('eq_') || p === 'lowcut_freq';
+  const eqOpts = Object.entries(PARAM_DEFS)
+    .filter(([p, d]) => d.channelDetail && isEq(p)).map(_opt).join('');
+  const dynOpts = Object.entries(PARAM_DEFS)
+    .filter(([p, d]) => d.channelDetail && !isEq(p)).map(_opt).join('');
+  return `<optgroup label="Channel">${chanOpts}</optgroup><optgroup label="Channel EQ">${eqOpts}</optgroup><optgroup label="Channel Dynamics / Input">${dynOpts}</optgroup><optgroup label="FX (global)">${fxOpts}</optgroup>`;
 }
 
 // Extra operation controls per parameter (#13): a mute LFO exposes its gate
