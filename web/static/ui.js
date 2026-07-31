@@ -628,6 +628,16 @@ Object.assign(PARAM_DEFS, {
   alev_risetime: _unitSlider('Auto Level Rise',     '/2/alevRisetime',
                              v => `${(0.1 + 9.8 * v).toFixed(1)} s`),
   lowcut_enable: _detailToggle('Low Cut On/Off',    '/2/lowcutEnable'),
+  // Four-position enum, hardware-mapped (#20; device wording — Bell not
+  // Peak). eqType2 does not exist: band 2 is always Bell.
+  eq_type_1: { widget: 'toggle', default: 0.0, channelDetail: true,
+               label: 'EQ Band 1 Type', addr: '/2/eqType1',
+               options: [['0.0', 'Bell'], ['0.3333', 'Shelf'],
+                         ['0.6667', 'High Pass'], ['1.0', 'Low Pass']] },
+  eq_type_3: { widget: 'toggle', default: 0.0, channelDetail: true,
+               label: 'EQ Band 3 Type', addr: '/2/eqType3',
+               options: [['0.0', 'Bell'], ['0.3333', 'Shelf'],
+                         ['0.6667', 'High Pass'], ['1.0', 'Low Pass']] },
   lowcut_grade:  _unitSlider('Low Cut Slope',       '/2/lowcutGrade',
                              v => `${6 + Math.round(v * 3) * 6} dB/oct`, 1.0),
   input_gain:    _eqSlider('Input Gain',            '/2/gain', 0.0),

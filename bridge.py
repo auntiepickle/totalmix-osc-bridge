@@ -705,6 +705,8 @@ class TotalMixOSCBridge:
         "alev_risetime":  "/2/alevRisetime",
         "lowcut_enable":  "/2/lowcutEnable",
         "lowcut_grade":   "/2/lowcutGrade",
+        "eq_type_1":      "/2/eqType1",
+        "eq_type_3":      "/2/eqType3",
         "alev_enable":    "/2/alevEnable",
         "alev_headroom":  "/2/alevHeadroom",
         "alev_maxgain":   "/2/alevMaxgain",
