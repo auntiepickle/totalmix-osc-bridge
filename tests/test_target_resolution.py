@@ -697,10 +697,11 @@ def test_eq_refused_on_playback_row(make_bridge, fake_osc):
     assert "/setBankStart" not in fake_osc.addresses()
 
 
-def test_eq_output_row_aims_by_submix_index(make_bridge, fake_osc):
-    """Output EQ: output strips ARE the submixes and the walked index is the
-    1-based hardware position (order verified 15/15) — page-2 offset is
-    index-1, no width map involved. Guarded by the live-outputs match."""
+def test_eq_output_row_refused_pending_width_map(make_bridge, fake_osc):
+    """Output EQ is GATED OFF: page 2 follows the row, but index-based
+    aiming was hardware-DISPROVEN (RE-150 In: measured offset 14, index-1
+    gave 13 - outputs are 2 hw channels wide; offset = cumulative output
+    width). Row-3 EQ refuses until a measured output width map exists."""
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
@@ -711,26 +712,6 @@ def test_eq_output_row_aims_by_submix_index(make_bridge, fake_osc):
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.5)
-    assert ("/1/busOutput", 1.0) in fake_osc.sent
-    assert ("/setBankStart", 13.0) in fake_osc.sent   # index 14 -> offset 13
-    assert ("/2/eqGain1", 0.6) in fake_osc.sent
-    # input row restored after the output-row step
-    assert fake_osc.sent[-1] == ("/1/busInput", 1.0) or \
-           ("/1/busInput", 1.0) in fake_osc.sent[-3:]
-
-
-def test_eq_output_row_refuses_on_layout_drift(make_bridge, fake_osc):
-    """A stale output index would write a DIFFERENT channel's EQ silently —
-    refuse when the live output row no longer matches the map."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": [{
-        "osc": "/2/eqGain1", "value": "0.6",
-        "target": {"channel": "RE-150 In", "param": "eq_gain_1", "row": 3},
-    }]}})
-    b.channel_map = CHANNEL_MAP
-    b.osc_listener = listener
-    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    b.run_macro("m", 0.5)
     assert "/2/eqGain1" not in fake_osc.addresses()
     assert "/setBankStart" not in fake_osc.addresses()
+    assert "/setSubmix" not in fake_osc.addresses()

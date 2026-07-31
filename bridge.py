@@ -819,32 +819,22 @@ class TotalMixOSCBridge:
                          f"and outputs only)")
             return None, None, "not_in_bank"
         if param in self.CHANNEL_DETAIL_PARAMS and row == "3":
-            # OUTPUT-channel EQ: output strips ARE the submixes, and the
-            # walked submix index IS the output's 1-based hardware position
-            # (output-row order matches index order, hardware-verified
-            # 15/15) — so the page-2 bank offset is exactly index-1. No
-            # width map involved, unlike the input row.
-            idx = self._submix_index_by_name(channel_name)
-            if idx is None:
-                logger.error(f"   → output '{channel_name}' not in the "
-                             f"channel map — cannot aim page 2, refusing")
-                return None, None, "not_in_bank"
-            live_outputs = self._live_output_names()
-            map_outputs = {str(n).strip() for n in
-                           (self.channel_map or {}).get("submixes", {})}
-            if live_outputs is None or live_outputs != map_outputs:
-                logger.error(f"   → live output row unknown or changed since "
-                             f"the map was captured — refusing page-2 aim "
-                             f"for output '{channel_name}' (a stale index "
-                             f"would write a different channel's EQ)")
-                return None, None, "not_in_bank"
-            self.osc_client.send_message("/1/busOutput", 1.0)
-            self.osc_client.send_message("/setBankStart", float(idx - 1))
-            addr = self.CHANNEL_DETAIL_PARAMS[param]
-            logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
-                        f"submix index {idx}, hw position {idx - 1} → aimed "
-                        f"page 2 ({addr})")
-            return idx, addr, "resolved"
+            # OUTPUT EQ is GATED OFF. Page 2 does follow the selected row
+            # (hardware-verified with a discriminator EQ), but the aiming
+            # rule is NOT the submix index: outputs occupy TWO hw channels
+            # each and the measured offset for RE-150 In (output pos 8,
+            # index 14) is 14 — cumulative output WIDTH, not index-1. The
+            # shipped index-1 rule mis-aimed every output; the third time
+            # a width assumption produced a wrong aim (label inference,
+            # the 2x-strips bound, now this). Aiming needs a layout-keyed
+            # OUTPUT width map, measured like the input one — refuse until
+            # it exists.
+            logger.error(f"   → output EQ is disabled pending a measured "
+                         f"output width map — refusing page-2 aim for "
+                         f"'{channel_name}' (index-based aiming was "
+                         f"hardware-DISPROVEN: it writes a different "
+                         f"channel's EQ)")
+            return None, None, "not_in_bank"
         if channel_scoped:
             # Mute is GLOBAL-per-channel (hardware-verified, #4/#10) and
             # channel-detail params (EQ etc.) address the CHANNEL, not a
