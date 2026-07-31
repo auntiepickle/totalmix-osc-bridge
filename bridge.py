@@ -575,13 +575,13 @@ class TotalMixOSCBridge:
                     self.osc_client.send_message("/setBankStart", 0.0)
                     logger.info("   → bank window restored to 0 after channel-detail step")
 
-            # Restore the input row if any step drove the playback row —
-            # /1/volume{N} is row-relative, so leaving playback selected
-            # would mis-route the next hardcoded-address macro
-            if any(str(s.get("target", {}).get("row", 1)) == "2"
+            # Restore the input row if any step drove the playback or
+            # output row — page-1 addresses are row-relative, so leaving
+            # another row selected would mis-route the next macro
+            if any(str(s.get("target", {}).get("row", 1)) in ("2", "3")
                    for s in macro.get("steps", []) if "target" in s):
                 self.osc_client.send_message("/1/busInput", 1.0)
-                logger.info("   → input row restored after playback-row step")
+                logger.info("   → input row restored after playback/output-row step")
 
             # === GUARANTEED HA SYNC ===
             if self.mqtt_client:
@@ -810,6 +810,41 @@ class TotalMixOSCBridge:
             return None, addr, "resolved"
         channel_scoped = (param == "mute"
                           or param in self.CHANNEL_DETAIL_PARAMS)
+        if param in self.CHANNEL_DETAIL_PARAMS and row == "2":
+            # EQ/channel-detail exists on hardware inputs and outputs but
+            # NOT on software playback (user-reported, device has no such
+            # page) — an aimed write would land on a real channel instead
+            logger.error(f"   → '{param}' does not exist on the playback "
+                         f"row — refusing (EQ lives on hardware inputs "
+                         f"and outputs only)")
+            return None, None, "not_in_bank"
+        if param in self.CHANNEL_DETAIL_PARAMS and row == "3":
+            # OUTPUT-channel EQ: output strips ARE the submixes, and the
+            # walked submix index IS the output's 1-based hardware position
+            # (output-row order matches index order, hardware-verified
+            # 15/15) — so the page-2 bank offset is exactly index-1. No
+            # width map involved, unlike the input row.
+            idx = self._submix_index_by_name(channel_name)
+            if idx is None:
+                logger.error(f"   → output '{channel_name}' not in the "
+                             f"channel map — cannot aim page 2, refusing")
+                return None, None, "not_in_bank"
+            live_outputs = self._live_output_names()
+            map_outputs = {str(n).strip() for n in
+                           (self.channel_map or {}).get("submixes", {})}
+            if live_outputs is None or live_outputs != map_outputs:
+                logger.error(f"   → live output row unknown or changed since "
+                             f"the map was captured — refusing page-2 aim "
+                             f"for output '{channel_name}' (a stale index "
+                             f"would write a different channel's EQ)")
+                return None, None, "not_in_bank"
+            self.osc_client.send_message("/1/busOutput", 1.0)
+            self.osc_client.send_message("/setBankStart", float(idx - 1))
+            addr = self.CHANNEL_DETAIL_PARAMS[param]
+            logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
+                        f"submix index {idx}, hw position {idx - 1} → aimed "
+                        f"page 2 ({addr})")
+            return idx, addr, "resolved"
         if channel_scoped:
             # Mute is GLOBAL-per-channel (hardware-verified, #4/#10) and
             # channel-detail params (EQ etc.) address the CHANNEL, not a

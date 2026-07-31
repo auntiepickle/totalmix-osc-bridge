@@ -677,3 +677,60 @@ def test_raw_setsubmix_blind_listener_aborts_macro(make_bridge, fake_osc):
     b.run_macro("m", 0.8)  # no listener at all
     assert "/setSubmix" not in fake_osc.addresses()
     assert "/1/volume3" not in fake_osc.addresses()
+
+
+def test_eq_refused_on_playback_row(make_bridge, fake_osc):
+    """EQ/channel-detail exists on hardware inputs and outputs, NOT on the
+    software playback row (user-reported) — an aimed page-2 write from a
+    playback target would land on a real channel's EQ. Refuse."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "AN 1/2", "param": "eq_gain_1", "row": 2},
+    }]}})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.5)
+    assert "/2/eqGain1" not in fake_osc.addresses()
+    assert "/setBankStart" not in fake_osc.addresses()
+
+
+def test_eq_output_row_aims_by_submix_index(make_bridge, fake_osc):
+    """Output EQ: output strips ARE the submixes and the walked index is the
+    1-based hardware position (order verified 15/15) — page-2 offset is
+    index-1, no width map involved. Guarded by the live-outputs match."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "RE-150 In", "param": "eq_gain_1", "row": 3},
+    }]}})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.5)
+    assert ("/1/busOutput", 1.0) in fake_osc.sent
+    assert ("/setBankStart", 13.0) in fake_osc.sent   # index 14 -> offset 13
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+    # input row restored after the output-row step
+    assert fake_osc.sent[-1] == ("/1/busInput", 1.0) or \
+           ("/1/busInput", 1.0) in fake_osc.sent[-3:]
+
+
+def test_eq_output_row_refuses_on_layout_drift(make_bridge, fake_osc):
+    """A stale output index would write a DIFFERENT channel's EQ silently —
+    refuse when the live output row no longer matches the map."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "RE-150 In", "param": "eq_gain_1", "row": 3},
+    }]}})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.5)
+    assert "/2/eqGain1" not in fake_osc.addresses()
+    assert "/setBankStart" not in fake_osc.addresses()

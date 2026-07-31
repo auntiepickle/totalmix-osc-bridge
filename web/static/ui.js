@@ -452,8 +452,29 @@ window.updateSendPickerOptions = function (name, selectedChannel) {
   const submixSel = document.getElementById(`routing-submix-${name}`);
   const sendSel   = document.getElementById(`routing-send-${name}`);
   if (!submixSel || !sendSel) return;
-  const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
+  const subs = (window._channelMap || {}).submixes || {};
+  const sub = subs[submixSel.value];
   const sends = sub ? sub.sends || {} : {};
+  const paramSel = document.getElementById(`routing-param-${name}`);
+  const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
+  if (def.channelDetail) {
+    // EQ exists on hardware INPUTS and OUTPUTS, not software playback —
+    // exclude row-2 sends, and offer the outputs (= the submixes: one
+    // output strip per submix, aimed by walked index on the bridge side)
+    const inputs = Object.entries(sends)
+      .filter(([, s]) => (s.row ?? 1) !== 2)
+      .map(([sn]) => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)}</option>`)
+      .join('');
+    const outputs = Object.values(subs)
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+      .map(s => { const v = `__out3__${s.name}`;
+        return `<option value="${_esc(v)}"${v === selectedChannel ? ' selected' : ''}>${_esc(s.name)}</option>`; })
+      .join('');
+    sendSel.innerHTML =
+      `<optgroup label="Hardware inputs">${inputs}</optgroup>` +
+      `<optgroup label="Hardware outputs">${outputs}</optgroup>`;
+    return;
+  }
   sendSel.innerHTML = Object.keys(sends)
     .map(sn => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)}</option>`)
     .join('') || '<option value="">no channels discovered</option>';
@@ -465,6 +486,7 @@ function _currentRouting(m) {
   if (paramStep && paramStep.target) {
     return { submix: paramStep.target.submix,
              channel: paramStep.target.channel,
+             row: paramStep.target.row,
              param: paramStep.target.param || 'volume' };
   }
   // Legacy macros: reverse-lookup /setSubmix index and the raw address
@@ -722,6 +744,8 @@ window.updateParamScope = function (name) {
     sendSel.disabled = isGlobal;
     sendSel.title = isGlobal ? 'Global FX parameter — no routing applies' : '';
   }
+  // Re-filter the channel list: EQ excludes playback and offers outputs
+  updateSendPickerOptions(name, sendSel ? sendSel.value : undefined);
 };
 
 window.applyRouting = function (name) {
@@ -745,6 +769,25 @@ window.applyRouting = function (name) {
   if (!submixSel || !sendSel || !sendSel.value) return;
   const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
   if (!sub) return;
+  if (def0.channelDetail) {
+    // EQ targets a hardware channel directly: input picks resolve by name
+    // against the live bank (verified widths); output picks (__out3__) aim
+    // by walked submix index — row 3 tells the bridge which path
+    const isOut = sendSel.value.startsWith('__out3__');
+    const pickedSend = (sub.sends || {})[sendSel.value];
+    const target = { channel: isOut ? sendSel.value.slice(8)
+                              : ((pickedSend && pickedSend.name) || sendSel.value),
+                     param: paramSel0.value };
+    if (isOut) target.row = 3;
+    const m0 = _harvestEditor(name);
+    m0.steps = (m0.steps || []).filter(s => s.osc !== '/setSubmix');
+    const pStep0 = m0.steps.find(s => s.value === '{{param}}');
+    if (pStep0) { pStep0.target = target; pStep0.osc = def0.addr; }
+    else m0.steps.push({ osc: def0.addr, target,
+                         value: String(def0.default ?? 0.5) });
+    editDetail(name);
+    return;
+  }
   const send = (sub.sends || {})[sendSel.value];
 
   const m = _harvestEditor(name);
@@ -908,8 +951,8 @@ function editDetail(name) {
           (PARAM_DEFS[step.target.param] || {}).global
             ? `${_esc((PARAM_DEFS[step.target.param] || {}).label || step.target.param)} <span class="text-purple-400 text-xs">fx</span>`
             : step.target.param === 'mute'
-            ? `${_esc(step.target.channel ?? '')} <span class="text-purple-400 text-xs">mute</span>${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}`
-            : `${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : ''}${step.target.param && step.target.param !== 'volume' ? ` <span class="text-purple-400 text-xs">${_esc(step.target.param)}</span>` : ''}`
+            ? `${_esc(step.target.channel ?? '')} <span class="text-purple-400 text-xs">mute</span>${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : step.target.row === 3 ? ' <span class="text-zinc-500 text-xs">(output)</span>' : ''}`
+            : `${_esc(step.target.channel ?? '')} <span class="text-zinc-500">→</span> ${_esc(step.target.submix ?? '')}${step.target.row === 2 ? ' <span class="text-zinc-500 text-xs">(playback)</span>' : step.target.row === 3 ? ' <span class="text-zinc-500 text-xs">(output)</span>' : ''}${step.target.param && step.target.param !== 'volume' ? ` <span class="text-purple-400 text-xs">${_esc(step.target.param)}</span>` : ''}`
         }</span>
         <span class="text-[10px] text-zinc-600 shrink-0">set via Routing above</span>
       </div>` : '';
@@ -1113,7 +1156,8 @@ function editDetail(name) {
   // Populate the cascading send picker, restoring the macro's current send,
   // and set the submix dropdown's enabled state for the current parameter
   if (hasChannelMap) {
-    updateSendPickerOptions(name, routing.channel);
+    updateSendPickerOptions(name, routing.row === 3
+      ? `__out3__${routing.channel}` : routing.channel);
     updateParamScope(name);
   }
 }
