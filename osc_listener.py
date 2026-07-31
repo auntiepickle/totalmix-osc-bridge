@@ -101,6 +101,11 @@ class DeviceState:
                 return True  # structural change
 
             if address in _BUS_ROW and args and float(args[0]) == 1.0:
+                if _BUS_ROW[address] != self.current_row:
+                    # A mid-burst row change must not merge rows into the
+                    # input-row strip stats (review finding)
+                    self._burst_max_strip = 0
+                    self._burst_real_strips = set()
                 self.current_row = _BUS_ROW[address]
                 return True  # row switch rescopes subsequent channel data
 

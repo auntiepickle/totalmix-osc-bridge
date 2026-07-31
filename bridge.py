@@ -823,7 +823,7 @@ class TotalMixOSCBridge:
                 break
             name = str(strips[s].get("name", "")).strip()
             w = widths.get(name)
-            if w not in (1, 2):
+            if isinstance(w, bool) or w not in (1, 2):
                 logger.error(f"   → no verified width for strip '{name}' — "
                              f"cannot aim page 2 (POST /api/device/widths "
                              f"with this layout's widths)")
@@ -1027,13 +1027,22 @@ class TotalMixOSCBridge:
         wanted = submix_name.lower()
         wanted_ch = channel_name.lower()
 
+        # Freshness watermark: DeviceState accumulates banks across layout
+        # changes, and a STALE bank winning name resolution writes another
+        # channel's strip index (review finding — mute had no page-2
+        # confirmation to catch it). Entries older than the watermark are
+        # invisible to matching.
+        _fresh_floor = self._layout_epoch
+
         def _match_in(strips):
             # Exact name first, stereo-pair cover second — a pair strip's
             # fader controls both halves, so it is a correct target
-            for strip, data in sorted(strips.items()):
+            fresh = {s: d for s, d in strips.items()
+                     if d.get("_seen", 0) >= _fresh_floor}
+            for strip, data in sorted(fresh.items()):
                 if str(data.get("name", "")).strip().lower() == wanted_ch:
                     return strip
-            for strip, data in sorted(strips.items()):
+            for strip, data in sorted(fresh.items()):
                 if self._names_cover(str(data.get("name", "")), channel_name):
                     return strip
             return None
@@ -1057,8 +1066,10 @@ class TotalMixOSCBridge:
 
         if channel_scoped:
             # No submix switch happened, so there may be no fresh dump to
-            # wait on. If nothing matches the already-known state, provoke a
-            # dump with the probe's row-toggle trick (guaranteed change).
+            # wait on. If nothing FRESH matches, provoke a dump with the
+            # probe's row-toggle trick (guaranteed change) — stale banks
+            # are invisible to the matcher, so this fires whenever the
+            # only candidates are old (review finding).
             if find_strip(listener.state) is None:
                 other = "/1/busPlayback" if bus_addr == "/1/busInput" else "/1/busInput"
                 self.osc_client.send_message(other, 1.0)
@@ -1118,8 +1129,11 @@ class TotalMixOSCBridge:
         strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
         # Filter the placeholder strips past the hardware channel count —
         # a 48-wide bank would otherwise bury the real names in 30x 'n.a.'
+        # — and judge 'bank seen' by FRESH entries only (stale banks must
+        # not turn a refusal into a stored-address fallback)
         real = [d.get('name') for d in strips.values()
-                if str(d.get('name', '')).strip().lower() not in ('n.a.', 'n/a')]
+                if str(d.get('name', '')).strip().lower() not in ('n.a.', 'n/a')
+                and d.get('_seen', 0) >= _fresh_floor]
         logger.error(f"   → channel '{channel_name}' is NOT in the live bank for "
                      f"'{submix_name}' (live strips: {real}) — refusing the "
                      f"stored address, it may point at a different channel now")
@@ -1139,13 +1153,19 @@ class TotalMixOSCBridge:
         if listener is None or not listener.running or self.osc_client is None:
             return None
 
-        def _names(st):
+        def _names(st, floor):
+            # Only entries refreshed by THIS dump count: _outputs keeps
+            # ghost strips from wider/older layouts forever, and a ghost
+            # that matches the map would defeat the /setSubmix crash
+            # guard after a layout shrink (review finding)
             strips = st.submix_snapshot("_outputs").get("3", {})
-            names = {str(d.get("name", "")).strip() for d in strips.values()}
+            names = {str(d.get("name", "")).strip() for d in strips.values()
+                     if d.get("_seen", 0) >= floor}
             return {n for n in names
                     if n and n.lower() not in ("n.a.", "n/a")}
 
         with self._device_lock:
+            t0 = time.time()
             before = listener.state.message_count
             self.osc_client.send_message("/1/busOutput", 1.0)
             if listener.wait_for(lambda st: st.message_count > before, timeout):
@@ -1153,7 +1173,7 @@ class TotalMixOSCBridge:
                 # settle so stale names get overwritten first
                 time.sleep(0.15)
             self.osc_client.send_message("/1/busInput", 1.0)
-        names = _names(listener.state) or None
+        names = _names(listener.state, t0) or None
         if names:
             self._outputs_cache = (time.time(), names)
         return names

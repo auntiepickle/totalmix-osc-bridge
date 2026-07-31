@@ -316,11 +316,14 @@ async def save_config_snapshot_map(request: Request):
         data = await request.json()
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail="snapshot_map must be a JSON object")
-        bridge.snapshot_map = data
-        # Write to local app directory
+        # Backup first (every other config write does), and only adopt the
+        # new map in memory AFTER the disk write succeeds — assigning first
+        # left memory and disk divergent on a failed write (review finding)
+        backup_json_files("ufx2_snapshot_map.json")
         local_target = os.path.join(os.path.dirname(__file__), "../ufx2_snapshot_map.json")
         with open(local_target, "w") as f:
             json.dump(data, f, indent=2)
+        bridge.snapshot_map = data
         # Also write to SMB mount if accessible
         smb_target = "/app/config/ufx2_snapshot_map.json"
         smb_written = False
@@ -436,7 +439,8 @@ async def set_widths(body: WidthsBody):
     of strip names. EQ aiming consults the map matching the live layout at
     fire time, so hand-entered or fingerprint-derived widths stop rotting
     when snapshots rotate."""
-    bad = {k: v for k, v in body.widths.items() if v not in (1, 2)}
+    bad = {k: v for k, v in body.widths.items()
+           if isinstance(v, bool) or v not in (1, 2)}
     if bad:
         raise HTTPException(status_code=422,
                             detail=f"widths must be 1 or 2: {bad}")
@@ -453,7 +457,11 @@ async def set_widths(body: WidthsBody):
         names = sorted(live)
     key = bridge._layout_key_from_names(names)
     uncovered = sorted(n for n in names if n not in body.widths)
-    cm = bridge.channel_map or {"submixes": {}}
+    # Never inherit the EXAMPLE map: persisting onto it would write the
+    # example's submixes/indices out as the user's real config, and stale
+    # example indices feed the /setSubmix path (review finding)
+    cm = ({"submixes": {}} if getattr(bridge, "channel_map_is_example", False)
+          else bridge.channel_map) or {"submixes": {}}
     cm.setdefault("width_maps", {})[key] = dict(body.widths)
     _persist_channel_map(cm)
     total = sum(body.widths.get(n, 0) for n in names)
@@ -518,18 +526,25 @@ def _carry_widths(old_map, new_map):
 
 
 def _live_row1_names():
-    """Strip names on the live device's input row, from listener state.
-    None when the listener is absent or blind — coverage then unknowable."""
+    """Strip names on the live device's input row — from the CURRENT bank
+    only. A union across every bank ever seen mixed layouts together and
+    mis-keyed width maps (review finding: widths stored under a phantom
+    union layout never match at fire time, silently disarming EQ). None
+    when the listener is absent or blind."""
     lst = bridge.osc_listener
     if lst is None or not lst.running:
         return None
     st = lst.state
+    if not st.current_submix:
+        return None
+    floor = getattr(bridge, "_layout_epoch", 0.0)
     names = set()
-    for sub in list(st.submixes.keys()):
-        for _ch, d in st.submix_snapshot(sub).get("1", {}).items():
-            n = str(d.get("name", "")).strip()
-            if n and n.lower() not in ("n.a.", "n/a"):
-                names.add(n)
+    for _ch, d in st.submix_snapshot(st.current_submix).get("1", {}).items():
+        if d.get("_seen", 0) < floor:
+            continue
+        n = str(d.get("name", "")).strip()
+        if n and n.lower() not in ("n.a.", "n/a"):
+            names.add(n)
     return names or None
 
 
@@ -649,6 +664,8 @@ async def upload_mappings(file: UploadFile = File(...)):
         with open(target, "w") as f:
             json.dump(data, f, indent=2)
         bridge.mappings = data
+        bridge.mappings_is_example = False
+        bridge.mappings_source = "mappings.json"
         logger.info(f"✅ mappings.json uploaded + reloaded ({len(data.get('macros', {}))} macros)")
         return {"status": "success", "message": "mappings.json updated and reloaded"}
     except HTTPException:

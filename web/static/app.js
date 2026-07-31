@@ -9,16 +9,32 @@ let lastFiredMacro = null;  // { name, ts }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+let ws = null;
+let _wsRetryMs = 1000;
 
-ws.onopen = () => {
-  console.log('[WS] Connected to bridge');
-  loadMacros();
-};
+// Reconnect with capped backoff: the socket carries ALL live behavior
+// (LEDs, progress, WS/SS tracking, cross-tab sync) — without this, one
+// drop silently froze the UI while the REST health dots stayed green
+// (review finding). loadMacros() on open re-syncs whatever was missed.
+function _connectWS() {
+  ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+  ws.onopen = () => {
+    console.log('[WS] Connected to bridge');
+    document.title = 'TotalMix OSC Bridge';
+    _wsRetryMs = 1000;
+    loadMacros();
+  };
+  ws.onclose = () => {
+    console.warn(`[WS] Disconnected — retrying in ${_wsRetryMs / 1000}s`);
+    document.title = '⚠ offline — TotalMix OSC Bridge';
+    setTimeout(_connectWS, _wsRetryMs);
+    _wsRetryMs = Math.min(_wsRetryMs * 2, 10000);
+  };
+  ws.onmessage = _onWSMessage;
+}
+_connectWS();
 
-ws.onclose = () => console.log('[WS] Disconnected');
-
-ws.onmessage = function (event) {
+function _onWSMessage(event) {
   const data = JSON.parse(event.data);
   if (data.current_workspace) currentWorkspace = data.current_workspace;
   if (data.current_snapshot) currentSnapshot = data.current_snapshot;
@@ -145,7 +161,7 @@ function _updateNavDropdowns() {
   wsSel.innerHTML =
     `<option value="" disabled${!wsKnown ? ' selected' : ''}>—</option>` +
     workspaces.map(ws =>
-      `<option value="${ws}"${ws === currentWorkspace ? ' selected' : ''}>${ws}</option>`
+      `<option value="${_esc(ws)}"${ws === currentWorkspace ? ' selected' : ''}>${_esc(ws)}</option>`
     ).join('');
 
   // Snapshot dropdown — scoped to the confirmed workspace
@@ -158,7 +174,7 @@ function _updateNavDropdowns() {
   ssSel.innerHTML =
     `<option value="" disabled${!ssKnown ? ' selected' : ''}>—</option>` +
     ssValues.map(ss =>
-      `<option value="${ss}"${ss.toLowerCase() === (currentSnapshot || '').toLowerCase() ? ' selected' : ''}>${ss}</option>`
+      `<option value="${_esc(ss)}"${ss.toLowerCase() === (currentSnapshot || '').toLowerCase() ? ' selected' : ''}>${_esc(ss)}</option>`
     ).join('');
 }
 
@@ -178,7 +194,7 @@ window.switchToFromNav = async function() {
   if (ssSel) {
     ssSel.innerHTML =
       `<option value="" disabled selected>—</option>` +
-      ssValues.map(s => `<option value="${s}">${s}</option>`).join('');
+      ssValues.map(s => `<option value="${_esc(s)}">${_esc(s)}</option>`).join('');
   }
 
   try {

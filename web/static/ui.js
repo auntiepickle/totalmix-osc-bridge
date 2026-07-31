@@ -89,8 +89,8 @@ function createMacroCardHTML(name, m) {
     </div>
     <!-- Description + routing label -->
     <div class="pl-6 mb-3">
-        ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${m.description}</p>` : ''}
-        <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${routingLabel}</p>
+        ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${_esc(m.description)}</p>` : ''}
+        <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${_esc(routingLabel)}</p>
     </div>
     <!-- Progress bar -->
     <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3">
@@ -139,9 +139,9 @@ function renderCards() {
 
     // Workspace section header — always visible, click to collapse
     html += `<div class="col-span-full mb-2">
-      <button onclick="toggleGroup('${ws}')"
+      <button onclick="toggleGroup(decodeURIComponent('${_jsArg(ws)}'))"
           class="w-full flex items-center gap-3 group text-left py-1">
-        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-widest group-hover:text-white transition-colors">${ws}</span>
+        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-widest group-hover:text-white transition-colors">${_esc(ws)}</span>
         <div class="flex-1 h-px bg-zinc-800"></div>
         <!-- Group last-fired LED + label -->
         <span id="group-led-dot-${wsId}" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200 shrink-0"></span>
@@ -162,9 +162,9 @@ function renderCards() {
         const ssArrowStyle = ssCollapsed ? 'style="transform:rotate(-90deg)"' : '';
 
         html += `<div class="col-span-full mb-1 ml-1">
-          <button onclick="toggleSnapshotGroup('${ws}','${ss}')"
+          <button onclick="toggleSnapshotGroup(decodeURIComponent('${_jsArg(ws)}'),decodeURIComponent('${_jsArg(ss)}'))"
               class="flex items-center gap-2 group text-left py-0.5">
-            <span class="text-[10px] text-zinc-600 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">↳ ${ss}</span>
+            <span class="text-[10px] text-zinc-600 uppercase tracking-widest group-hover:text-zinc-400 transition-colors">↳ ${_esc(ss)}</span>
             <i id="ss-arrow-${ssId}" class="fas fa-chevron-down text-[8px] text-zinc-700 group-hover:text-zinc-500 transition-transform duration-150" ${ssArrowStyle}></i>
           </button>
         </div>`;
@@ -301,8 +301,8 @@ function toggleDetail(name) {
     m.steps.forEach(step => {
       // Name-based targets display as names — the strip index is live-resolved
       const addr = step.target
-        ? `${step.target.channel} → ${step.target.submix} ⚡live`
-        : (step.osc || '?');
+        ? `${_esc(step.target.channel)} → ${_esc(step.target.submix)} ⚡live`
+        : _esc(step.osc || '?');
       if (step.operation) {
         const op = step.operation;
         const opType = (op.type || '').toUpperCase();
@@ -363,7 +363,7 @@ function toggleDetail(name) {
     <summary class="cursor-pointer text-xs text-zinc-600 hover:text-orange-400 transition-colors flex items-center gap-1 select-none">
       <i class="fas fa-code text-[10px]"></i> Full JSON
     </summary>
-    <pre class="mt-2 text-xs overflow-auto max-h-52 bg-zinc-950 text-zinc-400 p-3 rounded-lg border border-zinc-800 leading-relaxed">${JSON.stringify(m, null, 2)}</pre>
+    <pre class="mt-2 text-xs overflow-auto max-h-52 bg-zinc-950 text-zinc-400 p-3 rounded-lg border border-zinc-800 leading-relaxed">${_esc(JSON.stringify(m, null, 2))}</pre>
   </details>`;
 
   html += `</div>`;
@@ -373,6 +373,14 @@ function toggleDetail(name) {
 // ── Inline card editor ────────────────────────────────────────────────────────
 
 // Escape value for use in HTML attribute (double-quote safe)
+// Safe transport for names through inline onclick JS strings: percent-
+// encode everything INCLUDING single quotes (encodeURIComponent leaves
+// them alone), decode inside the handler call (review finding: a quote
+// in a workspace/snapshot name broke out of the inline JS string)
+function _jsArg(v) {
+  return encodeURIComponent(String(v == null ? '' : v)).replace(/'/g, '%27');
+}
+
 function _esc(v) {
   return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 }
@@ -770,10 +778,15 @@ function _valueControl(name, i, step, nc, sc) {
   const v = parseFloat(step.value);
   const val = Number.isFinite(v) ? v : (def.default ?? 0);
   if (def.widget === 'toggle') {
+    // Select the NEAREST option: exact float compare silently rewrote any
+    // non-canonical stored value (0.333333 vs '0.3333') to the first
+    // option on every harvest/re-render cycle (review finding)
+    const selOv = def.options.reduce((a, b) =>
+      Math.abs(parseFloat(b[0]) - val) < Math.abs(parseFloat(a[0]) - val) ? b : a)[0];
     return `<div class="flex gap-2 items-center flex-1">
       <select data-field="steps.${i}.value" class="${sc}">
         ${def.options.map(([ov, ol]) =>
-          `<option value="${ov}"${parseFloat(ov) === val ? ' selected' : ''}>${ol}</option>`).join('')}
+          `<option value="${ov}"${ov === selOv ? ' selected' : ''}>${ol}</option>`).join('')}
       </select>
       ${followBox}
     </div>`;
