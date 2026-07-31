@@ -441,11 +441,13 @@ class MixedBankTotalMix(LiveFakeTotalMix):
             self.listener._handle("/1/trackname3", "ADAT 5/6")  # pair
 
 
-def _eq_bridge(make_bridge, fake_osc, macro):
+def _eq_bridge(make_bridge, fake_osc, macro, widths=None):
     from osc_listener import OSCListener
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = dict(CHANNEL_MAP)
+    if widths is not None:
+        b.channel_map["channel_widths"] = widths
     b.osc_listener = listener
     b.osc_client = MixedBankTotalMix(listener, fake_osc)
     listener._server = object()
@@ -455,19 +457,23 @@ def _eq_bridge(make_bridge, fake_osc, macro):
     return b
 
 
-def test_eq_target_aims_page2_with_hw_offset_and_restores(make_bridge, fake_osc):
-    """'Mavis' sits after the 'AN 1/2' pair: strip 2, hardware offset 2.
-    Resolution must aim /setBankStart 2, write /2/..., restore bank 0."""
+# Hardware truth from the #5 write-test failure: labels DO NOT encode width
+# ('RE-101' is a slash-free stereo pair). Widths must come from the verified
+# channel_widths map — here the fake bank's 'Mavis' (labelled mono-style) is
+# declared width 2, like the real RE-101 incident.
+VERIFIED_WIDTHS = {"AN 1/2": 2, "Mavis": 2, "ADAT 5/6": 2}
+
+
+def test_eq_target_aims_page2_with_verified_widths_and_restores(make_bridge, fake_osc):
+    """'Mavis' sits after the 'AN 1/2' pair (width 2 by the VERIFIED map,
+    not by label): offset 2. Aim, write /2/..., restore bank 0."""
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "target": {"channel": "Mavis", "param": "eq_gain_1"},
         "value": "0.8",
-    }]})
+    }]}, widths=VERIFIED_WIDTHS)
     b.run_macro("m", 0.0)
     sent = fake_osc.sent
     assert ("/2/eqGain1", 0.8) in sent
-    bank_sends = [v for a, v in sent if a == "/setBankStart"]
-    # pin 0 -> aim 2 -> restore 0, in that order
-    assert bank_sends[-3:] == [0.0, 2.0, 0.0] or bank_sends[-2:] == [2.0, 0.0]
     aim_i = sent.index(("/setBankStart", 2.0))
     write_i = sent.index(("/2/eqGain1", 0.8))
     restore_i = len(sent) - 1 - sent[::-1].index(("/setBankStart", 0.0))
@@ -475,15 +481,29 @@ def test_eq_target_aims_page2_with_hw_offset_and_restores(make_bridge, fake_osc)
     assert "/setSubmix" not in fake_osc.addresses()
 
 
-def test_eq_offset_counts_pair_widths(make_bridge, fake_osc):
-    """'ADAT 5/6' is strip 3 behind a pair (2) and a mono (1): offset 3."""
+def test_eq_offset_uses_map_not_labels(make_bridge, fake_osc):
+    """'ADAT 5/6' is strip 3 behind AN 1/2 (2) and mono-LOOKING Mavis whose
+    VERIFIED width is 2 — offset 4, where the old label heuristic said 3
+    and wrote to the wrong channel on hardware."""
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "target": {"channel": "ADAT 5/6", "param": "eq_freq_2"},
         "value": "0.4",
-    }]})
+    }]}, widths=VERIFIED_WIDTHS)
     b.run_macro("m", 0.0)
-    assert ("/setBankStart", 3.0) in fake_osc.sent
+    assert ("/setBankStart", 4.0) in fake_osc.sent
     assert ("/2/eqFreq2", 0.4) in fake_osc.sent
+
+
+def test_eq_refuses_when_any_preceding_width_unverified(make_bridge, fake_osc):
+    """One unknown width poisons the whole offset — refuse, never guess."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
+        "value": "0.8",
+    }]}, widths={"AN 1/2": 2})  # Mavis width unknown
+    b.run_macro("m", 0.0)
+    assert not [a for a in fake_osc.addresses() if a.startswith("/2/")]
+    # No aim happened either — bank never left its pinned 0
+    assert set(v for a, v in fake_osc.sent if a == "/setBankStart") <= {0.0}
 
 
 def test_eq_refuses_without_listener(make_bridge, fake_osc):

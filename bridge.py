@@ -648,18 +648,32 @@ class TotalMixOSCBridge:
         "lowcut_freq": "/2/lowcutFreq",
     }
 
-    _PAIR_NAME_RE = re.compile(r"\d+/\d+\s*$")
-
-    @classmethod
-    def _hw_offset_of_strip(cls, strips: dict, strip) -> int:
+    def _hw_offset_of_strip(self, strips: dict, strip):
         """Hardware-channel offset of a strip: the summed widths of the
-        strips before it. A stereo-pair label ('AN 1/2') is width 2."""
+        strips before it, from the VERIFIED width map only.
+
+        Label inference is banned here: hardware testing proved a stereo
+        pair can carry a slash-free name ('RE-101'), which silently mis-
+        aimed every subsequent strip and wrote to the wrong channel's EQ
+        (#5 write-test failure). Widths come from
+        channel_map['channel_widths'] (name -> 1|2), produced by hardware
+        measurement or hand-entry. Returns None (→ refusal) if ANY
+        preceding strip's width is unknown — one unknown poisons the
+        whole offset.
+        """
+        widths = (self.channel_map or {}).get("channel_widths", {})
         offset = 0
         for s in sorted(strips):
             if s >= strip:
                 break
-            name = str(strips[s].get("name", ""))
-            offset += 2 if cls._PAIR_NAME_RE.search(name) else 1
+            name = str(strips[s].get("name", "")).strip()
+            w = widths.get(name)
+            if w not in (1, 2):
+                logger.error(f"   → no verified width for strip '{name}' — "
+                             f"cannot aim page 2 (add it to channel_widths "
+                             f"in ufx2_channel_map.json)")
+                return None
+            offset += w
         return offset
 
     @staticmethod
@@ -840,10 +854,16 @@ class TotalMixOSCBridge:
                                    for b in banks
                                    if strip in st.submix_snapshot(b).get(row, {})), {})
                     offset = self._hw_offset_of_strip(strips, strip)
+                    if offset is None:
+                        # Wrong-channel EQ writes are silent and destructive —
+                        # refuse rather than aim on a guess (#5 write-test
+                        # failure: a slash-free stereo pair broke label math)
+                        return None, None, "not_in_bank"
                     self.osc_client.send_message("/setBankStart", float(offset))
                     addr = self.CHANNEL_DETAIL_PARAMS[param]
                     logger.info(f"   → live-resolved '{channel_name}' {param} → strip "
-                                f"{strip}, hw offset {offset} → aimed page 2 ({addr})")
+                                f"{strip}, hw offset {offset} (verified widths) → "
+                                f"aimed page 2 ({addr})")
                     return index, addr, "resolved"
                 # Write address is always page 1 — the bus selection above
                 # decides which row the write lands on
