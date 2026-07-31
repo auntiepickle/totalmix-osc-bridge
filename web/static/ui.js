@@ -465,12 +465,18 @@ window.updateSendPickerOptions = function (name, selectedChannel) {
       .filter(([, s]) => (s.row ?? 1) !== 2)
       .map(([sn]) => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)}</option>`)
       .join('');
-    // Hardware-outputs group REMOVED: page 2 follows the row, but the
-    // aiming rule is cumulative output WIDTH (outputs are 2 hw channels
-    // each), not the submix index — index-based aiming mis-aimed every
-    // output on hardware. Returns when a measured, layout-keyed output
-    // width map exists; the bridge refuses row-3 EQ targets until then.
-    sendSel.innerHTML = `<optgroup label="Hardware inputs">${inputs}</optgroup>`;
+    // Outputs aim by the hardware-MEASURED rule (offset = first hw
+    // channel via the walked index; Main = 0). The bridge only fires it
+    // on all-stereo output layouts and refuses otherwise — a mono-output
+    // layout shows the option but the step refuses safely at fire time.
+    const outputs = Object.values(subs)
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+      .map(s => { const v = `__out3__${s.name}`;
+        return `<option value="${_esc(v)}"${v === selectedChannel ? ' selected' : ''}>${_esc(s.name)}</option>`; })
+      .join('');
+    sendSel.innerHTML =
+      `<optgroup label="Hardware inputs">${inputs}</optgroup>` +
+      `<optgroup label="Hardware outputs">${outputs}</optgroup>`;
     return;
   }
   sendSel.innerHTML = Object.keys(sends)

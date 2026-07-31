@@ -819,22 +819,54 @@ class TotalMixOSCBridge:
                          f"and outputs only)")
             return None, None, "not_in_bank"
         if param in self.CHANNEL_DETAIL_PARAMS and row == "3":
-            # OUTPUT EQ is GATED OFF. Page 2 does follow the selected row
-            # (hardware-verified with a discriminator EQ), but the aiming
-            # rule is NOT the submix index: outputs occupy TWO hw channels
-            # each and the measured offset for RE-150 In (output pos 8,
-            # index 14) is 14 — cumulative output WIDTH, not index-1. The
-            # shipped index-1 rule mis-aimed every output; the third time
-            # a width assumption produced a wrong aim (label inference,
-            # the 2x-strips bound, now this). Aiming needs a layout-keyed
-            # OUTPUT width map, measured like the input one — refuse until
-            # it exists.
-            logger.error(f"   → output EQ is disabled pending a measured "
-                         f"output width map — refusing page-2 aim for "
-                         f"'{channel_name}' (index-based aiming was "
-                         f"hardware-DISPROVEN: it writes a different "
-                         f"channel's EQ)")
-            return None, None, "not_in_bank"
+            # OUTPUT EQ (hardware-measured 2026-08-01): page 2 follows the
+            # selected row, and the page-2 offset is the output's first hw
+            # channel — which IS the walked submix index, except the first
+            # output where the index is clamped to 1 (Main occupies
+            # offsets 0-1 with index 1; RE-150 In index 14 measured at
+            # offsets 14-15). ENABLED only for all-stereo output layouts
+            # (index deltas [1,2,2,...]), where this equals the verified
+            # 2*(pos-1) rule; layouts with MONO outputs (later deltas of
+            # 1, e.g. the 23-strip layout) REFUSE until the unclamped-
+            # index rule is verified there. Width assumptions have
+            # mis-aimed three times — equivalence-or-refuse only.
+            subs = (self.channel_map or {}).get("submixes", {})
+            entries = sorted(
+                ((int(s["index"]), str(s.get("name", "")).strip())
+                 for s in subs.values()
+                 if isinstance(s.get("index"), (int, float))),
+                key=lambda t: t[0])
+            idx_of = {n: i for i, n in entries}
+            if channel_name not in idx_of:
+                logger.error(f"   → output '{channel_name}' not in the "
+                             f"channel map — cannot aim page 2, refusing")
+                return None, None, "not_in_bank"
+            indices = [i for i, _ in entries]
+            deltas = [b - a for a, b in zip(indices, indices[1:])]
+            uniform_stereo = (indices[0] == 1
+                              and (not deltas or deltas[0] == 1)
+                              and all(d == 2 for d in deltas[1:]))
+            if not uniform_stereo:
+                logger.error(f"   → output layout has non-stereo spacing "
+                             f"(index deltas {deltas}) — output EQ aiming "
+                             f"is only verified for all-stereo layouts, "
+                             f"refusing rather than mis-aim")
+                return None, None, "not_in_bank"
+            live_outputs = self._live_output_names()
+            map_outputs = {n for _, n in entries}
+            if live_outputs is None or live_outputs != map_outputs:
+                logger.error(f"   → live output row unknown or changed "
+                             f"since the map was captured — refusing "
+                             f"page-2 aim for output '{channel_name}'")
+                return None, None, "not_in_bank"
+            offset = 0 if channel_name == entries[0][1] else idx_of[channel_name]
+            self.osc_client.send_message("/1/busOutput", 1.0)
+            self.osc_client.send_message("/setBankStart", float(offset))
+            addr = self.CHANNEL_DETAIL_PARAMS[param]
+            logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
+                        f"hw offset {offset} (measured rule, all-stereo "
+                        f"layout) → aimed page 2 ({addr})")
+            return idx_of[channel_name], addr, "resolved"
         if channel_scoped:
             # Mute is GLOBAL-per-channel (hardware-verified, #4/#10) and
             # channel-detail params (EQ etc.) address the CHANNEL, not a

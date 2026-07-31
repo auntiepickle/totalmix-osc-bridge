@@ -697,21 +697,94 @@ def test_eq_refused_on_playback_row(make_bridge, fake_osc):
     assert "/setBankStart" not in fake_osc.addresses()
 
 
-def test_eq_output_row_refused_pending_width_map(make_bridge, fake_osc):
-    """Output EQ is GATED OFF: page 2 follows the row, but index-based
-    aiming was hardware-DISPROVEN (RE-150 In: measured offset 14, index-1
-    gave 13 - outputs are 2 hw channels wide; offset = cumulative output
-    width). Row-3 EQ refuses until a measured output width map exists."""
+# All-stereo output layout, hardware-measured shape: walked indices are the
+# first hw channel of each output, with the FIRST output clamped to 1 (Main
+# occupies hw 0-1 with index 1) — index deltas [1, 2, 2, ...]
+OUTPUT_MAP = {"submixes": {
+    "Main":      {"index": 1, "name": "Main",      "sends": {}},
+    "AN 3/4":    {"index": 2, "name": "AN 3/4",    "sends": {}},
+    "AES":       {"index": 4, "name": "AES",       "sends": {}},
+    "RE-150 In": {"index": 6, "name": "RE-150 In", "sends": {}},
+}}
+
+
+class StereoOutputsTotalMix(LiveFakeTotalMix):
+    OUTPUT_NAMES = ["Main", "AN 3/4", "AES", "RE-150 In"]
+
+
+def _out_eq_bridge(make_bridge, fake_osc, channel, cmap=None):
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": channel, "param": "eq_gain_1", "row": 3},
+    }]}})
+    b.channel_map = cmap or OUTPUT_MAP
+    b.osc_listener = listener
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    return b
+
+
+def test_eq_output_aims_at_walked_index_offset(make_bridge, fake_osc):
+    """Hardware-measured: RE-150 In (index 14) reads at page-2 offsets
+    14-15 with busOutput selected — the offset IS the walked index for
+    every output but the first. Here index 6 -> offset 6."""
+    b = _out_eq_bridge(make_bridge, fake_osc, "RE-150 In")
+    b.run_macro("m", 0.5)
+    assert ("/1/busOutput", 1.0) in fake_osc.sent
+    assert ("/setBankStart", 6.0) in fake_osc.sent
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+    assert ("/1/busInput", 1.0) in fake_osc.sent[-3:]  # row restored
+
+
+def test_eq_output_first_output_offset_zero(make_bridge, fake_osc):
+    """Main carries index 1 but occupies hw offsets 0-1 (measured: a write
+    at 0 appeared at 0 AND 1) — the first output aims at 0, not its index."""
+    b = _out_eq_bridge(make_bridge, fake_osc, "Main")
+    b.run_macro("m", 0.5)
+    assert ("/setBankStart", 0.0) in fake_osc.sent
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+
+
+def test_eq_output_refuses_mono_output_layouts(make_bridge, fake_osc):
+    """The 23-strip layout has MONO outputs (index deltas of 1 mid-list) —
+    the all-stereo rule is unverified there, so aiming must refuse."""
+    mono_map = {"submixes": {
+        "Main":   {"index": 1, "name": "Main",   "sends": {}},
+        "AN 3/4": {"index": 2, "name": "AN 3/4", "sends": {}},
+        "Solo A": {"index": 4, "name": "Solo A", "sends": {}},
+        "Solo B": {"index": 5, "name": "Solo B", "sends": {}},  # delta 1: mono
+    }}
+
+    class MonoOutputsTotalMix(LiveFakeTotalMix):
+        OUTPUT_NAMES = ["Main", "AN 3/4", "Solo A", "Solo B"]
+
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "Solo A", "param": "eq_gain_1", "row": 3},
+    }]}})
+    b.channel_map = mono_map
+    b.osc_listener = listener
+    b.osc_client = MonoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.5)
+    assert "/2/eqGain1" not in fake_osc.addresses()
+    assert "/setBankStart" not in fake_osc.addresses()
+
+
+def test_eq_output_refuses_on_layout_drift(make_bridge, fake_osc):
+    """Live output row no longer matches the map the indices came from —
+    a stale offset writes a different channel's EQ silently. Refuse."""
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": "RE-150 In", "param": "eq_gain_1", "row": 3},
     }]}})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = OUTPUT_MAP
     b.osc_listener = listener
-    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.5)
     assert "/2/eqGain1" not in fake_osc.addresses()
     assert "/setBankStart" not in fake_osc.addresses()
-    assert "/setSubmix" not in fake_osc.addresses()
