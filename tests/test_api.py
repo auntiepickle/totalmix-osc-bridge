@@ -174,3 +174,29 @@ def test_map_strip_count_counts_input_row_only(monkeypatch):
     })
     body = client.get("/api/status").json()
     assert body["channel_map_strip_count"] == 2  # input rows only
+
+
+def test_widths_carry_only_when_layout_unchanged():
+    """channel_widths are LAYOUT-scoped (RE-101 was width 2 in one snapshot,
+    width 1 in another — hardware-proven). Carrying them across a layout
+    change could mis-aim page-2 writes; dropping them merely refuses."""
+    from web.web_client import _carry_widths
+
+    def cmap(names, widths=None):
+        m = {"submixes": {"Main": {"sends": {
+            n: {"name": n, "row": 1, "channel": i + 1} for i, n in enumerate(names)
+        }}}}
+        if widths:
+            m["channel_widths"] = widths
+        return m
+
+    old = cmap(["AN 1/2", "RE-101"], widths={"AN 1/2": 2, "RE-101": 2})
+    same_layout = cmap(["AN 1/2", "RE-101"])
+    assert _carry_widths(old, same_layout) is True
+    assert same_layout["channel_widths"] == {"AN 1/2": 2, "RE-101": 2}
+
+    changed_layout = cmap(["AN 1", "AN 2", "RE-101"])
+    assert _carry_widths(old, changed_layout) is False
+    assert "channel_widths" not in changed_layout
+
+    assert _carry_widths(cmap(["AN 1/2"]), cmap(["AN 1/2"])) is False  # nothing to carry

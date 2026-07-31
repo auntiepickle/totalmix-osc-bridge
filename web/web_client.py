@@ -438,6 +438,29 @@ async def get_discovery():
     return bridge.discovery_state
 
 
+def _row1_names(channel_map):
+    """The input-strip name set — the layout identity used to decide whether
+    channel_widths may carry across a discovery apply."""
+    return {str(s.get("name", "")).strip()
+            for sub in (channel_map or {}).get("submixes", {}).values()
+            for s in sub.get("sends", {}).values() if s.get("row", 1) == 1}
+
+
+def _carry_widths(old_map, new_map):
+    """Preserve channel_widths across a discovery apply ONLY when the strip
+    layout is unchanged. Widths are LAYOUT-scoped (hardware-proven: RE-101 is
+    width 2 in one snapshot and width 1 in another), so carrying them across
+    a layout change could mis-aim page-2 writes — refusal is safe, a stale
+    width is not. Returns True if carried."""
+    widths = (old_map or {}).get("channel_widths")
+    if not widths:
+        return False
+    if _row1_names(old_map) == _row1_names(new_map):
+        new_map["channel_widths"] = widths
+        return True
+    return False
+
+
 @app.post("/api/device/discovery/apply")
 async def apply_discovery():
     """Promote the last discovery result to the live ufx2_channel_map.json."""
@@ -445,14 +468,24 @@ async def apply_discovery():
     if state.get("status") != "done" or "channel_map" not in state:
         raise HTTPException(status_code=409, detail="No completed discovery to apply")
     backup_json_files("ufx2_channel_map.json")
+    new_map = state["channel_map"]
+    # Discovery builds the map from scratch — without this, every apply
+    # silently disarmed EQ macros by dropping the verified widths
+    if _carry_widths(bridge.channel_map, new_map):
+        logger.info("channel_widths preserved across discovery apply (layout unchanged)")
+    elif (bridge.channel_map or {}).get("channel_widths"):
+        logger.warning("⚠️ channel_widths DROPPED: the strip layout changed across "
+                       "this discovery — EQ macros will refuse until widths are "
+                       "re-derived or re-entered for the new layout")
     target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
     with open(target, "w") as f:
-        json.dump(state["channel_map"], f, indent=2)
+        json.dump(new_map, f, indent=2)
     bridge._load_channel_map()
     bridge.channel_map_is_example = False
-    submixes = len(state["channel_map"]["submixes"])
+    submixes = len(new_map["submixes"])
     logger.info(f"✅ Discovered channel map applied ({submixes} submixes)")
-    return {"status": "success", "submixes": submixes}
+    return {"status": "success", "submixes": submixes,
+            "channel_widths_carried": "channel_widths" in new_map}
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
