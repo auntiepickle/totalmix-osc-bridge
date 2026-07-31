@@ -165,7 +165,9 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     ws = getattr(bridge, "current_workspace", None)
                     snap_name = None
                     if ws and ws in SNAPSHOT_MAP:
-                        snap_name = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(num))
+                        v = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(num))
+                        # dict-format map entries: {"name": ..., "index": ...}
+                        snap_name = (v.get("name") if isinstance(v, dict) else v)
                     bridge.update_snapshot(name=snap_name or f"snap_{num}")
                 bridge.state_confirmed = False  # belief only, device untouched
                 logger.info(f"Retained {msg.topic} = {payload} absorbed as belief "

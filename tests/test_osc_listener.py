@@ -32,6 +32,7 @@ def test_channel_feedback_scoped_to_current_submix():
     )
     d = s.to_dict()
     ch = d["submixes"]["AES"]["1"][1]
+    ch.pop("_seen", None)  # freshness stamp, value is wall-clock
     assert ch == {"name": "AN 1/2", "volume": 0.72,
                   "volume_db": "-6.0 dB", "pan": 0.5}
     assert d["submixes"]["AES"]["2"][3]["name"] == "ADAT 13/14"

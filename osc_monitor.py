@@ -42,7 +42,10 @@ class OSCMonitor:
 
             while self.running:
                 data, addr = self.socket.recvfrom(4096)
-                ts = time.strftime("%H:%M:%S.%f")[:-3]
+                # time.strftime has no %f (it raised on Windows, killing
+                # the receive loop on the first datagram) — datetime does
+                from datetime import datetime
+                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
                 if data.startswith(b'#bundle'):
                     try:
@@ -58,6 +61,16 @@ class OSCMonitor:
                                     logger.info(f"[OSC] {ts}  {item.address} → {value_str}   ←←← COPY THIS FOR MAPPINGS")
                     except Exception as e:
                         logger.error(f"Bundle parse error: {e}")
+                else:
+                    # bare (non-bundle) OSC messages were silently dropped,
+                    # leaving the mappings log incomplete (review finding)
+                    try:
+                        from pythonosc.osc_message import OscMessage
+                        item = OscMessage(data)
+                        value_str = " ".join(str(p) for p in item.params)
+                        logger.info(f"[OSC] {ts}  {item.address} → {value_str}   ←←← COPY THIS FOR MAPPINGS")
+                    except Exception as e:
+                        logger.error(f"Message parse error: {e}")
         except Exception as e:
             logger.error(f"OSC Monitor error: {e}")
         finally:

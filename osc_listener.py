@@ -31,7 +31,7 @@ import logging
 from collections import deque
 
 from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import ThreadingOSCUDPServer
+from pythonosc.osc_server import BlockingOSCUDPServer
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +131,18 @@ class DeviceState:
             channels = (self.submixes.setdefault(submix_key, {})
                         .setdefault(row, {})
                         .setdefault(ch, {}))
+            # Freshness stamp: DeviceState accumulates across layout
+            # changes, and consumers must be able to ignore entries from
+            # a previous layout (stale ghost strips defeated the crash
+            # guard and won name resolution — review findings)
+            channels["_seen"] = now
 
             if field == "trackname" and args:
                 channels["name"] = str(args[0])
-                if page == "1":
+                if page == "1" and self.current_row == "1":
+                    # Strip stats describe the INPUT row only — playback/
+                    # output banks counting into real_strip_count skewed
+                    # the stale-map comparison (review finding)
                     self._burst_max_strip = max(self._burst_max_strip, ch)
                     # Grow immediately (shrink only at burst boundaries)
                     if ch > (self.bank_width or 0):
@@ -151,7 +159,10 @@ class DeviceState:
                     channels["volume"] = float(args[0])
                 return False
             if field == "pan" and args:
-                channels["pan"] = float(args[0])
+                if is_val:
+                    channels["pan_val"] = str(args[0])   # "C", "L16", ...
+                else:
+                    channels["pan"] = float(args[0])
                 return False
             return False
 
@@ -234,7 +245,15 @@ class OSCListener:
         dispatcher = Dispatcher()
         dispatcher.set_default_handler(self._handle, needs_reply_address=False)
         try:
-            self._server = ThreadingOSCUDPServer(("0.0.0.0", self.port), dispatcher)
+            # Blocking (single-threaded) on purpose: TotalMix dumps are
+            # 90+ message bursts whose meaning depends on ARRIVAL ORDER
+            # (busX/labelSubmix scope the tracknames that follow). The
+            # threading server dispatched each datagram on its own thread
+            # with no ordering guarantee — context markers could be
+            # processed AFTER the channel data they scope, mis-filing
+            # whole banks (review finding). Handlers are microseconds of
+            # dict work; ordering wins.
+            self._server = BlockingOSCUDPServer(("0.0.0.0", self.port), dispatcher)
         except OSError as e:
             logger.error(
                 f"OSC listener could not bind UDP port {self.port} ({e}) — "
@@ -251,7 +270,13 @@ class OSCListener:
     def stop(self):
         if self._server:
             self._server.shutdown()
+            # Without server_close() the UDP socket stays bound until GC —
+            # a stop()->start() cycle could hit EADDRINUSE and permanently
+            # disable device capture (review finding)
+            self._server.server_close()
             self._server = None
+            if self._thread:
+                self._thread.join(timeout=2.0)
             logger.info("OSC listener stopped")
 
     @property
@@ -262,7 +287,15 @@ class OSCListener:
         # TotalMix sends "/" heartbeats — record nothing, they are just noise
         if address == "/":
             return
-        structural = self.state.ingest(address, args)
+        try:
+            structural = self.state.ingest(address, args)
+        except Exception as e:
+            # python-osc dispatches a packet's messages sequentially and an
+            # uncaught handler exception drops every REMAINING message in
+            # the packet (review finding: a single /1/panNVal string used
+            # to kill the rest of the dump) — contain and log instead
+            logger.warning(f"OSC ingest error on {address} {args!r}: {e}")
+            return
 
         # Wake any wait_for() callers whose condition this message satisfied
         if self._waiters:

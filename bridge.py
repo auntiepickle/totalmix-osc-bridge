@@ -91,8 +91,19 @@ ws_clients = []  # list of active FastAPI WebSocket connections
 
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
-        self._suppress_handler = False
+        self._suppress_count = 0    # >0 while any macro runs (see property)
         self._last_macro_end_time = 0.0
+        # Serializes every sender of device-global aim state (/setSubmix,
+        # /setBankStart, /1/busX) TOGETHER WITH the writes that depend on
+        # it. Page-1/page-2 addresses are relative to submix+row+bank, so
+        # a concurrent macro re-aiming mid-ramp silently retargets the
+        # other macro's writes (review finding: the confirm-then-act
+        # guarantee is void without this). RLock: resolution helpers
+        # re-enter from within a locked step.
+        self._device_lock = threading.RLock()
+        # Bumped whenever the BRIDGE commands a layout change (workspace/
+        # snapshot). Consumers refuse device state older than this.
+        self._layout_epoch = 0.0
         self.osc_client = osc_client
         self.mappings = mappings
         self.mappings_is_example = MAPPINGS_IS_EXAMPLE
@@ -117,6 +128,14 @@ class TotalMixOSCBridge:
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
         self.broadcast_state = self._safe_broadcast_state
+
+    @property
+    def _suppress_handler(self):
+        """True while ANY macro is executing. A plain boolean was cleared
+        by whichever concurrent macro finished FIRST, dropping feedback
+        suppression mid-ramp for the still-running one (review finding) —
+        so this is a counter now."""
+        return self._suppress_count > 0
 
     # ─────────────────────────────────────────────────────────────
     # SAFE WEBSOCKET BROADCAST (FINAL VERSION — MQTT thread safe)
@@ -187,6 +206,11 @@ class TotalMixOSCBridge:
         for step in macro.get("steps", []):
             if "operation" in step:
                 op = step["operation"]
+                if "duration" in op:   # explicit seconds override bars/bpm
+                    try:
+                        return int(float(op["duration"]) * 1000)
+                    except (TypeError, ValueError):
+                        pass
                 bars = op.get("bars", 2)
                 bpm  = op.get("bpm", 140)
                 if bpm == "clock":
@@ -273,7 +297,10 @@ class TotalMixOSCBridge:
             return False
 
         t0 = time.time()
-        self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
+        with self._device_lock:
+            self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
+        self._outputs_cache = None
+        self._layout_epoch = time.time()
         self.current_workspace = workspace
         logger.info(f"switch_to: workspace '{workspace}' (slot {ws_slot})")
 
@@ -285,12 +312,18 @@ class TotalMixOSCBridge:
             snapshots = ws_entry.get("snapshots", {})
             snap_num  = None
             for snap_key, snap_val in snapshots.items():
-                if str(snap_val).strip().lower() == snapshot.strip().lower():
-                    snap_num = snap_key
+                # snapshot maps come in two shapes: {"2": "Live"} and
+                # {"2": {"name": "Live", "index": 2}} — handle both
+                cand = (snap_val.get("name") or snap_key)                     if isinstance(snap_val, dict) else snap_val
+                if str(cand).strip().lower() == snapshot.strip().lower():
+                    snap_num = (snap_val.get("index") or snap_key)                         if isinstance(snap_val, dict) else snap_key
                     break
             if snap_num is not None:
                 osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
-                self.osc_client.send_message(osc_addr, 1.0)
+                with self._device_lock:
+                    self.osc_client.send_message(osc_addr, 1.0)
+                self._outputs_cache = None
+                self._layout_epoch = time.time()
                 self.current_snapshot = snapshot.strip().lower()
                 logger.info(f"switch_to: snapshot '{snapshot}' ({osc_addr})")
             else:
@@ -349,11 +382,11 @@ class TotalMixOSCBridge:
                     logger.info(f"   → '{macro_name}' running, mode=ignore — dropped")
                     return
                 elif fire_mode == "queue":
-                    self._queued_params[macro_name] = param
+                    self._queued_params[macro_name] = (param, clock_bpm)
                     logger.info(f"   → '{macro_name}' running, mode=queue — queued (param={param:.3f})")
                     return
                 elif fire_mode == "restart":
-                    self._queued_params[macro_name] = param
+                    self._queued_params[macro_name] = (param, clock_bpm)
                     ev = self._cancel_events.get(macro_name)
                     if ev:
                         ev.set()
@@ -368,12 +401,17 @@ class TotalMixOSCBridge:
                     logger.info(f"   → '{macro_name}' in debounce window ({elapsed:.0f}/{debounce_ms}ms) — ignored")
                     return
 
-            self._suppress_handler = True
+            self._suppress_count += 1
             cancel_event = threading.Event()
             self._cancel_events[macro_name] = cancel_event
             self._running_macros.add(macro_name)
 
         try:
+          # All device-global aim state (/setSubmix, /setBankStart, /1/busX)
+          # and every write relative to it happens under the device lock —
+          # one macro's step sequence at a time. Without it a concurrent
+          # macro's re-aim silently retargets this macro's in-flight writes.
+          with self._device_lock:
             # === ALWAYS RESOLVE SLOTS/INDICES ===
             ws_slot = None
             snap_num = None
@@ -423,6 +461,11 @@ class TotalMixOSCBridge:
                 if ws_name and ws_slot is not None:
                     t0 = time.time()
                     self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
+                    # The layout just changed: cached output rows and any
+                    # state captured before this instant are void (a stale
+                    # cache here once could approve a crashing /setSubmix)
+                    self._outputs_cache = None
+                    self._layout_epoch = time.time()
                     logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
                     self.current_workspace = ws_name
                     if self.mqtt_client:
@@ -440,6 +483,9 @@ class TotalMixOSCBridge:
                     osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
                     t0 = time.time()
                     self.osc_client.send_message(osc_addr, 1.0)
+                    # Snapshots re-pair strips and can change layouts too
+                    self._outputs_cache = None
+                    self._layout_epoch = time.time()
                     logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
                     self.current_snapshot = snap_name
                     if self.mqtt_client:
@@ -464,7 +510,15 @@ class TotalMixOSCBridge:
             })
 
             # === MACRO STEPS WITH OPERATION LIBRARY ===
-            for step in macro.get("steps", []):
+            # Restores are GUARANTEED via finally: an exception (or refusal
+            # mid-sequence) must never leave the bank scrolled or a non-
+            # input row selected — both persist on the device and silently
+            # mis-target every later macro (review finding).
+            _bank_dirty = False
+            _row_dirty = any(str(s.get("target", {}).get("row", 1)) in ("2", "3")
+                             for s in macro.get("steps", []) if "target" in s)
+            try:
+             for step in macro.get("steps", []):
                 osc_addr = step.get("osc")
 
                 # CRASH GUARD for RAW steps: /setSubmix past the last real
@@ -544,6 +598,9 @@ class TotalMixOSCBridge:
                                  str(step["target"].get("param", "")).lower()
                                  in self.CHANNEL_DETAIL_PARAMS)
 
+                if _restore_bank:
+                    _bank_dirty = True
+
                 if "operation" in step and step.get("value") == "{{param}}":
                     op_config = step["operation"]
                     # Substitute live MIDI clock BPM when the mapping uses "bpm": "clock"
@@ -561,6 +618,7 @@ class TotalMixOSCBridge:
                     )
                     if _restore_bank:
                         self.osc_client.send_message("/setBankStart", 0.0)
+                        _bank_dirty = False
                         logger.info("   → bank window restored to 0 after channel-detail step")
                     continue
 
@@ -573,15 +631,18 @@ class TotalMixOSCBridge:
                     logger.error(f"OSC send failed: {e}")
                 if _restore_bank:
                     self.osc_client.send_message("/setBankStart", 0.0)
+                    _bank_dirty = False
                     logger.info("   → bank window restored to 0 after channel-detail step")
-
-            # Restore the input row if any step drove the playback or
-            # output row — page-1 addresses are row-relative, so leaving
-            # another row selected would mis-route the next macro
-            if any(str(s.get("target", {}).get("row", 1)) in ("2", "3")
-                   for s in macro.get("steps", []) if "target" in s):
-                self.osc_client.send_message("/1/busInput", 1.0)
-                logger.info("   → input row restored after playback/output-row step")
+            finally:
+                if _bank_dirty:
+                    self.osc_client.send_message("/setBankStart", 0.0)
+                    logger.info("   → bank window restored to 0 (finally)")
+                # Restore the input row if any step drove the playback or
+                # output row — page-1 addresses are row-relative, so leaving
+                # another row selected would mis-route the next macro
+                if _row_dirty:
+                    self.osc_client.send_message("/1/busInput", 1.0)
+                    logger.info("   → input row restored after playback/output-row step")
 
             # === GUARANTEED HA SYNC ===
             if self.mqtt_client:
@@ -613,16 +674,18 @@ class TotalMixOSCBridge:
             )
 
         finally:
-            self._suppress_handler = False
             self._last_macro_end_time = time.time()
             with self._macro_lock:
+                self._suppress_count = max(0, self._suppress_count - 1)
                 self._cancel_events.pop(macro_name, None)
                 self._running_macros.discard(macro_name)
                 # Fire any queued trigger (queue mode or restart mode)
                 queued = self._queued_params.pop(macro_name, None)
             if queued is not None:
-                logger.info(f"   → '{macro_name}' firing queued trigger (param={queued:.3f})")
-                threading.Thread(target=self.run_macro, args=(macro_name, queued), daemon=True).start()
+                q_param, q_bpm = queued
+                logger.info(f"   → '{macro_name}' firing queued trigger (param={q_param:.3f})")
+                threading.Thread(target=self.run_macro, args=(macro_name, q_param),
+                                 kwargs={"clock_bpm": q_bpm}, daemon=True).start()
 
     # ─────────────────────────────────────────────────────────────
     # NAME-BASED TARGET RESOLUTION (live, via OSC feedback)
@@ -887,6 +950,10 @@ class TotalMixOSCBridge:
             # compute, CONFIRM, then act — every wrong-channel write this
             # project has produced would have been caught by this check
             if not self._confirm_page2_aim(channel_name, "3"):
+                # restore what the failed aim changed: the scrolled bank
+                # and the output row both persist on the device
+                self.osc_client.send_message("/setBankStart", 0.0)
+                self.osc_client.send_message("/1/busInput", 1.0)
                 return None, None, "not_in_bank"
             addr = self.CHANNEL_DETAIL_PARAMS[param]
             logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
@@ -1033,6 +1100,8 @@ class TotalMixOSCBridge:
                     self.osc_client.send_message("/setBankStart", float(offset))
                     # compute, CONFIRM, then act (see _confirm_page2_aim)
                     if not self._confirm_page2_aim(channel_name, row):
+                        # failed aim left the bank scrolled — restore it
+                        self.osc_client.send_message("/setBankStart", 0.0)
                         return None, None, "not_in_bank"
                     addr = self.CHANNEL_DETAIL_PARAMS[param]
                     logger.info(f"   → live-resolved '{channel_name}' {param} → strip "
@@ -1076,13 +1145,14 @@ class TotalMixOSCBridge:
             return {n for n in names
                     if n and n.lower() not in ("n.a.", "n/a")}
 
-        before = listener.state.message_count
-        self.osc_client.send_message("/1/busOutput", 1.0)
-        if listener.wait_for(lambda st: st.message_count > before, timeout):
-            # A row dump has no end-of-burst marker — short bounded settle
-            # so stale names from a previous layout get overwritten first
-            time.sleep(0.15)
-        self.osc_client.send_message("/1/busInput", 1.0)
+        with self._device_lock:
+            before = listener.state.message_count
+            self.osc_client.send_message("/1/busOutput", 1.0)
+            if listener.wait_for(lambda st: st.message_count > before, timeout):
+                # A row dump has no end-of-burst marker — short bounded
+                # settle so stale names get overwritten first
+                time.sleep(0.15)
+            self.osc_client.send_message("/1/busInput", 1.0)
         names = _names(listener.state) or None
         if names:
             self._outputs_cache = (time.time(), names)
@@ -1155,8 +1225,9 @@ class TotalMixOSCBridge:
         state = listener.state
         before = state.message_count
         t0 = time.time()
-        self.osc_client.send_message("/1/busPlayback", 1.0)
-        self.osc_client.send_message("/1/busInput", 1.0)
+        with self._device_lock:
+            self.osc_client.send_message("/1/busPlayback", 1.0)
+            self.osc_client.send_message("/1/busInput", 1.0)
         alive = listener.wait_for(lambda st: st.message_count > before, timeout)
         elapsed = time.time() - t0
 

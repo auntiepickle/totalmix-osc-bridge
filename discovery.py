@@ -64,8 +64,31 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
     prev_label = None
     dupe_run = 0
     for i in range(1, submix_count + 1):
+        t_send = time.time()
         osc_client.send_message("/setSubmix", float(i))
-        time.sleep(settle_s)
+        # CONFIRM the label is FRESH before classifying it. The old fixed
+        # sleep read whatever current_submix held: one lost/late
+        # labelSubmix datagram made a real submix look like a stereo-pair
+        # duplicate — silently dropping it from the map AND letting the
+        # walk run past the output-count stop toward the fatal index
+        # (review finding). An unconfirmed label is never classified.
+        confirmed = listener.wait_for(
+            lambda st: (st.raw_entry("/1/labelSubmix") or {})
+                       .get("last_seen", 0) >= t_send,
+            max(settle_s, 1.0))
+        time.sleep(settle_s)  # let the bank burst behind the label land
+        if not confirmed:
+            entry = {"index": i, "label": None,
+                     "skipped": "no labelSubmix confirmation",
+                     "stop": (f"no labelSubmix followed /setSubmix {i} — "
+                              f"aborting the walk (unconfirmed labels are "
+                              f"never classified; device dead or feedback "
+                              f"lost — probe it)")}
+            walk_log.append(entry)
+            logger.error(f"Walk aborted at index {i}: {entry['stop']}")
+            if progress_cb:
+                progress_cb(i, submix_count, None)
+            break
         name = listener.state.current_submix
         entry = {"index": i, "label": name}
         stop = None
