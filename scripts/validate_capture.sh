@@ -52,6 +52,17 @@ echo "ok: $COUNT distinct OSC addresses captured"
 echo "$STATE" | { python3 -c 'import json,sys; d=json.load(sys.stdin); print("current submix:", d["current_submix"]); print("submixes seen:", list(d["submixes"]))' 2>/dev/null || true; }
 
 say "4/5 Discovery walk (up to ~100s — includes per-submix playback capture)"
+# Probe before walking: a mid-walk device freeze once produced a 1-submix
+# "successful" walk. Probing before/after every walk also builds the data
+# for the walks-vs-freezes question (correlation currently unresolved).
+PRE_PROBE=$(curl -sf -X POST "$BASE/api/device/probe" 2>/dev/null)
+if echo "$PRE_PROBE" | grep -q '"alive": *false'; then
+  fail "device NOT responding before the walk — fix TotalMix first (In Use ticked?)"
+elif [ -n "$PRE_PROBE" ]; then
+  echo "pre-walk probe: alive"
+else
+  echo "pre-walk probe unavailable (no listener?) — continuing"
+fi
 curl -sf -X POST "$BASE/api/device/discover" \
   -H 'Content-Type: application/json' -d '{"submix_count": 32, "settle_s": 1.0}' | json \
   || fail "could not start discovery (409 = already running; wait and retry)"
@@ -65,6 +76,13 @@ for _ in $(seq 1 90); do
 done
 RESULT=$(curl -sf "$BASE/api/device/discovery")
 [ "$STATUS" = "done" ] || { echo "$RESULT" | json; fail "discovery ended with status '$STATUS'"; }
+
+POST_PROBE=$(curl -sf -X POST "$BASE/api/device/probe" 2>/dev/null)
+if echo "$POST_PROBE" | grep -q '"alive": *false'; then
+  fail "device stopped responding DURING the walk — do NOT apply this map (it is truncated); restart TotalMix and re-walk"
+elif [ -n "$POST_PROBE" ]; then
+  echo "post-walk probe: alive"
+fi
 
 say "5/5 Result"
 # heredoc, not python3 -c: backslash-escaped quotes inside a single-quoted -c

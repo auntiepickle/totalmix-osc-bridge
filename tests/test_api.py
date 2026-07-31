@@ -200,3 +200,21 @@ def test_widths_carry_only_when_layout_unchanged():
     assert "channel_widths" not in changed_layout
 
     assert _carry_widths(cmap(["AN 1/2"]), cmap(["AN 1/2"])) is False  # nothing to carry
+
+
+def test_apply_refuses_collapsed_walk(monkeypatch):
+    """A mid-walk device freeze produces a 1-submix 'successful' walk —
+    applying it clobbered a good 16-submix map on hardware. Refuse a
+    dramatic collapse unless forced."""
+    import web.web_client as wc
+    monkeypatch.setattr(wc, "backup_json_files", lambda *a, **k: None)
+    monkeypatch.setattr(bridge_module.bridge, "channel_map", {
+        "submixes": {f"Sub {i}": {"sends": {}} for i in range(16)},
+    })
+    monkeypatch.setattr(bridge_module.bridge, "discovery_state", {
+        "status": "done",
+        "channel_map": {"submixes": {"Only One": {"sends": {}}}},
+    })
+    r = client.post("/api/device/discovery/apply", json={})
+    assert r.status_code == 409
+    assert "mid-walk" in r.json()["detail"]

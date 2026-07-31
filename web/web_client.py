@@ -461,31 +461,85 @@ def _carry_widths(old_map, new_map):
     return False
 
 
+def _live_row1_names():
+    """Strip names on the live device's input row, from listener state.
+    None when the listener is absent or blind — coverage then unknowable."""
+    lst = bridge.osc_listener
+    if lst is None or not lst.running:
+        return None
+    st = lst.state
+    names = set()
+    for sub in list(st.submixes.keys()):
+        for _ch, d in st.submix_snapshot(sub).get("1", {}).items():
+            n = str(d.get("name", "")).strip()
+            if n and n.lower() not in ("n.a.", "n/a"):
+                names.add(n)
+    return names or None
+
+
+class ApplyBody(BaseModel):
+    force: bool = False
+
+
 @app.post("/api/device/discovery/apply")
-async def apply_discovery():
+async def apply_discovery(body: ApplyBody = ApplyBody()):
     """Promote the last discovery result to the live ufx2_channel_map.json."""
     state = bridge.discovery_state
     if state.get("status") != "done" or "channel_map" not in state:
         raise HTTPException(status_code=409, detail="No completed discovery to apply")
-    backup_json_files("ufx2_channel_map.json")
     new_map = state["channel_map"]
+
+    # Sanity guard: a mid-walk device freeze produces a walk that "completes"
+    # with one submix (the one it was parked on) — applying that clobbers a
+    # good map (happened live). Refuse a dramatic collapse unless forced.
+    old_subs = len((bridge.channel_map or {}).get("submixes", {}))
+    new_subs = len(new_map["submixes"])
+    if not body.force and old_subs >= 4 and new_subs * 2 < old_subs:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Walk found only {new_subs} submixes vs {old_subs} in the "
+                   f"live map — the device may have stopped responding "
+                   f"mid-walk. Probe it (POST /api/device/probe), re-run "
+                   f"discovery, or pass {{\"force\": true}} to apply anyway.")
+
+    backup_json_files("ufx2_channel_map.json")
     # Discovery builds the map from scratch — without this, every apply
     # silently disarmed EQ macros by dropping the verified widths
-    if _carry_widths(bridge.channel_map, new_map):
+    carried = _carry_widths(bridge.channel_map, new_map)
+    if carried:
         logger.info("channel_widths preserved across discovery apply (layout unchanged)")
     elif (bridge.channel_map or {}).get("channel_widths"):
         logger.warning("⚠️ channel_widths DROPPED: the strip layout changed across "
                        "this discovery — EQ macros will refuse until widths are "
                        "re-derived or re-entered for the new layout")
+
+    # 'carried' only says old-map names == new-map names. Widths are CONSUMED
+    # against LIVE strip names, a different namespace — report coverage of
+    # the live layout so carried:true can't masquerade as EQ-is-armed
+    # (observed live: carried widths keyed on a 17-strip layout with a
+    # 23-strip device — 16 live strips uncovered, EQ fully disarmed).
+    live = _live_row1_names()
+    widths = new_map.get("channel_widths", {})
+    coverage = None
+    if live is not None:
+        uncovered = sorted(n for n in live if n not in widths)
+        coverage = {"live_strips": len(live),
+                    "covered": len(live) - len(uncovered),
+                    "uncovered": uncovered}
+        if uncovered and widths:
+            logger.warning(f"⚠️ channel_widths cover {coverage['covered']}/"
+                           f"{len(live)} live strips — EQ will refuse on: "
+                           f"{uncovered}")
+
     target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
     with open(target, "w") as f:
         json.dump(new_map, f, indent=2)
     bridge._load_channel_map()
     bridge.channel_map_is_example = False
-    submixes = len(new_map["submixes"])
-    logger.info(f"✅ Discovered channel map applied ({submixes} submixes)")
-    return {"status": "success", "submixes": submixes,
-            "channel_widths_carried": "channel_widths" in new_map}
+    logger.info(f"✅ Discovered channel map applied ({new_subs} submixes)")
+    return {"status": "success", "submixes": new_subs,
+            "channel_widths_carried": carried,
+            "widths_live_coverage": coverage}
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
