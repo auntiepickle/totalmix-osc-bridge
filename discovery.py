@@ -76,19 +76,37 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
             lambda st: (st.raw_entry("/1/labelSubmix") or {})
                        .get("last_seen", 0) >= t_send,
             max(settle_s, 1.0))
-        time.sleep(settle_s)  # let the bank burst behind the label land
         if not confirmed:
-            entry = {"index": i, "label": None,
-                     "skipped": "no labelSubmix confirmation",
-                     "stop": (f"no labelSubmix followed /setSubmix {i} — "
-                              f"aborting the walk (unconfirmed labels are "
-                              f"never classified; device dead or feedback "
-                              f"lost — probe it)")}
-            walk_log.append(entry)
-            logger.error(f"Walk aborted at index {i}: {entry['stop']}")
-            if progress_cb:
-                progress_cb(i, submix_count, None)
-            break
+            # SILENCE IS AMBIGUOUS (hardware-measured, v0.1.0-alpha
+            # regression): a /setSubmix that selects the ALREADY-selected
+            # submix — every stereo pair's second index — is a total
+            # no-op: zero messages, no label. But a crashed device is
+            # also silent, and walking on through a crash is the #17
+            # injury. Disambiguate with the guaranteed-change row toggle
+            # (the liveness probe's primitive): alive means the send was
+            # a no-op and the unchanged label classifies as the pair
+            # duplicate below; dead means abort.
+            b0 = listener.state.message_count
+            osc_client.send_message("/1/busPlayback", 1.0)
+            osc_client.send_message("/1/busInput", 1.0)
+            alive = listener.wait_for(
+                lambda st: st.message_count > b0, max(settle_s, 1.0))
+            if alive:
+                logger.info(f"   index {i}: silent /setSubmix, device alive "
+                            f"— no-op (still on "
+                            f"'{listener.state.current_submix}')")
+            else:
+                entry = {"index": i, "label": None,
+                         "skipped": "no feedback and device not responding",
+                         "stop": (f"/setSubmix {i} was silent AND the row "
+                                  f"toggle got no feedback — device dead "
+                                  f"or feedback lost, aborting the walk")}
+                walk_log.append(entry)
+                logger.error(f"Walk aborted at index {i}: {entry['stop']}")
+                if progress_cb:
+                    progress_cb(i, submix_count, None)
+                break
+        time.sleep(settle_s)  # let the bank burst behind the label land
         name = listener.state.current_submix
         entry = {"index": i, "label": name}
         stop = None

@@ -161,3 +161,76 @@ def test_walk_stops_at_output_count_before_any_fatal_index():
     assert "stop" in walk_log[-1]
 
 
+
+
+class PairAccurateFake(FakeTotalMix):
+    """Device-accurate: a /setSubmix that selects the ALREADY-selected
+    submix emits NOTHING (hardware-measured — every stereo pair's second
+    index is a silent no-op). Bus-row toggles always produce feedback."""
+
+    def __init__(self, listener):
+        super().__init__(listener)
+        self._current = None
+
+    def send_message(self, address, value):
+        if address in ("/1/busPlayback", "/1/busInput"):
+            self.listener._handle(address, 1.0)  # guaranteed change/echo
+            return
+        if address != "/setSubmix":
+            return
+        self.set_submix_calls.append(int(value))
+        index = min(int(value), max(self.SUBMIXES))
+        name, rows = self.SUBMIXES[index]
+        if name == self._current:
+            return  # SILENT no-op — the regression's root cause
+        self._current = name
+        self.listener._handle("/1/labelSubmix", name)
+        for row, channels in rows.items():
+            for ch, trackname in channels.items():
+                self.listener._handle(f"/{row}/trackname{ch}", trackname)
+                self.listener._handle(f"/{row}/volume{ch}", 0.5)
+
+
+def test_walk_survives_silent_pair_indices():
+    """v0.1.0-alpha regression: the pair's silent second index aborted the
+    walk at 2 of 16 submixes. Silence + alive row-toggle = no-op, classify
+    as the stereo-pair duplicate and continue."""
+    class Pairs(PairAccurateFake):
+        SUBMIXES = {
+            1: ("Main", {}),
+            2: ("AN 3/4", {}),   # pair: indices 2+3, 3 is SILENT
+            3: ("AN 3/4", {}),
+            4: ("AN 5/6", {}),
+            5: ("AN 5/6", {}),   # silent again
+        }
+
+    listener = OSCListener(0)
+    device = Pairs(listener)
+    channel_map, walk_log = discover_channel_map(device, listener,
+                                                 submix_count=5, settle_s=0)
+    assert set(channel_map["submixes"]) == {"Main", "AN 3/4", "AN 5/6"}
+    by_index = {e["index"]: e for e in walk_log}
+    assert by_index[3]["skipped"] == "duplicate label (stereo pair)"
+    assert by_index[5]["skipped"] == "duplicate label (stereo pair)"
+
+
+def test_walk_aborts_when_silent_and_dead():
+    """Silence + a dead row toggle = the #17 injury scenario — abort."""
+    class DiesAfterTwo(PairAccurateFake):
+        SUBMIXES = {1: ("Main", {}), 2: ("AES", {}), 3: ("AES", {})}
+        def send_message(self, address, value):
+            if getattr(self, "_dead", False):
+                if address == "/setSubmix":
+                    self.set_submix_calls.append(int(value))
+                return  # crashed: silent to EVERYTHING incl. toggles
+            super().send_message(address, value)
+            if address == "/setSubmix" and int(value) == 2:
+                self._dead = True
+
+    listener = OSCListener(0)
+    device = DiesAfterTwo(listener)
+    channel_map, walk_log = discover_channel_map(device, listener,
+                                                 submix_count=6, settle_s=0)
+    assert "stop" in walk_log[-1]
+    assert "device dead or feedback lost" in walk_log[-1]["stop"]
+    assert device.set_submix_calls == [1, 2, 3]  # aborted at the dead index

@@ -1072,6 +1072,8 @@ class TotalMixOSCBridge:
             # only candidates are old (review finding).
             if find_strip(listener.state) is None:
                 other = "/1/busPlayback" if bus_addr == "/1/busInput" else "/1/busInput"
+                logger.info(f"   → no fresh match in listener state — "
+                            f"provoking a dump ({other} → {bus_addr})")
                 self.osc_client.send_message(other, 1.0)
                 self.osc_client.send_message(bus_addr, 1.0)
         elif not listener.wait_for(

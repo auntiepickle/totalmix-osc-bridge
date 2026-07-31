@@ -28,6 +28,13 @@ Honest edges of the pre-alpha, kept current so nobody re-discovers them.
 - Concurrent macros serialize at step granularity behind the device-aim
   lock — a long ramp makes a simultaneously fired macro wait. Correctness
   over parallelism; finer-grained locking is future work.
+- **Ramp "parked at start" means the ramp trajectory's start** (the sweep
+  floor), not the channel's pre-ramp value. Natural for a volume fade;
+  on an EQ-gain ramp it reads as "slammed to the floor and left there".
+  Restore-to-prior-value and editor wording are #19 design-half work.
+- A `/setSubmix` to the already-selected submix (every stereo pair's
+  second index) is a **total no-op — zero feedback**. The walk
+  disambiguates silence from a crash with a row-toggle probe.
 
 ## Not exposed
 - `/2/reverbSend` — constant sentinel (−3.615/−oo) on every channel;
