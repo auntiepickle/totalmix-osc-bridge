@@ -467,6 +467,34 @@ class TotalMixOSCBridge:
             for step in macro.get("steps", []):
                 osc_addr = step.get("osc")
 
+                # CRASH GUARD for RAW steps: /setSubmix past the last real
+                # output crashes TotalMix (hardware root cause). A raw index
+                # cannot be name-verified, so refuse when the live outputs
+                # are unknown or the index is PROVABLY out of range (more
+                # than 2 hw channels per output strip is impossible). The
+                # whole macro stops — later raw steps assume the switch.
+                if "target" not in step and osc_addr == "/setSubmix":
+                    outs = self._live_output_names()
+                    try:
+                        raw_idx = float(value if step.get("value") == "{{param}}"
+                                        else step.get("value"))
+                    except (TypeError, ValueError):
+                        raw_idx = None
+                    if outs is None or raw_idx is None or raw_idx > 2 * len(outs):
+                        why = ("live outputs not enumerable" if outs is None
+                               else f"index {raw_idx} provably out of range "
+                                    f"({len(outs)} output strips)")
+                        logger.error(f"   → raw /setSubmix REFUSED ({why}) — "
+                                     f"an out-of-range /setSubmix crashes "
+                                     f"TotalMix; use a name-based target. "
+                                     f"Macro aborted.")
+                        self.broadcast_state(macro_event={
+                            "type": "macro_skipped",
+                            "name": macro_name,
+                            "reason": "setsubmix_unverifiable",
+                        })
+                        break
+
                 # Name-based target: live-resolve strip index via OSC feedback.
                 # Stored-address fallback ONLY when feedback is unavailable —
                 # if the live bank is visible and the channel is absent, the
@@ -776,6 +804,26 @@ class TotalMixOSCBridge:
             if index is None:
                 logger.warning(f"   → target submix '{submix_name}' not in channel map")
                 return None, None, "not_in_bank"
+            # CRASH GUARD (hardware root cause, 2026-07-31): /setSubmix past
+            # the device's last real output crashes TotalMix outright, and
+            # stale maps are routine — the index is only trusted when the
+            # LIVE output row (one strip per submix, enumerated WITHOUT
+            # /setSubmix) still matches the map the index came from.
+            live_outputs = self._live_output_names()
+            if live_outputs is None:
+                logger.error(f"   → cannot enumerate the live output row — "
+                             f"REFUSING /setSubmix {index} ('{submix_name}'): "
+                             f"an out-of-range index crashes TotalMix")
+                return None, None, "not_in_bank"
+            map_outputs = {str(n).strip() for n in
+                           (self.channel_map or {}).get("submixes", {})}
+            if live_outputs != map_outputs:
+                logger.error(f"   → output layout changed since the map was "
+                             f"captured (gone: "
+                             f"{sorted(map_outputs - live_outputs)}, new: "
+                             f"{sorted(live_outputs - map_outputs)}) — "
+                             f"REFUSING /setSubmix {index}; re-run discovery")
+                return None, None, "not_in_bank"
 
         # Normalize the bank so strip indices are absolute — a bank left
         # scrolled (e.g. by TouchOSC) would shift every /1/volume{N}.
@@ -905,6 +953,38 @@ class TotalMixOSCBridge:
                      f"'{submix_name}' (live strips: {real}) — refusing the "
                      f"stored address, it may point at a different channel now")
         return index, None, "not_in_bank"
+
+    def _live_output_names(self, timeout: float = 1.5):
+        """Names of the live output strips (row 3), from a fresh busOutput
+        dump. Each output strip IS one submix, so this enumerates the
+        submixes that exist RIGHT NOW without sending /setSubmix — which
+        matters because an out-of-range /setSubmix CRASHES TotalMix
+        (hardware root cause, controlled test 2026-07-31). Cached ~2s so
+        one macro run pays for the row toggle once. None = cannot tell."""
+        cached = getattr(self, "_outputs_cache", None)
+        if cached and time.time() - cached[0] < 2.0:
+            return cached[1]
+        listener = self.osc_listener
+        if listener is None or not listener.running or self.osc_client is None:
+            return None
+
+        def _names(st):
+            strips = st.submix_snapshot("_outputs").get("3", {})
+            names = {str(d.get("name", "")).strip() for d in strips.values()}
+            return {n for n in names
+                    if n and n.lower() not in ("n.a.", "n/a")}
+
+        before = listener.state.message_count
+        self.osc_client.send_message("/1/busOutput", 1.0)
+        if listener.wait_for(lambda st: st.message_count > before, timeout):
+            # A row dump has no end-of-burst marker — short bounded settle
+            # so stale names from a previous layout get overwritten first
+            time.sleep(0.15)
+        self.osc_client.send_message("/1/busInput", 1.0)
+        names = _names(listener.state) or None
+        if names:
+            self._outputs_cache = (time.time(), names)
+        return names
 
     def probe_device(self, timeout: float = 2.5):
         """Liveness probe: send a state-CHANGING command and confirm a

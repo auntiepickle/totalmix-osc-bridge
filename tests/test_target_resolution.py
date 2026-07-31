@@ -33,7 +33,11 @@ TARGET_MACRO = {
 
 class LiveFakeTotalMix:
     """Answers /setSubmix by pushing feedback where AN 1/2 are now LINKED —
-    one strip — so AN 3 lives at strip 2, not the captured strip 3."""
+    one strip — so AN 3 lives at strip 2, not the captured strip 3.
+    Also echoes bus selections and serves the OUTPUT row (one strip per
+    submix): the /setSubmix crash guard enumerates it before any switch."""
+
+    OUTPUT_NAMES = ["RE-150 In"]
 
     def __init__(self, listener, fake_osc):
         self.listener = listener
@@ -41,7 +45,21 @@ class LiveFakeTotalMix:
 
     def send_message(self, address, value):
         self.fake_osc.send_message(address, value)
-        if address == "/setSubmix" and int(value) == 14:
+        if address in ("/1/busInput", "/1/busPlayback", "/1/busOutput"):
+            self.listener._handle(address, 1.0)
+            if address == "/1/busOutput":
+                for n, name in enumerate(self.OUTPUT_NAMES, 1):
+                    self.listener._handle(f"/1/trackname{n}", name)
+            self.on_bus(address)
+            return
+        if address == "/setSubmix":
+            self.dump_bank(int(value))
+
+    def on_bus(self, address):
+        pass
+
+    def dump_bank(self, index):
+        if index == 14:
             self.listener._handle("/1/labelSubmix", "RE-150 In")
             self.listener._handle("/1/trackname1", "AN 1/2")  # linked pair
             self.listener._handle("/1/trackname2", "AN 3")    # shifted!
@@ -74,24 +92,67 @@ def test_live_resolution_overrides_stale_address(make_bridge, fake_osc):
     assert "/1/volume3" not in fake_osc.addresses()
 
 
-def test_no_listener_falls_back_to_stored_address(make_bridge, fake_osc):
+def test_no_listener_refuses_submix_switch(make_bridge, fake_osc):
+    """No listener = no way to verify the submix still exists, and an
+    out-of-range /setSubmix CRASHES TotalMix (hardware root cause) — the
+    old stored-address fallback must NOT switch submixes blind."""
     b = make_target_bridge(make_bridge, fake_osc, listener=None)
     b.run_macro("m", 0.8)
-    assert ("/setSubmix", 14.0) in fake_osc.sent
-    assert ("/1/volume3", 0.8) in fake_osc.sent  # stale but best available
+    assert "/setSubmix" not in fake_osc.addresses()
+    assert "/1/volume3" not in fake_osc.addresses()
 
 
-def test_no_feedback_times_out_to_stored_address(make_bridge, fake_osc):
+def test_silent_device_refuses_submix_switch(make_bridge, fake_osc):
+    """Listener up but the device answers nothing: the output row cannot
+    be enumerated, so the switch is refused (was: stored-address
+    fallback — no longer permitted, a blind index might be fatal)."""
     listener = OSCListener(0)          # never receives anything
     listener._server = object()
     b = make_bridge({"m": TARGET_MACRO})
     b.channel_map = CHANNEL_MAP
     b.osc_listener = listener
     b.run_macro("m", 0.8)              # osc_client is the plain fake — no feedback
+    assert "/setSubmix" not in fake_osc.addresses()
+    assert "/1/volume3" not in fake_osc.addresses()
 
-    # Patch the timeout small for test speed? run_macro used default 1.5s —
-    # acceptable, but verify the fallback happened:
-    assert ("/1/volume3", 0.8) in fake_osc.sent
+
+class OutputsOnlyTotalMix(LiveFakeTotalMix):
+    """Serves the output row (crash guard passes) but never answers the
+    /setSubmix — models feedback loss after a healthy, valid switch."""
+
+    def dump_bank(self, index):
+        pass
+
+
+def test_no_submix_feedback_falls_back_to_stored_address(make_bridge, fake_osc):
+    """Guard passed (live outputs match the map) and the switch was sent —
+    only the bank dump is missing. THIS is where the stored address stays
+    a legitimate last resort (mis-aim risk only, no crash risk)."""
+    listener = OSCListener(0)
+    b = make_target_bridge(make_bridge, fake_osc, listener)
+    b.osc_client = OutputsOnlyTotalMix(listener, fake_osc)
+    b.run_macro("m", 0.8)
+    assert ("/setSubmix", 14.0) in fake_osc.sent
+    assert ("/1/volume3", 0.8) in fake_osc.sent  # stale but best available
+
+
+class RenamedOutputsTotalMix(LiveFakeTotalMix):
+    """The live output row no longer matches the captured map."""
+
+    OUTPUT_NAMES = ["Something Else Out"]
+
+
+def test_output_layout_drift_refuses_submix_switch(make_bridge, fake_osc):
+    """Map says index 14 = 'RE-150 In' but the live output row disagrees —
+    the index may be out of range, and out-of-range crashes TotalMix."""
+    listener = OSCListener(0)
+    b = make_target_bridge(make_bridge, fake_osc, listener)
+    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
+    b.run_macro("m", 0.8)
+    assert "/setSubmix" not in fake_osc.addresses()
+    skipped = [e["event"] for e in b.events
+               if e["event"] and e["event"]["type"] == "macro_skipped"]
+    assert skipped and skipped[0]["reason"] == "target_not_in_bank"
 
 
 def test_unknown_submix_skips_step_without_crash(make_bridge, fake_osc):
@@ -134,9 +195,8 @@ class SlowBurstTotalMix(LiveFakeTotalMix):
     """Delivers the label immediately but the high strip's trackname late —
     models a 48-fader bank dump still in flight when resolution starts."""
 
-    def send_message(self, address, value):
-        self.fake_osc.send_message(address, value)
-        if address == "/setSubmix" and int(value) == 14:
+    def dump_bank(self, index):
+        if index == 14:
             self.listener._handle("/1/labelSubmix", "RE-150 In")
             # High strip arrives ~0.3s later, past the old 0.15s fixed grace
             def late():
@@ -165,9 +225,8 @@ class RepairedBankTotalMix(LiveFakeTotalMix):
     the linked strip 'AN 1/2' covers it (hardware-observed on snapshot
     recall)."""
 
-    def send_message(self, address, value):
-        self.fake_osc.send_message(address, value)
-        if address == "/setSubmix" and int(value) == 14:
+    def dump_bank(self, index):
+        if index == 14:
             self.listener._handle("/1/labelSubmix", "RE-150 In")
             self.listener._handle("/1/trackname1", "AN 1/2")
             self.listener._handle("/1/trackname2", "RE-101")
@@ -217,11 +276,8 @@ class PlaybackRowTotalMix(LiveFakeTotalMix):
     """Echoes bus selections into feedback (like the real device) and dumps
     playback-row tracknames when /1/busPlayback is selected."""
 
-    def send_message(self, address, value):
-        self.fake_osc.send_message(address, value)
-        if address in ("/1/busInput", "/1/busPlayback"):
-            self.listener._handle(address, value)
-        if address == "/setSubmix" and int(value) == 14:
+    def dump_bank(self, index):
+        if index == 14:
             self.listener._handle("/1/labelSubmix", "RE-150 In")
             # Current row's bank dumps after the submix confirm; the fake
             # dumps playback names (row was selected before setSubmix)
@@ -246,7 +302,8 @@ def test_playback_row_target_selects_bus_and_restores_input(make_bridge, fake_os
     assert ("/1/busPlayback", 1.0) in fake_osc.sent
     assert addrs.index("/1/busPlayback") < addrs.index("/setSubmix")
     assert ("/1/volume3", 0.6) in fake_osc.sent
-    assert addrs.index("/1/volume3") < addrs.index("/1/busInput")
+    last_bus_input = len(addrs) - 1 - addrs[::-1].index("/1/busInput")
+    assert addrs.index("/1/volume3") < last_bus_input
     assert fake_osc.sent[-1] != ("/1/busPlayback", 1.0)  # not left on playback
 
 
@@ -430,10 +487,7 @@ class MixedBankTotalMix(LiveFakeTotalMix):
     """Bank with mixed mono/stereo strips — the hw-channel offset must be
     computed from widths, not strip counts (#5 phase 2)."""
 
-    def send_message(self, address, value):
-        self.fake_osc.send_message(address, value)
-        if address in ("/1/busInput", "/1/busPlayback"):
-            self.listener._handle(address, value)
+    def on_bus(self, address):
         if address == "/1/busInput":
             self.listener._handle("/1/labelSubmix", "Main")
             self.listener._handle("/1/trackname1", "AN 1/2")    # pair -> width 2
@@ -551,3 +605,54 @@ def test_eq_layout_key_ignores_placeholder_strips(make_bridge, fake_osc):
     key_padded = TotalMixOSCBridge._layout_key_from_names(
         ["AN 1/2", "Mavis", "n.a.", "N.A.", ""])
     assert key_clean == key_padded
+
+
+def test_raw_setsubmix_within_range_still_sends(make_bridge, fake_osc):
+    """A raw /setSubmix index that cannot be out of range (<= 2 hw channels
+    per live output strip) passes — the user's legacy macros keep working."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [
+        {"osc": "/setSubmix", "value": "1"},
+        {"osc": "/1/volume3", "value": "{{param}}"},
+    ]}})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.8)
+    assert ("/setSubmix", 1.0) in fake_osc.sent
+    assert ("/1/volume3", 0.8) in fake_osc.sent
+
+
+def test_raw_setsubmix_out_of_range_aborts_macro(make_bridge, fake_osc):
+    """Index 99 on a 1-output-strip device is provably invalid — hardware-
+    proven to CRASH TotalMix. Refuse it AND stop the macro: later raw
+    steps assume the switch happened."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [
+        {"osc": "/setSubmix", "value": "99"},
+        {"osc": "/1/volume3", "value": "{{param}}"},
+    ]}})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.8)
+    assert "/setSubmix" not in {a for a, _ in fake_osc.sent if a == "/setSubmix"} or \
+           ("/setSubmix", 99.0) not in fake_osc.sent
+    assert "/1/volume3" not in fake_osc.addresses()  # macro aborted, not skipped-past
+    skipped = [e["event"] for e in b.events
+               if e["event"] and e["event"]["type"] == "macro_skipped"]
+    assert skipped and skipped[0]["reason"] == "setsubmix_unverifiable"
+
+
+def test_raw_setsubmix_blind_listener_aborts_macro(make_bridge, fake_osc):
+    """No way to enumerate outputs = no way to bound a raw index — refuse."""
+    b = make_bridge({"m": {"steps": [
+        {"osc": "/setSubmix", "value": "14"},
+        {"osc": "/1/volume3", "value": "{{param}}"},
+    ]}})
+    b.channel_map = CHANNEL_MAP
+    b.run_macro("m", 0.8)  # no listener at all
+    assert "/setSubmix" not in fake_osc.addresses()
+    assert "/1/volume3" not in fake_osc.addresses()

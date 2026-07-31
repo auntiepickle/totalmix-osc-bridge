@@ -39,6 +39,28 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
     # cover every channel or discovery will only see the first bank.
     osc_client.send_message("/setBankStart", 0.0)
 
+    # Bound the walk by the LIVE output row before sending any /setSubmix:
+    # each output strip is one submix, and /setSubmix past the last real
+    # submix CRASHES TotalMix outright (hardware root cause, controlled
+    # test 2026-07-31: index 30 fatal on a 28-index layout). Knowing how
+    # many submixes exist lets the walk stop BEFORE the fatal index — the
+    # label-repeat backstop below only detects the injury one index late.
+    osc_client.send_message("/1/busOutput", 1.0)
+    time.sleep(settle_s)
+    osc_client.send_message("/1/busInput", 1.0)
+    time.sleep(settle_s)
+    out_strips = listener.state.submix_snapshot("_outputs").get("3", {})
+    out_names = {str(d.get("name", "")).strip() for d in out_strips.values()}
+    out_names = {n for n in out_names if n and n.lower() not in ("n.a.", "n/a")}
+    expected = len(out_names) or None
+    if expected:
+        logger.info(f"Output row reports {expected} strips — the walk stops "
+                    f"after finding that many submixes")
+    else:
+        logger.warning("Output row not enumerable — walking with the "
+                       "label-repeat backstop only (it aborts one index LATE; "
+                       "the first past-the-end index is the fatal one)")
+
     prev_label = None
     dupe_run = 0
     for i in range(1, submix_count + 1):
@@ -46,17 +68,24 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
         time.sleep(settle_s)
         name = listener.state.current_submix
         entry = {"index": i, "label": name}
+        stop = None
         if not name or name.strip().lower() in EMPTY_NAMES:
             entry["skipped"] = "empty or no feedback"
             dupe_run = 0
         elif any(n == name for _, n in found):
             # One consecutive duplicate = the second half of a stereo-linked
             # output (pairs occupy two indices). A longer run means the walk
-            # has saturated past the last real submix — TotalMix clamps
-            # out-of-range indices and keeps reporting the final label.
+            # went past the last real submix — and the index that first went
+            # past may already have crashed the device, so ABORT immediately
+            # instead of walking on (crashes A/B: 31/32 never answered).
             dupe_run = dupe_run + 1 if name == prev_label else 1
-            entry["skipped"] = ("duplicate label (stereo pair)" if dupe_run == 1
-                                else "past last submix (label repeating)")
+            if dupe_run == 1:
+                entry["skipped"] = "duplicate label (stereo pair)"
+            else:
+                entry["skipped"] = "past last submix (label repeating)"
+                stop = (f"label repeating at index {i}: past the last submix. "
+                        f"An out-of-range /setSubmix crashes TotalMix — this "
+                        f"index may already have done it; probe the device.")
         else:
             found.append((i, name))
             dupe_run = 0
@@ -67,10 +96,17 @@ def discover_channel_map(osc_client, listener, submix_count=32, settle_s=1.0,
                 time.sleep(settle_s)
                 osc_client.send_message("/1/busInput", 1.0)
                 time.sleep(settle_s)
+            if expected is not None and len(found) >= expected:
+                stop = (f"all {expected} outputs found — stopping before any "
+                        f"out-of-range /setSubmix (it would crash TotalMix)")
         prev_label = name
         walk_log.append(entry)
         if progress_cb:
             progress_cb(i, submix_count, name)
+        if stop:
+            entry["stop"] = stop
+            logger.warning(f"Walk stopped early: {stop}")
+            break
 
     # Put TotalMix back on the submix that was selected before the walk
     restore = next((i for i, n in found if n == initial_submix), None)

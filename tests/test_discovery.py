@@ -111,9 +111,11 @@ def test_na_strips_beyond_hardware_filtered_out():
     assert not [k for k in sends if "n.a." in k.lower()]
 
 
-def test_walk_saturation_labeled_past_last_submix():
-    """One consecutive duplicate = stereo pair half; further repeats mean
-    TotalMix is clamping past its last submix (seen live at indices 29-32)."""
+def test_walk_aborts_at_first_past_last_submix():
+    """One consecutive duplicate = stereo pair half. A SECOND repeat means
+    the walk went past the last submix — hardware-proven to crash TotalMix
+    — so the walk must ABORT there, not keep sending (backstop for when
+    the output row could not be enumerated)."""
     class SaturatingFake(FakeTotalMix):
         SUBMIXES = {
             1: ("Main", {}),
@@ -127,5 +129,35 @@ def test_walk_saturation_labeled_past_last_submix():
                                        submix_count=6, settle_s=0)
     by_index = {e["index"]: e for e in walk_log}
     assert by_index[3]["skipped"] == "duplicate label (stereo pair)"
-    for i in (4, 5, 6):  # clamped — device keeps reporting the last label
-        assert by_index[i]["skipped"] == "past last submix (label repeating)"
+    assert by_index[4]["skipped"] == "past last submix (label repeating)"
+    assert "stop" in by_index[4]
+    assert device.set_submix_calls == [1, 2, 3, 4]  # 5 and 6 never sent
+    assert 5 not in by_index and 6 not in by_index
+
+
+def test_walk_stops_at_output_count_before_any_fatal_index():
+    """When the output row is enumerable, the walk knows how many submixes
+    exist and stops the moment it has found them all — no index is ever
+    sent past the last submix (the fatal one included)."""
+    class OutputAwareFake(FakeTotalMix):
+        def send_message(self, address, value):
+            if address == "/1/busOutput":
+                self.listener._handle(address, 1.0)
+                for n, name in enumerate(["ADAT 1", "AES", "RE-150 In"], 1):
+                    self.listener._handle(f"/1/trackname{n}", name)
+                return
+            if address in ("/1/busInput", "/1/busPlayback"):
+                self.listener._handle(address, 1.0)
+                return
+            super().send_message(address, value)
+
+    listener = OSCListener(0)
+    device = OutputAwareFake(listener)
+    channel_map, walk_log = discover_channel_map(device, listener,
+                                                 submix_count=32, settle_s=0)
+    # 3 real outputs: found at 1, 2 (AES pair dups at 3), skipped 4, last at 5
+    assert set(channel_map["submixes"]) == {"ADAT 1", "AES", "RE-150 In"}
+    assert device.set_submix_calls == [1, 2, 3, 4, 5]  # stopped at 5, not 32
+    assert "stop" in walk_log[-1]
+
+
