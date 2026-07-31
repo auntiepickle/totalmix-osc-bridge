@@ -218,3 +218,33 @@ def test_apply_refuses_collapsed_walk(monkeypatch):
     r = client.post("/api/device/discovery/apply", json={})
     assert r.status_code == 409
     assert "mid-walk" in r.json()["detail"]
+
+
+def test_widths_endpoint_stores_layout_keyed(monkeypatch):
+    """POST /api/device/widths keys the widths to the given layout so two
+    layouts can hold conflicting widths for the same strip name (#16)."""
+    import web.web_client as wc
+    persisted = {}
+    monkeypatch.setattr(wc, "_persist_channel_map",
+                        lambda cm: persisted.update(cm))
+    monkeypatch.setattr(bridge_module.bridge, "channel_map", {"submixes": {}})
+    r = client.post("/api/device/widths", json={
+        "widths": {"AN 1/2": 2, "RE-101": 2},
+        "layout": ["AN 1/2", "RE-101"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["hw_channels_covered"] == 4 and body["uncovered"] == []
+    key = bridge_module.bridge._layout_key_from_names(["AN 1/2", "RE-101"])
+    assert persisted["width_maps"][key] == {"AN 1/2": 2, "RE-101": 2}
+
+    r = client.post("/api/device/widths", json={
+        "widths": {"RE-101": 3}, "layout": ["RE-101"]})
+    assert r.status_code == 422
+
+
+def test_widths_endpoint_refuses_blind_listener(monkeypatch):
+    """Without a live layout or an explicit one, keying is impossible —
+    refuse rather than guess (mis-keyed widths would silently disarm EQ)."""
+    monkeypatch.setattr(bridge_module.bridge, "osc_listener", None)
+    r = client.post("/api/device/widths", json={"widths": {"AN 1/2": 2}})
+    assert r.status_code == 409

@@ -421,6 +421,48 @@ async def start_discovery(body: DiscoverBody = DiscoverBody()):
             "estimated_s": body.submix_count * per_index}
 
 
+class WidthsBody(BaseModel):
+    widths: dict
+    layout: Optional[list] = None
+
+
+@app.post("/api/device/widths")
+async def set_widths(body: WidthsBody):
+    """Store a verified width map (strip name -> 1|2) for one layout.
+
+    Widths are layout-scoped (#16): the same strip name can have different
+    widths in different snapshots, so entries are keyed by the layout's
+    row-1 name set — by default the LIVE one, or an explicit `layout` list
+    of strip names. EQ aiming consults the map matching the live layout at
+    fire time, so hand-entered or fingerprint-derived widths stop rotting
+    when snapshots rotate."""
+    bad = {k: v for k, v in body.widths.items() if v not in (1, 2)}
+    if bad:
+        raise HTTPException(status_code=422,
+                            detail=f"widths must be 1 or 2: {bad}")
+    if body.layout:
+        names = [str(n).strip() for n in body.layout if str(n).strip()]
+    else:
+        live = _live_row1_names()
+        if not live:
+            raise HTTPException(
+                status_code=409,
+                detail="listener has no live layout to key the widths to — "
+                       "run the connection check (or wiggle a fader) so the "
+                       "bank is known, or pass an explicit layout: [names]")
+        names = sorted(live)
+    key = bridge._layout_key_from_names(names)
+    uncovered = sorted(n for n in names if n not in body.widths)
+    cm = bridge.channel_map or {"submixes": {}}
+    cm.setdefault("width_maps", {})[key] = dict(body.widths)
+    _persist_channel_map(cm)
+    total = sum(body.widths.get(n, 0) for n in names)
+    logger.info(f"✅ width map stored for a {len(names)}-strip layout "
+                f"({total} hw channels covered, {len(uncovered)} uncovered)")
+    return {"status": "success", "layout_strips": len(names),
+            "hw_channels_covered": total, "uncovered": uncovered}
+
+
 @app.post("/api/device/probe")
 async def probe_device():
     """Liveness probe: sends a state-changing command and confirms feedback.
@@ -446,12 +488,26 @@ def _row1_names(channel_map):
             for s in sub.get("sends", {}).values() if s.get("row", 1) == 1}
 
 
+def _persist_channel_map(cm):
+    """Write the channel map to disk (backup first) and hot-reload it."""
+    backup_json_files("ufx2_channel_map.json")
+    target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
+    with open(target, "w") as f:
+        json.dump(cm, f, indent=2)
+    bridge._load_channel_map()
+
+
 def _carry_widths(old_map, new_map):
     """Preserve channel_widths across a discovery apply ONLY when the strip
     layout is unchanged. Widths are LAYOUT-scoped (hardware-proven: RE-101 is
     width 2 in one snapshot and width 1 in another), so carrying them across
     a layout change could mis-aim page-2 writes — refusal is safe, a stale
     width is not. Returns True if carried."""
+    # Layout-KEYED width maps are immune to layout change by construction
+    # (each entry only ever matches its own layout) — carry them verbatim.
+    wm = (old_map or {}).get("width_maps")
+    if wm:
+        new_map["width_maps"] = wm
     widths = (old_map or {}).get("channel_widths")
     if not widths:
         return False
@@ -502,7 +558,6 @@ async def apply_discovery(body: ApplyBody = ApplyBody()):
                    f"mid-walk. Probe it (POST /api/device/probe), re-run "
                    f"discovery, or pass {{\"force\": true}} to apply anyway.")
 
-    backup_json_files("ufx2_channel_map.json")
     # Discovery builds the map from scratch — without this, every apply
     # silently disarmed EQ macros by dropping the verified widths
     carried = _carry_widths(bridge.channel_map, new_map)
@@ -519,7 +574,11 @@ async def apply_discovery(body: ApplyBody = ApplyBody()):
     # (observed live: carried widths keyed on a 17-strip layout with a
     # 23-strip device — 16 live strips uncovered, EQ fully disarmed).
     live = _live_row1_names()
-    widths = new_map.get("channel_widths", {})
+    widths = {}
+    if live is not None:
+        key = bridge._layout_key_from_names(live)
+        widths = (new_map.get("width_maps", {}).get(key)
+                  or new_map.get("channel_widths", {}))
     coverage = None
     if live is not None:
         uncovered = sorted(n for n in live if n not in widths)
@@ -531,10 +590,7 @@ async def apply_discovery(body: ApplyBody = ApplyBody()):
                            f"{len(live)} live strips — EQ will refuse on: "
                            f"{uncovered}")
 
-    target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
-    with open(target, "w") as f:
-        json.dump(new_map, f, indent=2)
-    bridge._load_channel_map()
+    _persist_channel_map(new_map)
     bridge.channel_map_is_example = False
     logger.info(f"✅ Discovered channel map applied ({new_subs} submixes)")
     return {"status": "success", "submixes": new_subs,

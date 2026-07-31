@@ -523,3 +523,31 @@ def test_eq_routing_label(make_bridge, fake_osc):
         "target": {"channel": "Mavis", "param": "eq_gain_1"}, "value": "0.8",
     }]}})
     assert b.get_routing_label("m") == "Mavis (Eq Gain 1)"
+
+
+def test_eq_widths_are_layout_keyed(make_bridge, fake_osc):
+    """#16: the same strip name can have DIFFERENT widths in different
+    layouts (hardware-proven: RE-101 was 2 in the 17-strip layout, 1 in
+    the 23-strip one). The layout-keyed width_maps entry for the LIVE
+    layout must win over a stale flat channel_widths."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
+    }]}, widths={"AN 1/2": 2, "Mavis": 1, "ADAT 5/6": 2})  # stale flat map
+    key = b._layout_key_from_names(["AN 1/2", "Mavis", "ADAT 5/6"])
+    b.channel_map["width_maps"] = {key: {"AN 1/2": 2, "Mavis": 2,
+                                         "ADAT 5/6": 2}}
+    b.run_macro("m", 0.5)
+    # Layout entry says Mavis is a pair: offset 2+2=4 (flat map would say 3)
+    assert ("/setBankStart", 4.0) in fake_osc.sent
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+
+
+def test_eq_layout_key_ignores_placeholder_strips(make_bridge, fake_osc):
+    """'n.a.' placeholder strips past the hardware channel count must not
+    change the layout key — a 48-wide bank pads with dozens of them."""
+    from bridge import TotalMixOSCBridge
+    key_clean = TotalMixOSCBridge._layout_key_from_names(["AN 1/2", "Mavis"])
+    key_padded = TotalMixOSCBridge._layout_key_from_names(
+        ["AN 1/2", "Mavis", "n.a.", "N.A.", ""])
+    assert key_clean == key_padded

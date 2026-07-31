@@ -648,6 +648,30 @@ class TotalMixOSCBridge:
         "lowcut_freq": "/2/lowcutFreq",
     }
 
+    @staticmethod
+    def _layout_key_from_names(names) -> str:
+        """Stable key for a strip layout: the sorted real strip names.
+        Snapshots re-pair strips, so the SAME name can carry DIFFERENT
+        widths in different layouts (hardware-proven: RE-101 is width 2
+        in the 17-strip layout, width 1 in the 23-strip one) — widths
+        must be stored and looked up per layout, never in one flat map."""
+        real = {str(n).strip() for n in names}
+        return "|".join(sorted(
+            n for n in real if n and n.lower() not in ("n.a.", "n/a")))
+
+    def _layout_key(self, strips: dict) -> str:
+        return self._layout_key_from_names(
+            d.get("name", "") for d in strips.values())
+
+    def _widths_for_layout(self, strips: dict) -> dict:
+        """The verified width map for THIS layout:
+        channel_map['width_maps'][layout_key] when the layout has been
+        measured, else the legacy flat channel_widths (whose per-strip
+        check still refuses when it does not cover)."""
+        cm = self.channel_map or {}
+        return (cm.get("width_maps", {}).get(self._layout_key(strips))
+                or cm.get("channel_widths", {}))
+
     def _hw_offset_of_strip(self, strips: dict, strip):
         """Hardware-channel offset of a strip: the summed widths of the
         strips before it, from the VERIFIED width map only.
@@ -655,13 +679,13 @@ class TotalMixOSCBridge:
         Label inference is banned here: hardware testing proved a stereo
         pair can carry a slash-free name ('RE-101'), which silently mis-
         aimed every subsequent strip and wrote to the wrong channel's EQ
-        (#5 write-test failure). Widths come from
-        channel_map['channel_widths'] (name -> 1|2), produced by hardware
+        (#5 write-test failure). Widths come from the layout-keyed
+        width_maps (or legacy channel_widths), produced by hardware
         measurement or hand-entry. Returns None (→ refusal) if ANY
         preceding strip's width is unknown — one unknown poisons the
         whole offset.
         """
-        widths = (self.channel_map or {}).get("channel_widths", {})
+        widths = self._widths_for_layout(strips)
         offset = 0
         for s in sorted(strips):
             if s >= strip:
@@ -670,8 +694,8 @@ class TotalMixOSCBridge:
             w = widths.get(name)
             if w not in (1, 2):
                 logger.error(f"   → no verified width for strip '{name}' — "
-                             f"cannot aim page 2 (add it to channel_widths "
-                             f"in ufx2_channel_map.json)")
+                             f"cannot aim page 2 (POST /api/device/widths "
+                             f"with this layout's widths)")
                 return None
             offset += w
         return offset
