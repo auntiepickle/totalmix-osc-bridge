@@ -607,12 +607,13 @@ def test_eq_layout_key_ignores_placeholder_strips(make_bridge, fake_osc):
     assert key_clean == key_padded
 
 
-def test_raw_setsubmix_within_range_still_sends(make_bridge, fake_osc):
-    """A raw /setSubmix index that cannot be out of range (<= 2 hw channels
-    per live output strip) passes — the user's legacy macros keep working."""
+def test_raw_setsubmix_known_map_index_still_sends(make_bridge, fake_osc):
+    """A raw /setSubmix that is exactly a known submix index from the map,
+    with the live output row matching that map, passes — the user's
+    legacy macros keep working."""
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [
-        {"osc": "/setSubmix", "value": "1"},
+        {"osc": "/setSubmix", "value": "14"},
         {"osc": "/1/volume3", "value": "{{param}}"},
     ]}})
     b.channel_map = CHANNEL_MAP
@@ -620,13 +621,33 @@ def test_raw_setsubmix_within_range_still_sends(make_bridge, fake_osc):
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.8)
-    assert ("/setSubmix", 1.0) in fake_osc.sent
+    assert ("/setSubmix", 14.0) in fake_osc.sent
     assert ("/1/volume3", 0.8) in fake_osc.sent
 
 
+def test_raw_setsubmix_pair_half_index_refused(make_bridge, fake_osc):
+    """Index 15 = map index 14 + 1 could be the pair's second half — but
+    allowing +1 assumes the submix is stereo, and a MONO last submix
+    would make +1 the fatal index (the 2x-strips bound died the same
+    way on hardware: one mono output put the bound ON the fatal index).
+    Exact match or refuse."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [
+        {"osc": "/setSubmix", "value": "15"},
+        {"osc": "/1/volume3", "value": "{{param}}"},
+    ]}})
+    b.channel_map = CHANNEL_MAP
+    b.osc_listener = listener
+    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    listener._server = object()
+    b.run_macro("m", 0.8)
+    assert "/setSubmix" not in fake_osc.addresses()
+    assert "/1/volume3" not in fake_osc.addresses()
+
+
 def test_raw_setsubmix_out_of_range_aborts_macro(make_bridge, fake_osc):
-    """Index 99 on a 1-output-strip device is provably invalid — hardware-
-    proven to CRASH TotalMix. Refuse it AND stop the macro: later raw
+    """Index 99 is not a known submix index — hardware-proven to CRASH
+    TotalMix when out of range. Refuse it AND stop the macro: later raw
     steps assume the switch happened."""
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [

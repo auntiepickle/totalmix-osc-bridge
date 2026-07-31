@@ -469,21 +469,37 @@ class TotalMixOSCBridge:
 
                 # CRASH GUARD for RAW steps: /setSubmix past the last real
                 # output crashes TotalMix (hardware root cause). A raw index
-                # cannot be name-verified, so refuse when the live outputs
-                # are unknown or the index is PROVABLY out of range (more
-                # than 2 hw channels per output strip is impossible). The
-                # whole macro stops — later raw steps assume the switch.
+                # cannot be name-verified, so it is allowed ONLY when it is
+                # exactly a known submix index from the map AND the live
+                # output row still matches that map. No arithmetic bounds:
+                # the first version used 2×strips, which assumes every
+                # output is stereo — one mono output (live layout: Main)
+                # made the bound land exactly ON the fatal index. And no
+                # index+1 pair-half allowance either: that re-assumes width
+                # at the tail, where a mono LAST submix would make +1 the
+                # fatal index. Widths have now bitten three times — exact
+                # match or refuse. The whole macro stops on refusal — later
+                # raw steps assume the switch happened.
                 if "target" not in step and osc_addr == "/setSubmix":
                     outs = self._live_output_names()
+                    map_subs = (self.channel_map or {}).get("submixes", {})
+                    known = {int(s["index"]) for s in map_subs.values()
+                             if isinstance(s.get("index"), (int, float))}
+                    map_names = {str(n).strip() for n in map_subs}
                     try:
                         raw_idx = float(value if step.get("value") == "{{param}}"
                                         else step.get("value"))
                     except (TypeError, ValueError):
                         raw_idx = None
-                    if outs is None or raw_idx is None or raw_idx > 2 * len(outs):
+                    if (outs is None or raw_idx is None
+                            or raw_idx != int(raw_idx)
+                            or int(raw_idx) not in known
+                            or outs != map_names):
                         why = ("live outputs not enumerable" if outs is None
-                               else f"index {raw_idx} provably out of range "
-                                    f"({len(outs)} output strips)")
+                               else "output layout changed since the map"
+                               if outs != map_names
+                               else f"index {raw_idx} is not a known submix "
+                                    f"index (map knows {sorted(known)})")
                         logger.error(f"   → raw /setSubmix REFUSED ({why}) — "
                                      f"an out-of-range /setSubmix crashes "
                                      f"TotalMix; use a name-based target. "
