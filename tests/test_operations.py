@@ -66,7 +66,9 @@ def test_ramp_range_maps_sweep_window(fake_osc):
     values = [v for _, v in fake_osc.sent]
     assert min(values) >= 0.2 - 1e-9
     assert max(values) <= 0.65 + 1e-9
-    assert values[-1] == 0.2  # parks at the window's low end, not raw 0
+    # linear = transition: parks at the window's DESTINATION (#19) —
+    # and shaped, not raw 1.0
+    assert values[-1] == 0.65
 
 
 def test_lfo_threshold_gates_binary_params(fake_osc):
@@ -85,3 +87,45 @@ def test_range_then_threshold_compose(fake_osc):
     assert shape_value(0.0, {"range": ["0.4", "0.6"], "threshold": 0.5}) == 0.0
     assert shape_value(1.0, {"range": ["0.4", "0.6"], "threshold": 0.5}) == 1.0
     assert shape_value(0.5, {}) == 0.5  # no shaping config = passthrough
+
+
+def test_ramp_linear_parks_at_destination(fake_osc):
+    """A linear ramp is a transition — it must STAY at the sweep ceiling,
+    not snap back to the floor on the final send (#19, user-reported)."""
+    OperationRegistry.execute("ramp", fake_osc, "/1/volume1", 0.5, {
+        "duration": 0.2, "steps_per_sec": 20, "curve": "linear",
+        "range": [0.2, 0.8],
+    })
+    values = [v for _, v in fake_osc.sent]
+    assert values[-1] == 0.8          # parked at the destination
+    assert values[0] <= 0.25          # started at the floor
+
+
+def test_lfo_integer_cycles_return_to_start(fake_osc):
+    """The wobble must end where it began: (1-cos)/2 starts at the floor
+    and an integer cycle count lands it back there — the final park is
+    seamless instead of a jump (#19, user-reported)."""
+    OperationRegistry.execute("lfo", fake_osc, "/1/pan1", 0.5, {
+        "bars": 1, "bpm": 960, "steps_per_sec": 200, "range": [0.3, 0.7],
+    })
+    values = [v for _, v in fake_osc.sent]
+    assert abs(values[0] - 0.3) < 0.01   # starts at the floor (first
+    # sample lands microseconds into the wave, so allow launch jitter)
+    assert values[-1] == 0.3          # parks at the floor — same value
+    assert max(values) > 0.65         # actually wobbled up
+
+
+def test_lfo_rate_sets_cycle_count(fake_osc):
+    """bars = how long, rate = how fast: 1 bar at rate 0.5 = 2 cycles,
+    rate 2 = 8 cycles (was bpm/15 cycles regardless of bars)."""
+    def count_cycles(rate):
+        fake_osc.clear()
+        OperationRegistry.execute("lfo", fake_osc, "/1/pan1", 0.5, {
+            "bars": 1, "bpm": 960, "steps_per_sec": 400, "rate": rate,
+        })
+        values = [v for _, v in fake_osc.sent]
+        mid = 0.5
+        return sum(1 for a, b in zip(values, values[1:])
+                   if a < mid <= b)
+    assert count_cycles(0.5) == 2
+    assert count_cycles(2) == 8
