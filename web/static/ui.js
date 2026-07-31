@@ -597,15 +597,43 @@ const _detailToggle = (label, addr, dflt = 0.0) => ({
   widget: 'toggle', default: dflt, channelDetail: true, label, addr,
   options: [['1.0', 'On'], ['0.0', 'Off']], mod: { threshold: true },
 });
+// Unit ranges below are hardware-MEASURED (#20 inventory: multi-point
+// fits, every sampled point on its line) — floats stay 0..1 on the wire,
+// the fmt shows the device's real units.
+const _unitSlider = (label, addr, fmt, dflt = 0.5) => ({
+  widget: 'slider', min: 0, max: 1, step: 0.01, default: dflt, fmt,
+  mod: { range: true }, channelDetail: true, label, addr,
+});
 Object.assign(PARAM_DEFS, {
-  dyn_gain:      _eqSlider('Dynamics Gain',       '/2/compexpGain'),
+  dyn_enable:    _detailToggle('Dynamics On/Off',   '/2/compexpEnable'),
+  dyn_gain:      _unitSlider('Dynamics Gain',       '/2/compexpGain',
+                             v => `${(v * 60 - 30).toFixed(1)} dB`),
+  comp_thresh:   _unitSlider('Comp Threshold',      '/2/compTrsh',
+                             v => `${(v * 60 - 60).toFixed(1)} dB`),
+  comp_ratio:    _unitSlider('Comp Ratio',          '/2/compRatio',
+                             v => `${(1 + 9 * v).toFixed(1)}:1`, 0.0),
+  exp_thresh:    _unitSlider('Exp Threshold',       '/2/expTrsh',
+                             v => `${(-99 + 79 * v).toFixed(1)} dB`, 0.0),
+  exp_ratio:     _unitSlider('Exp Ratio',           '/2/expRatio',
+                             v => `${(1 + 9 * v).toFixed(1)}:1`, 0.0),
+  dyn_attack:    _unitSlider('Dyn Attack',          '/2/compexpAttack',
+                             v => `${Math.round(200 * v)} ms`, 0.05),
+  dyn_release:   _unitSlider('Dyn Release',         '/2/compexpRelease',
+                             v => `${Math.round(100 + 899 * v)} ms`, 0.0),
   alev_enable:   _detailToggle('Auto Level On/Off', '/2/alevEnable'),
-  alev_headroom: _eqSlider('Auto Level Headroom', '/2/alevHeadroom'),
-  alev_maxgain:  _eqSlider('Auto Level Max Gain', '/2/alevMaxgain'),
-  input_gain:    _eqSlider('Input Gain',          '/2/gain', 0.0),
-  input_gain_r:  _eqSlider('Input Gain R',        '/2/gainRight', 0.0),
-  phase:         _detailToggle('Phase Invert',    '/2/phase'),
-  phase_r:       _detailToggle('Phase Invert R',  '/2/phaseRight'),
+  alev_headroom: _unitSlider('Auto Level Headroom', '/2/alevHeadroom',
+                             v => `${(3 + 9 * v).toFixed(1)} dB`),
+  alev_maxgain:  _unitSlider('Auto Level Max Gain', '/2/alevMaxgain',
+                             v => `${(18 * v).toFixed(1)} dB`),
+  alev_risetime: _unitSlider('Auto Level Rise',     '/2/alevRisetime',
+                             v => `${(0.1 + 9.8 * v).toFixed(1)} s`),
+  lowcut_enable: _detailToggle('Low Cut On/Off',    '/2/lowcutEnable'),
+  lowcut_grade:  _unitSlider('Low Cut Slope',       '/2/lowcutGrade',
+                             v => `${6 + Math.round(v * 3) * 6} dB/oct`, 1.0),
+  input_gain:    _eqSlider('Input Gain',            '/2/gain', 0.0),
+  input_gain_r:  _eqSlider('Input Gain R',          '/2/gainRight', 0.0),
+  phase:         _detailToggle('Phase Invert',      '/2/phase'),
+  phase_r:       _detailToggle('Phase Invert R',    '/2/phaseRight'),
 });
 
 function _buildParamOptions(selected) {

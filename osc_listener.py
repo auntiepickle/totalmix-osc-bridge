@@ -175,6 +175,12 @@ class DeviceState:
                 "last_message_at": self.last_message_at,
             }
 
+    def raw_entry(self, address):
+        """Thread-safe copy of one raw-address entry ({args, count, ...})."""
+        with self._lock:
+            e = self.raw.get(address)
+            return dict(e) if e else None
+
     def submix_snapshot(self, name):
         with self._lock:
             rows = self.submixes.get(name, {})

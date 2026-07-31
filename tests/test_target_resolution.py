@@ -835,3 +835,70 @@ def test_dynamics_params_share_eq_aiming(make_bridge, fake_osc):
     for p in ("dyn_gain", "alev_enable", "alev_headroom", "alev_maxgain",
               "input_gain", "input_gain_r", "phase", "phase_r"):
         assert p in TotalMixOSCBridge.CHANNEL_DETAIL_PARAMS
+
+
+class ConfirmingTotalMix(LiveFakeTotalMix):
+    """Answers the page-2 row no-op with a /2/trackname dump — the #20
+    aim-confirmation mechanism. PAGE2_NAME configures what page 2 shows."""
+
+    PAGE2_NAME = None  # override
+
+    def send_message(self, address, value):
+        if address in ("/2/busInput", "/2/busPlayback", "/2/busOutput"):
+            self.fake_osc.send_message(address, value)
+            self.listener._handle("/2/trackname", self.PAGE2_NAME)
+            return
+        super().send_message(address, value)
+
+
+def test_page2_aim_confirmed_write_proceeds(make_bridge, fake_osc):
+    """/2/trackname matches the intended channel — the write fires."""
+    class RightAim(ConfirmingTotalMix):
+        PAGE2_NAME = "ADAT 5/6"
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
+    }]}, widths=VERIFIED_WIDTHS)
+    b.osc_client = RightAim(b.osc_listener, fake_osc)
+    b.osc_client.send_message("/1/busInput", 1.0)
+    fake_osc.clear()
+    b.run_macro("m", 0.5)
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+
+
+def test_page2_aim_mismatch_refuses_write(make_bridge, fake_osc):
+    """Page 2 reports a DIFFERENT channel than intended — the aim landed
+    wrong (every wrong-channel write this project produced would have
+    been caught here). The write must not fire."""
+    class WrongAim(ConfirmingTotalMix):
+        PAGE2_NAME = "Mavis"
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
+    }]}, widths=VERIFIED_WIDTHS)
+    b.osc_client = WrongAim(b.osc_listener, fake_osc)
+    b.osc_client.send_message("/1/busInput", 1.0)
+    fake_osc.clear()
+    b.run_macro("m", 0.5)
+    assert "/2/eqGain1" not in fake_osc.addresses()
+
+
+def test_page2_aim_silence_is_inconclusive_write_proceeds(make_bridge, fake_osc):
+    """No fresh /2/trackname (the page-2 no-op refresh is not verified on
+    hardware yet) — silence must not brick verified aiming; the write
+    proceeds as before. Covered by every pre-existing EQ test fake, but
+    asserted explicitly here."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
+    }]}, widths=VERIFIED_WIDTHS)
+    b.run_macro("m", 0.5)
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+
+
+def test_tranche2_dynamics_params_registered():
+    from bridge import TotalMixOSCBridge
+    for p in ("dyn_enable", "comp_thresh", "comp_ratio", "exp_thresh",
+              "exp_ratio", "dyn_attack", "dyn_release", "alev_risetime",
+              "lowcut_enable", "lowcut_grade"):
+        assert p in TotalMixOSCBridge.CHANNEL_DETAIL_PARAMS

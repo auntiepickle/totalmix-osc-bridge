@@ -695,6 +695,16 @@ class TotalMixOSCBridge:
         # probe. The full Dynamics inventory (comp/exp threshold, ratio,
         # attack, release, enable) lands after the device inventory round.
         "dyn_gain":       "/2/compexpGain",
+        "dyn_enable":     "/2/compexpEnable",
+        "comp_thresh":    "/2/compTrsh",
+        "comp_ratio":     "/2/compRatio",
+        "exp_thresh":     "/2/expTrsh",
+        "exp_ratio":      "/2/expRatio",
+        "dyn_attack":     "/2/compexpAttack",
+        "dyn_release":    "/2/compexpRelease",
+        "alev_risetime":  "/2/alevRisetime",
+        "lowcut_enable":  "/2/lowcutEnable",
+        "lowcut_grade":   "/2/lowcutGrade",
         "alev_enable":    "/2/alevEnable",
         "alev_headroom":  "/2/alevHeadroom",
         "alev_maxgain":   "/2/alevMaxgain",
@@ -872,6 +882,10 @@ class TotalMixOSCBridge:
             offset = 0 if channel_name == entries[0][1] else idx_of[channel_name]
             self.osc_client.send_message("/1/busOutput", 1.0)
             self.osc_client.send_message("/setBankStart", float(offset))
+            # compute, CONFIRM, then act — every wrong-channel write this
+            # project has produced would have been caught by this check
+            if self._confirm_page2_aim(channel_name) is False:
+                return None, None, "not_in_bank"
             addr = self.CHANNEL_DETAIL_PARAMS[param]
             logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
                         f"hw offset {offset} (offset = walked index, "
@@ -1015,6 +1029,9 @@ class TotalMixOSCBridge:
                         # failure: a slash-free stereo pair broke label math)
                         return None, None, "not_in_bank"
                     self.osc_client.send_message("/setBankStart", float(offset))
+                    # compute, CONFIRM, then act (see _confirm_page2_aim)
+                    if self._confirm_page2_aim(channel_name) is False:
+                        return None, None, "not_in_bank"
                     addr = self.CHANNEL_DETAIL_PARAMS[param]
                     logger.info(f"   → live-resolved '{channel_name}' {param} → strip "
                                 f"{strip}, hw offset {offset} (verified widths) → "
@@ -1068,6 +1085,43 @@ class TotalMixOSCBridge:
         if names:
             self._outputs_cache = (time.time(), names)
         return names
+
+    def _confirm_page2_aim(self, channel_name: str, timeout: float = 0.8):
+        """Confirm the page-2 window shows the INTENDED channel before a
+        write (#20 headline find: /2/trackname names the aimed channel,
+        verified 5/5 across rows including a mono output).
+
+        Requests a page-2 dump by re-asserting the current row via its
+        page-2 mirror address (a no-op value; page-addressed messages make
+        TotalMix dump that page — the page-3 no-op trick, page-2 form).
+
+        Returns True (confirmed), False (confirmed WRONG channel — the
+        caller must refuse), or None (no fresh trackname arrived; the
+        page-2 no-op refresh is not hardware-verified yet, so silence is
+        inconclusive rather than fatal)."""
+        listener = self.osc_listener
+        if listener is None or not listener.running:
+            return None
+        st = listener.state
+        entry = st.raw_entry("/2/trackname")
+        before = entry["count"] if entry else 0
+        row_addr = {"1": "/2/busInput", "2": "/2/busPlayback",
+                    "3": "/2/busOutput"}.get(st.current_row, "/2/busInput")
+        self.osc_client.send_message(row_addr, 1.0)
+        fresh = listener.wait_for(
+            lambda s: (s.raw_entry("/2/trackname") or {}).get("count", 0) > before,
+            timeout)
+        if not fresh:
+            return None
+        entry = st.raw_entry("/2/trackname") or {}
+        args = entry.get("args") or []
+        shown = str(args[0]).strip() if args else ""
+        if shown == channel_name.strip() or self._names_cover(shown, channel_name):
+            logger.info(f"   → page-2 aim CONFIRMED by /2/trackname ('{shown}')")
+            return True
+        logger.error(f"   → page-2 window shows '{shown}', intended "
+                     f"'{channel_name}' — aim landed WRONG, refusing the write")
+        return False
 
     def probe_device(self, timeout: float = 2.5):
         """Liveness probe: send a state-CHANGING command and confirm a
