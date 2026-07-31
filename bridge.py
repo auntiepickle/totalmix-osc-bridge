@@ -884,7 +884,7 @@ class TotalMixOSCBridge:
             self.osc_client.send_message("/setBankStart", float(offset))
             # compute, CONFIRM, then act — every wrong-channel write this
             # project has produced would have been caught by this check
-            if self._confirm_page2_aim(channel_name) is False:
+            if not self._confirm_page2_aim(channel_name, "3"):
                 return None, None, "not_in_bank"
             addr = self.CHANNEL_DETAIL_PARAMS[param]
             logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
@@ -1030,7 +1030,7 @@ class TotalMixOSCBridge:
                         return None, None, "not_in_bank"
                     self.osc_client.send_message("/setBankStart", float(offset))
                     # compute, CONFIRM, then act (see _confirm_page2_aim)
-                    if self._confirm_page2_aim(channel_name) is False:
+                    if not self._confirm_page2_aim(channel_name, row):
                         return None, None, "not_in_bank"
                     addr = self.CHANNEL_DETAIL_PARAMS[param]
                     logger.info(f"   → live-resolved '{channel_name}' {param} → strip "
@@ -1086,33 +1086,40 @@ class TotalMixOSCBridge:
             self._outputs_cache = (time.time(), names)
         return names
 
-    def _confirm_page2_aim(self, channel_name: str, timeout: float = 0.8):
+    def _confirm_page2_aim(self, channel_name: str, row: str,
+                           timeout: float = 0.8) -> bool:
         """Confirm the page-2 window shows the INTENDED channel before a
-        write (#20 headline find: /2/trackname names the aimed channel,
-        verified 5/5 across rows including a mono output).
+        write (#20: /2/trackname names the aimed channel, and the row-
+        mirror no-op reliably triggers a fresh 90-message page-2 dump —
+        both hardware-verified, idempotent across repeats).
 
-        Requests a page-2 dump by re-asserting the current row via its
-        page-2 mirror address (a no-op value; page-addressed messages make
-        TotalMix dump that page — the page-3 no-op trick, page-2 form).
+        `row` MUST be the row the caller just commanded — the mirror is a
+        WRITE (/2/busX sets the row exactly like /1/busX; only the
+        matching one is a no-op), so deriving it from listener belief
+        would silently SWITCH rows whenever that belief was stale
+        (hardware-observed hazard, same class as the stale-map aim).
 
-        Returns True (confirmed), False (confirmed WRONG channel — the
-        caller must refuse), or None (no fresh trackname arrived; the
-        page-2 no-op refresh is not hardware-verified yet, so silence is
-        inconclusive rather than fatal)."""
+        Returns True only on a confirmed match. A mismatch refuses, and
+        SILENCE refuses too: the dump primitive is verified reliable, so
+        no confirmation means something is genuinely wrong."""
         listener = self.osc_listener
         if listener is None or not listener.running:
-            return None
+            logger.error("   → no listener to confirm the page-2 aim — refusing")
+            return False
         st = listener.state
         entry = st.raw_entry("/2/trackname")
         before = entry["count"] if entry else 0
         row_addr = {"1": "/2/busInput", "2": "/2/busPlayback",
-                    "3": "/2/busOutput"}.get(st.current_row, "/2/busInput")
+                    "3": "/2/busOutput"}.get(str(row), "/2/busInput")
         self.osc_client.send_message(row_addr, 1.0)
         fresh = listener.wait_for(
             lambda s: (s.raw_entry("/2/trackname") or {}).get("count", 0) > before,
             timeout)
         if not fresh:
-            return None
+            logger.error(f"   → no page-2 dump followed the row-mirror nudge "
+                         f"within {timeout}s — the confirmation primitive is "
+                         f"verified reliable, so REFUSING the write")
+            return False
         entry = st.raw_entry("/2/trackname") or {}
         args = entry.get("args") or []
         shown = str(args[0]).strip() if args else ""

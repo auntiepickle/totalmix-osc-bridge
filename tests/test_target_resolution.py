@@ -38,13 +38,28 @@ class LiveFakeTotalMix:
     submix): the /setSubmix crash guard enumerates it before any switch."""
 
     OUTPUT_NAMES = ["RE-150 In"]
+    # offset -> channel name shown by page 2 (the /2/trackname
+    # self-identification, #20). None = device never answers (used to
+    # prove silence now REFUSES).
+    PAGE2_BY_OFFSET = None
 
     def __init__(self, listener, fake_osc):
         self.listener = listener
         self.fake_osc = fake_osc
+        self._bank = 0
 
     def send_message(self, address, value):
         self.fake_osc.send_message(address, value)
+        if address == "/setBankStart":
+            self._bank = int(value)
+            return
+        if address in ("/2/busInput", "/2/busPlayback", "/2/busOutput"):
+            # row-mirror no-op -> page-2 dump, incl. the window's trackname
+            if self.PAGE2_BY_OFFSET is not None:
+                self.listener._handle(
+                    "/2/trackname",
+                    self.PAGE2_BY_OFFSET.get(self._bank, "n.a."))
+            return
         if address in ("/1/busInput", "/1/busPlayback", "/1/busOutput"):
             self.listener._handle(address, 1.0)
             if address == "/1/busOutput":
@@ -487,6 +502,9 @@ class MixedBankTotalMix(LiveFakeTotalMix):
     """Bank with mixed mono/stereo strips — the hw-channel offset must be
     computed from widths, not strip counts (#5 phase 2)."""
 
+    PAGE2_BY_OFFSET = {0: "AN 1/2", 1: "AN 1/2", 2: "Mavis", 3: "Mavis",
+                       4: "ADAT 5/6", 5: "ADAT 5/6"}
+
     def on_bus(self, address):
         if address == "/1/busInput":
             self.listener._handle("/1/labelSubmix", "Main")
@@ -710,6 +728,8 @@ OUTPUT_MAP = {"submixes": {
 
 class StereoOutputsTotalMix(LiveFakeTotalMix):
     OUTPUT_NAMES = ["Main", "AN 3/4", "AES", "RE-150 In"]
+    PAGE2_BY_OFFSET = {0: "Main", 1: "Main", 2: "AN 3/4", 3: "AN 3/4",
+                       4: "AES", 5: "AES", 6: "RE-150 In", 7: "RE-150 In"}
 
 
 def _out_eq_bridge(make_bridge, fake_osc, channel, cmap=None):
@@ -760,6 +780,8 @@ def test_eq_output_mono_layout_aims_at_index(make_bridge, fake_osc):
 
     class MonoOutputsTotalMix(LiveFakeTotalMix):
         OUTPUT_NAMES = ["Main", "AN 3/4", "Solo A", "Solo B"]
+        PAGE2_BY_OFFSET = {0: "Main", 1: "Main", 2: "AN 3/4", 3: "AN 3/4",
+                           4: "Solo A", 5: "Solo B"}
 
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [{
@@ -883,17 +905,22 @@ def test_page2_aim_mismatch_refuses_write(make_bridge, fake_osc):
     assert "/2/eqGain1" not in fake_osc.addresses()
 
 
-def test_page2_aim_silence_is_inconclusive_write_proceeds(make_bridge, fake_osc):
-    """No fresh /2/trackname (the page-2 no-op refresh is not verified on
-    hardware yet) — silence must not brick verified aiming; the write
-    proceeds as before. Covered by every pre-existing EQ test fake, but
-    asserted explicitly here."""
+def test_page2_aim_silence_refuses_write(make_bridge, fake_osc):
+    """The row-mirror dump is hardware-verified reliable and idempotent —
+    so NO confirmation now means something is genuinely wrong, and the
+    write refuses (was: proceed, while the primitive was unverified)."""
+    class SilentPage2(MixedBankTotalMix):
+        PAGE2_BY_OFFSET = None  # device never answers the mirror
+
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
     }]}, widths=VERIFIED_WIDTHS)
+    b.osc_client = SilentPage2(b.osc_listener, fake_osc)
+    b.osc_client.send_message("/1/busInput", 1.0)
+    fake_osc.clear()
     b.run_macro("m", 0.5)
-    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+    assert "/2/eqGain1" not in fake_osc.addresses()
 
 
 def test_tranche2_dynamics_params_registered():
