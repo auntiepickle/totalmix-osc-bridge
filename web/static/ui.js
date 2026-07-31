@@ -537,13 +537,42 @@ Object.assign(PARAM_DEFS, {
   echo_width:    _fxSlider('Echo Width', '/3/echoWidth'),
 });
 
+// Channel EQ (#5 phase 2, hardware-verified) — page-2 channel-detail params.
+// Channel-scoped like mute (no submix); the bridge aims the page-2 window
+// via /setBankStart with LAYOUT-KEYED verified widths and REFUSES when the
+// live layout has no width entry (#16) — a refused step logs why. Keys and
+// addresses mirror bridge.CHANNEL_DETAIL_PARAMS exactly. Values are the
+// device's normalized 0..1 floats; shown as % until unit maps are captured.
+const _eqSlider = (label, addr, dflt = 0.5) => ({
+  widget: 'slider', min: 0, max: 1, step: 0.01, default: dflt, fmt: _pct,
+  mod: { range: true }, channelDetail: true, label, addr,
+});
+Object.assign(PARAM_DEFS, {
+  eq_enable: { widget: 'toggle', default: 1.0, channelDetail: true,
+               label: 'EQ On/Off', addr: '/2/eqEnable',
+               options: [['1.0', 'On'], ['0.0', 'Off']],
+               mod: { threshold: true } },
+  eq_gain_1:   _eqSlider('EQ Band 1 Gain', '/2/eqGain1'),
+  eq_freq_1:   _eqSlider('EQ Band 1 Freq', '/2/eqFreq1'),
+  eq_q_1:      _eqSlider('EQ Band 1 Q',    '/2/eqQ1'),
+  eq_gain_2:   _eqSlider('EQ Band 2 Gain', '/2/eqGain2'),
+  eq_freq_2:   _eqSlider('EQ Band 2 Freq', '/2/eqFreq2'),
+  eq_q_2:      _eqSlider('EQ Band 2 Q',    '/2/eqQ2'),
+  eq_gain_3:   _eqSlider('EQ Band 3 Gain', '/2/eqGain3'),
+  eq_freq_3:   _eqSlider('EQ Band 3 Freq', '/2/eqFreq3'),
+  eq_q_3:      _eqSlider('EQ Band 3 Q',    '/2/eqQ3'),
+  lowcut_freq: _eqSlider('Low Cut Freq',   '/2/lowcutFreq', 0.0),
+});
+
 function _buildParamOptions(selected) {
   const chan = ['volume', 'mute', 'pan'];
   const chanOpts = chan.map(p =>
     `<option value="${p}"${p === (selected || 'volume') ? ' selected' : ''}>${p[0].toUpperCase() + p.slice(1)}</option>`).join('');
   const fxOpts = Object.entries(PARAM_DEFS).filter(([, d]) => d.global)
     .map(([p, d]) => `<option value="${p}"${p === selected ? ' selected' : ''}>${d.label}</option>`).join('');
-  return `<optgroup label="Channel">${chanOpts}</optgroup><optgroup label="FX (global)">${fxOpts}</optgroup>`;
+  const eqOpts = Object.entries(PARAM_DEFS).filter(([, d]) => d.channelDetail)
+    .map(([p, d]) => `<option value="${p}"${p === selected ? ' selected' : ''}>${d.label}</option>`).join('');
+  return `<optgroup label="Channel">${chanOpts}</optgroup><optgroup label="Channel EQ">${eqOpts}</optgroup><optgroup label="FX (global)">${fxOpts}</optgroup>`;
 }
 
 // Extra operation controls per parameter (#13): a mute LFO exposes its gate
@@ -684,8 +713,10 @@ window.updateParamScope = function (name) {
   const def = PARAM_DEFS[paramSel.value] || {};
   const isMute = paramSel.value === 'mute';
   const isGlobal = !!def.global;
-  submixSel.disabled = isMute || isGlobal;
+  const isDetail = !!def.channelDetail;
+  submixSel.disabled = isMute || isGlobal || isDetail;
   submixSel.title = isGlobal ? 'Global FX parameter — no routing applies'
+    : isDetail ? 'Channel EQ addresses the channel — no submix applies'
     : isMute ? 'Mute is global per channel — no submix applies' : '';
   if (sendSel) {
     sendSel.disabled = isGlobal;
