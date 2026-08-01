@@ -576,6 +576,15 @@ async def apply_discovery(body: ApplyBody = ApplyBody()):
                    f"mid-walk. Probe it (POST /api/device/probe), re-run "
                    f"discovery, or pass {{\"force\": true}} to apply anyway.")
 
+    # LAYOUT LIBRARY: every applied walk is remembered under its output-
+    # layout key so later snapshot swaps hot-swap instead of re-walking.
+    # Carried verbatim (layout-keyed = immune to layout change), then the
+    # new walk registers itself.
+    library = dict((bridge.channel_map or {}).get("layout_library", {}))
+    new_key = bridge._layout_key_from_names(new_map.get("submixes", {}).keys())
+    library[new_key] = new_map.get("submixes", {})
+    new_map["layout_library"] = library
+
     # Discovery builds the map from scratch — without this, every apply
     # silently disarmed EQ macros by dropping the verified widths
     carried = _carry_widths(bridge.channel_map, new_map)

@@ -1253,7 +1253,13 @@ class TotalMixOSCBridge:
         """Compare the live output row against the channel map and record
         the verdict. Called proactively after workspace/snapshot switches
         and after discovery apply — waiting for a refusal made a stale map
-        look like a dead server (field report)."""
+        look like a dead server (field report).
+
+        On a mismatch, the LAYOUT LIBRARY is consulted first: every applied
+        walk is remembered under its output-layout key, so swapping between
+        already-walked layouts hot-swaps the matching map instead of
+        demanding a re-walk (user pain: a walk per snapshot swap). The
+        banner only appears for layouts never walked."""
         live = self._live_output_names()
         if live is None:
             self.map_matches_device = None
@@ -1262,15 +1268,45 @@ class TotalMixOSCBridge:
         map_names = {str(n).strip() for n in
                      (self.channel_map or {}).get("submixes", {})}
         matches = live == map_names
+        if not matches and self._try_layout_swap(live):
+            matches = True
         if not matches:
             logger.warning(f"⚠️ Device layout differs from the channel map "
                            f"({len(live)} live outputs vs {len(map_names)} "
-                           f"mapped) — output-targeting macros will refuse "
-                           f"until discovery is re-run")
+                           f"mapped) and no walked map is stored for this "
+                           f"layout — output-targeting macros will refuse "
+                           f"until discovery runs")
         self.map_matches_device = matches
         self.broadcast_state(macro_event={"type": "map_freshness",
                                           "matches": matches})
         return matches
+
+    def _try_layout_swap(self, live_outputs) -> bool:
+        """Adopt the stored map for the live output layout, if one exists.
+        Non-destructive: the active submixes are ALSO in the library under
+        their own key, so swapping back and forth loses nothing."""
+        cm = self.channel_map or {}
+        key = self._layout_key_from_names(live_outputs)
+        entry = (cm.get("layout_library") or {}).get(key)
+        if not entry:
+            return False
+        cm["submixes"] = entry
+        self._persist_channel_map_file(cm)
+        self.channel_map = cm
+        logger.info(f"🔁 Layout recognized — swapped to the stored map for "
+                    f"this output layout ({len(entry)} submixes, no re-walk "
+                    f"needed)")
+        return True
+
+    def _persist_channel_map_file(self, cm):
+        """Atomic write of the channel map (temp + replace — a crash mid-
+        write must not corrupt the only copy of the layout library)."""
+        target = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "ufx2_channel_map.json")
+        tmp = target + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cm, f, indent=2)
+        os.replace(tmp, target)
 
     def _read_button_state(self, addr: str, timeout: float = 1.0):
         """Fresh state of a page-3 momentary button: force a page-3 dump

@@ -1030,3 +1030,37 @@ def test_output_refusal_records_map_drift(make_bridge, fake_osc):
     assert b.map_matches_device is None
     b.run_macro("m", 0.5)
     assert b.map_matches_device is False
+
+
+def test_layout_swap_from_library_instead_of_banner(make_bridge, fake_osc, tmp_path, monkeypatch):
+    """Swapping to an already-walked layout hot-swaps the stored map —
+    map_matches_device stays True and no re-walk is demanded."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": []}})
+    b.osc_listener = listener
+    lib_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
+    b.channel_map = {
+        "submixes": {"Something": {"index": 1}, "Else": {"index": 2}},
+        "layout_library": {lib_key: {
+            "Main": {"index": 1}, "AN 3/4": {"index": 2},
+            "AES": {"index": 4}, "RE-150 In": {"index": 6}}},
+    }
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    assert b.check_map_freshness() is True             # swapped, not stale
+    assert set(b.channel_map["submixes"]) == {"Main", "AN 3/4", "AES", "RE-150 In"}
+    assert b.map_matches_device is True
+
+
+def test_unknown_layout_still_flags_drift(make_bridge, fake_osc, monkeypatch):
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": []}})
+    b.osc_listener = listener
+    b.channel_map = {"submixes": {"Something": {"index": 1}},
+                     "layout_library": {}}
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    assert b.check_map_freshness() is False
+    assert b.map_matches_device is False

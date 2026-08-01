@@ -248,3 +248,34 @@ def test_widths_endpoint_refuses_blind_listener(monkeypatch):
     monkeypatch.setattr(bridge_module.bridge, "osc_listener", None)
     r = client.post("/api/device/widths", json={"widths": {"AN 1/2": 2}})
     assert r.status_code == 409
+
+
+def test_apply_registers_walk_in_layout_library(monkeypatch):
+    """Every applied walk is remembered under its output-layout key so a
+    later snapshot swap hot-swaps the stored map instead of demanding a
+    re-walk (user pain: a walk per swap)."""
+    import web.web_client as wc
+    persisted = {}
+    monkeypatch.setattr(wc, "backup_json_files", lambda *a, **k: None)
+    monkeypatch.setattr(wc, "_persist_channel_map",
+                        lambda cm: persisted.update(cm))
+    monkeypatch.setattr(wc, "_live_row1_names", lambda: None)
+    monkeypatch.setattr(bridge_module.bridge, "check_map_freshness",
+                        lambda: None)
+    old_lib_key = bridge_module.bridge._layout_key_from_names(["Old A", "Old B"])
+    monkeypatch.setattr(bridge_module.bridge, "channel_map", {
+        "submixes": {"Old A": {"index": 1}, "Old B": {"index": 2}},
+        "layout_library": {old_lib_key: {"Old A": {"index": 1},
+                                         "Old B": {"index": 2}}},
+    })
+    monkeypatch.setattr(bridge_module.bridge, "discovery_state", {
+        "status": "done",
+        "channel_map": {"submixes": {"New A": {"index": 1},
+                                     "New B": {"index": 2}}},
+    })
+    r = client.post("/api/device/discovery/apply", json={})
+    assert r.status_code == 200
+    lib = persisted["layout_library"]
+    new_key = bridge_module.bridge._layout_key_from_names(["New A", "New B"])
+    assert set(lib) == {old_lib_key, new_key}          # old walk kept
+    assert lib[new_key] == {"New A": {"index": 1}, "New B": {"index": 2}}
