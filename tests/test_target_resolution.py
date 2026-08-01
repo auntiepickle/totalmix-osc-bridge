@@ -1011,3 +1011,22 @@ def test_fx_enable_refuses_without_state(make_bridge, fake_osc):
         "value": "1.0"}]}})
     b.run_macro("m", 0.5)
     assert "/3/reverbEnable" not in [a for a, _ in fake_osc.sent]
+
+
+def test_output_refusal_records_map_drift(make_bridge, fake_osc):
+    """The refusal IS the detection point: a live-vs-map mismatch must set
+    map_matches_device=False so /api/status and the UI banner can surface
+    what the log already knew (field report: a stale map looked like a
+    dead server)."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/2/eqGain1", "value": "0.6",
+        "target": {"channel": "RE-150 In", "param": "eq_gain_1", "row": 3},
+    }]}})
+    b.channel_map = OUTPUT_MAP
+    b.osc_listener = listener
+    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    assert b.map_matches_device is None
+    b.run_macro("m", 0.5)
+    assert b.map_matches_device is False

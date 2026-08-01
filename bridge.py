@@ -145,6 +145,11 @@ class TotalMixOSCBridge:
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
         self.last_probe = None              # result of the last device liveness probe
         self.discovery_state = {"status": "idle"}  # channel-map discovery job state
+        # Live-vs-map freshness verdict (None = unknown). A stale map after
+        # a snapshot change refused correctly but looked like a dead server
+        # to the user (field report) — this drives the UI drift banner.
+        self.map_matches_device = None
+        self.live_submix_count = None
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -350,6 +355,7 @@ class TotalMixOSCBridge:
             else:
                 logger.warning(f"switch_to: snapshot '{snapshot}' not found in '{workspace}'")
 
+        self.check_map_freshness()
         self.broadcast_state()
         return True
 
@@ -521,6 +527,14 @@ class TotalMixOSCBridge:
                         what=f"snapshot '{snap_name}' recall")
             else:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
+
+            if (force_switch or not already_on_target) and (ws_name or snap_name):
+                # The switch may have changed the layout — check the map
+                # NOW instead of waiting for a refusal. Off-thread: the
+                # check waits on device feedback and must not delay the
+                # macro's own steps (the device lock still serializes it).
+                threading.Thread(target=self.check_map_freshness,
+                                 daemon=True).start()
 
             # === EMIT macro_start SO BROWSER CAN SYNC PROGRESS BAR ===
             duration_ms = self._get_macro_duration_ms(macro, clock_bpm=clock_bpm)
@@ -992,6 +1006,8 @@ class TotalMixOSCBridge:
             live_outputs = self._live_output_names()
             map_outputs = {n for _, n in entries}
             if live_outputs is None or live_outputs != map_outputs:
+                if live_outputs is not None:
+                    self.map_matches_device = False
                 logger.error(f"   → live output row unknown or changed "
                              f"since the map was captured — refusing "
                              f"page-2 aim for output '{channel_name}'")
@@ -1036,6 +1052,7 @@ class TotalMixOSCBridge:
             map_outputs = {str(n).strip() for n in
                            (self.channel_map or {}).get("submixes", {})}
             if live_outputs != map_outputs:
+                self.map_matches_device = False
                 logger.error(f"   → output layout changed since the map was "
                              f"captured (gone: "
                              f"{sorted(map_outputs - live_outputs)}, new: "
@@ -1231,6 +1248,29 @@ class TotalMixOSCBridge:
         if names:
             self._outputs_cache = (time.time(), names)
         return names
+
+    def check_map_freshness(self):
+        """Compare the live output row against the channel map and record
+        the verdict. Called proactively after workspace/snapshot switches
+        and after discovery apply — waiting for a refusal made a stale map
+        look like a dead server (field report)."""
+        live = self._live_output_names()
+        if live is None:
+            self.map_matches_device = None
+            return None
+        self.live_submix_count = len(live)
+        map_names = {str(n).strip() for n in
+                     (self.channel_map or {}).get("submixes", {})}
+        matches = live == map_names
+        if not matches:
+            logger.warning(f"⚠️ Device layout differs from the channel map "
+                           f"({len(live)} live outputs vs {len(map_names)} "
+                           f"mapped) — output-targeting macros will refuse "
+                           f"until discovery is re-run")
+        self.map_matches_device = matches
+        self.broadcast_state(macro_event={"type": "map_freshness",
+                                          "matches": matches})
+        return matches
 
     def _read_button_state(self, addr: str, timeout: float = 1.0):
         """Fresh state of a page-3 momentary button: force a page-3 dump

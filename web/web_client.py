@@ -168,6 +168,9 @@ async def get_status():
         # workspace/snapshot below are the bridge's commanded belief;
         # state_confirmed says whether the device confirmed the last switch
         "state_confirmed": getattr(bridge, "state_confirmed", None),
+        # Live-vs-map drift (output side): False drives the UI banner
+        "map_matches_device": getattr(bridge, "map_matches_device", None),
+        "live_submix_count": getattr(bridge, "live_submix_count", None),
         "device_probe": getattr(bridge, "last_probe", None),
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),
@@ -607,6 +610,7 @@ async def apply_discovery(body: ApplyBody = ApplyBody()):
 
     _persist_channel_map(new_map)
     bridge.channel_map_is_example = False
+    bridge.check_map_freshness()
     logger.info(f"✅ Discovered channel map applied ({new_subs} submixes)")
     return {"status": "success", "submixes": new_subs,
             "channel_widths_carried": carried,

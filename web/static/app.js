@@ -53,6 +53,9 @@ function _onWSMessage(event) {
       updateLastFired();
     } else if (ev.type === 'macro_skipped') {
       flashLEDSkipped(ev.name);
+      showSkipReason(ev.name, ev.reason);
+    } else if (ev.type === 'map_freshness') {
+      checkBankWidth();  // refresh the drift banner promptly
     } else if (ev.type === 'macro_created' || ev.type === 'macro_updated'
                || ev.type === 'macro_deleted') {
       // Another tab changed the macro set — re-sync cards. Skip when the
@@ -261,6 +264,52 @@ function pulseLED(name, triggerTimestamp) {
 }
 
 // Amber solid — macro is executing. Clears peak-hold on the previous card first.
+// A skipped macro must not look like a successful fire (field report):
+// paint the reason on the card's routing label for a few seconds
+function showSkipReason(name, reason) {
+  const cards = document.querySelectorAll('.routing-label');
+  const card = document.getElementById(`led-dot-${name}`)?.closest('[class*=card],div');
+  const label = card ? card.querySelector('.routing-label') : null;
+  if (!label) return;
+  if (label.dataset.orig === undefined) label.dataset.orig = label.textContent;
+  label.textContent = `⚠ step skipped: ${reason || 'unresolved target'}`;
+  label.classList.add('text-red-400');
+  clearTimeout(label._skipTimer);
+  label._skipTimer = setTimeout(() => {
+    label.textContent = label.dataset.orig;
+    delete label.dataset.orig;
+    label.classList.remove('text-red-400');
+  }, 6000);
+}
+
+// Drift-banner action: walk, wait for completion, apply, refresh
+window.rewalkNow = async function () {
+  const btn = document.getElementById('layout-drift-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Walking…'; }
+  try {
+    await fetch('/api/device/discover', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({submix_count: 32, settle_s: 1.0})});
+    for (let i = 0; i < 90; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const d = await fetch('/api/device/discovery').then(r => r.json());
+      if (d.status !== 'running') break;
+    }
+    if (btn) btn.textContent = 'Applying…';
+    const res = await fetch('/api/device/discovery/apply', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: '{}'});
+    if (btn) btn.textContent = res.ok ? 'Done ✓' : `Apply failed (${res.status})`;
+    await loadMacros();
+    checkBankWidth();
+  } catch (e) {
+    if (btn) btn.textContent = 'Failed — see log';
+    console.error('[rewalk]', e);
+  } finally {
+    setTimeout(() => { const b = document.getElementById('layout-drift-btn');
+      if (b) { b.disabled = false; b.textContent = 'Re-walk now'; } }, 4000);
+  }
+};
+
 function setLEDRunning(name) {
   if (_lastFiredName && _lastFiredName !== name) {
     _clearLastFired(_lastFiredName);
@@ -384,6 +433,14 @@ async function checkBankWidth() {
         document.getElementById('stale-map-live').textContent = live;
       }
       staleBanner.classList.toggle('hidden', !mapStale);
+    }
+
+    // Output-layout drift: the device no longer matches the walked map.
+    // Field report: without this banner a refusing macro was
+    // indistinguishable from a dead server.
+    const driftBanner = document.getElementById('layout-drift-banner');
+    if (driftBanner) {
+      driftBanner.classList.toggle('hidden', s.map_matches_device !== false);
     }
 
     // Device unresponsive — driven ONLY by a failed probe (an idle mixer
