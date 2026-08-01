@@ -1064,3 +1064,20 @@ def test_unknown_layout_still_flags_drift(make_bridge, fake_osc, monkeypatch):
     monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
     assert b.check_map_freshness() is False
     assert b.map_matches_device is False
+
+
+def test_unknown_layout_triggers_auto_walk(make_bridge, fake_osc, monkeypatch):
+    """User: 'I don't ever want to have to click that button by default' —
+    an unknown layout must kick the auto-walk callback instead of only
+    raising the banner."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": []}})
+    b.osc_listener = listener
+    b.channel_map = {"submixes": {"Something": {"index": 1}},
+                     "layout_library": {}}
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    fired = []
+    b.auto_walk_cb = lambda: fired.append(1)
+    assert b.check_map_freshness() is False
+    assert fired == [1]

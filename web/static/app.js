@@ -54,7 +54,9 @@ function _onWSMessage(event) {
     } else if (ev.type === 'macro_skipped') {
       flashLEDSkipped(ev.name);
       showSkipReason(ev.name, ev.reason);
-    } else if (ev.type === 'map_freshness') {
+    } else if (ev.type === 'map_freshness'
+               || ev.type === 'discovery_complete'
+               || ev.type === 'discovery_progress') {
       checkBankWidth();  // refresh the drift banner promptly
     } else if (ev.type === 'macro_created' || ev.type === 'macro_updated'
                || ev.type === 'macro_deleted') {
@@ -440,7 +442,20 @@ async function checkBankWidth() {
     // indistinguishable from a dead server.
     const driftBanner = document.getElementById('layout-drift-banner');
     if (driftBanner) {
-      driftBanner.classList.toggle('hidden', s.map_matches_device !== false);
+      const drift = s.map_matches_device === false;
+      driftBanner.classList.toggle('hidden', !drift);
+      const btn = document.getElementById('layout-drift-btn');
+      const txt = document.getElementById('layout-drift-text');
+      if (drift && txt && btn) {
+        if (s.discovery_status === 'running') {
+          // auto-walk in flight — progress, not a demand
+          btn.classList.add('hidden');
+          txt.innerHTML = '<b>New layout detected</b> — learning it now (auto-walk running, ~30s)…';
+        } else {
+          btn.classList.remove('hidden');
+          txt.innerHTML = '<b>Device layout changed since the last walk</b> — macros that target outputs will refuse (safely) until the map is refreshed.';
+        }
+      }
     }
 
     // Device unresponsive — driven ONLY by a failed probe (an idle mixer

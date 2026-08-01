@@ -1276,6 +1276,12 @@ class TotalMixOSCBridge:
                            f"mapped) and no walked map is stored for this "
                            f"layout — output-targeting macros will refuse "
                            f"until discovery runs")
+            cb = getattr(self, "auto_walk_cb", None)
+            if cb:
+                try:
+                    cb()   # self-guarded: cooldown, no-op when disabled/busy
+                except Exception as e:
+                    logger.error(f"auto-walk trigger failed: {e}")
         self.map_matches_device = matches
         self.broadcast_state(macro_event={"type": "map_freshness",
                                           "matches": matches})

@@ -173,7 +173,7 @@
         <!-- Layout-drift warning: the device's OUTPUT layout no longer matches the walked map (field report: looked like a dead server) -->
         <div id="layout-drift-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
             <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
-            <span class="flex-1"><b>Device layout changed since the last walk</b> — macros that target outputs will refuse (safely) until the map is refreshed.</span>
+            <span id="layout-drift-text" class="flex-1"><b>Device layout changed since the last walk</b> — macros that target outputs will refuse (safely) until the map is refreshed.</span>
             <button id="layout-drift-btn" onclick="rewalkNow()"
                 class="shrink-0 bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-xs px-4 py-2 rounded-xl transition-all">
                 Re-walk now

@@ -171,6 +171,7 @@ async def get_status():
         # Live-vs-map drift (output side): False drives the UI banner
         "map_matches_device": getattr(bridge, "map_matches_device", None),
         "live_submix_count": getattr(bridge, "live_submix_count", None),
+        "discovery_status": bridge.discovery_state.get("status"),
         "device_probe": getattr(bridge, "last_probe", None),
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),
@@ -366,20 +367,12 @@ class DiscoverBody(BaseModel):
     include_playback: bool = True
 
 
-@app.post("/api/device/discover")
-async def start_discovery(body: DiscoverBody = DiscoverBody()):
-    """Walk all output submixes (/setSubmix 1..N) and build a channel-map
-    draft from the feedback. Runs in a background thread — poll
-    GET /api/device/discovery or watch discovery_* WebSocket events."""
-    if bridge.osc_client is None:
-        raise HTTPException(status_code=503, detail="OSC client not configured")
-    if bridge.osc_listener is None or not bridge.osc_listener.running:
-        raise HTTPException(status_code=503, detail="OSC listener not running")
-    if bridge.discovery_state.get("status") == "running":
-        raise HTTPException(status_code=409, detail="Discovery already running")
-
+def _launch_walk(submix_count=32, settle_s=1.0, include_playback=True,
+                 auto_apply=False):
+    """Start the discovery walk thread (shared by the endpoint and the
+    auto-walk path). Caller must have verified no walk is running."""
     bridge.discovery_state = {"status": "running", "progress": 0,
-                              "total": body.submix_count}
+                              "total": submix_count}
 
     def _progress(i, total, label):
         bridge.discovery_state.update({"progress": i, "current_label": label})
@@ -391,11 +384,15 @@ async def start_discovery(body: DiscoverBody = DiscoverBody()):
     def _run():
         from discovery import discover_channel_map
         try:
-            channel_map, walk_log = discover_channel_map(
-                bridge.osc_client, bridge.osc_listener,
-                submix_count=body.submix_count, settle_s=body.settle_s,
-                progress_cb=_progress, include_playback=body.include_playback,
-            )
+            # Device lock: a walk's /setSubmix stream must not interleave
+            # with a concurrent macro's aim/writes (review finding [1] —
+            # the walk was the one sender left outside the lock)
+            with bridge._device_lock:
+                channel_map, walk_log = discover_channel_map(
+                    bridge.osc_client, bridge.osc_listener,
+                    submix_count=submix_count, settle_s=settle_s,
+                    progress_cb=_progress, include_playback=include_playback,
+                )
             draft_path = os.path.join(os.path.dirname(__file__),
                                       "../discovered_channel_map.json")
             with open(draft_path, "w") as f:
@@ -412,6 +409,16 @@ async def start_discovery(body: DiscoverBody = DiscoverBody()):
                 "type": "discovery_complete",
                 "submixes": len(channel_map["submixes"]),
             })
+            if auto_apply:
+                try:
+                    res = _apply_discovery_result(force=False)
+                    logger.info(f"🤖 auto-walk applied — "
+                                f"{res.get('submixes')} submixes; layout "
+                                f"learned, no click needed")
+                except HTTPException as e:
+                    logger.error(f"auto-walk apply refused: {e.detail} — "
+                                 f"the drift banner stays up with the "
+                                 f"manual button")
         except Exception as e:
             logger.error(f"Discovery failed: {e}", exc_info=True)
             bridge.discovery_state = {"status": "error", "error": str(e)}
@@ -420,6 +427,49 @@ async def start_discovery(body: DiscoverBody = DiscoverBody()):
             })
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+# Auto-walk unknown layouts (default ON): the drift banner demanded a
+# click per never-walked layout; the user wants zero clicks. Guarded by a
+# cooldown so a failing layout cannot walk-loop.
+AUTO_WALK = os.getenv("AUTO_WALK_NEW_LAYOUTS", "true").strip().lower() == "true"
+_auto_walk_state = {"t": 0.0}
+
+
+def _auto_walk():
+    if not AUTO_WALK:
+        return
+    import time as _time
+    now = _time.time()
+    if now - _auto_walk_state["t"] < 120:
+        return
+    if bridge.discovery_state.get("status") == "running":
+        return
+    if bridge.osc_client is None or bridge.osc_listener is None             or not bridge.osc_listener.running:
+        return
+    _auto_walk_state["t"] = now
+    logger.info("🤖 Unknown layout — auto-walking it now "
+                "(AUTO_WALK_NEW_LAYOUTS=true; set false to get the manual "
+                "banner button instead)")
+    _launch_walk(auto_apply=True)
+
+
+bridge.auto_walk_cb = _auto_walk
+
+
+@app.post("/api/device/discover")
+async def start_discovery(body: DiscoverBody = DiscoverBody()):
+    """Walk all output submixes (/setSubmix 1..N) and build a channel-map
+    draft from the feedback. Runs in a background thread — poll
+    GET /api/device/discovery or watch discovery_* WebSocket events."""
+    if bridge.osc_client is None:
+        raise HTTPException(status_code=503, detail="OSC client not configured")
+    if bridge.osc_listener is None or not bridge.osc_listener.running:
+        raise HTTPException(status_code=503, detail="OSC listener not running")
+    if bridge.discovery_state.get("status") == "running":
+        raise HTTPException(status_code=409, detail="Discovery already running")
+
+    _launch_walk(body.submix_count, body.settle_s, body.include_playback)
     # Playback capture adds two extra settles per REAL submix; the real count
     # is unknown up front, so estimate the worst case (every index real)
     per_index = body.settle_s * (3 if body.include_playback else 1)
@@ -558,6 +608,10 @@ class ApplyBody(BaseModel):
 @app.post("/api/device/discovery/apply")
 async def apply_discovery(body: ApplyBody = ApplyBody()):
     """Promote the last discovery result to the live ufx2_channel_map.json."""
+    return _apply_discovery_result(body.force)
+
+
+def _apply_discovery_result(force: bool = False):
     state = bridge.discovery_state
     if state.get("status") != "done" or "channel_map" not in state:
         raise HTTPException(status_code=409, detail="No completed discovery to apply")
@@ -568,7 +622,7 @@ async def apply_discovery(body: ApplyBody = ApplyBody()):
     # good map (happened live). Refuse a dramatic collapse unless forced.
     old_subs = len((bridge.channel_map or {}).get("submixes", {}))
     new_subs = len(new_map["submixes"])
-    if not body.force and old_subs >= 4 and new_subs * 2 < old_subs:
+    if not force and old_subs >= 4 and new_subs * 2 < old_subs:
         raise HTTPException(
             status_code=409,
             detail=f"Walk found only {new_subs} submixes vs {old_subs} in the "
