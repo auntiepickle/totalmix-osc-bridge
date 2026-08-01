@@ -929,3 +929,85 @@ def test_tranche2_dynamics_params_registered():
               "exp_ratio", "dyn_attack", "dyn_release", "alev_risetime",
               "lowcut_enable", "lowcut_grade"):
         assert p in TotalMixOSCBridge.CHANNEL_DETAIL_PARAMS
+
+
+class MomentaryFxTotalMix:
+    """Hardware-accurate FX buttons: /3/reverbEnable and /3/echoEnable
+    TOGGLE on 1.0 and IGNORE 0.0 (measured on the UFX II). The page-3
+    no-op (/3/faderGroups/1/1) dumps page 3."""
+
+    def __init__(self, listener, fake_osc, initial=0.0):
+        self.listener = listener
+        self.fake_osc = fake_osc
+        self.state = {"/3/reverbEnable": initial, "/3/echoEnable": initial}
+
+    def send_message(self, address, value):
+        self.fake_osc.send_message(address, value)
+        if address == "/3/faderGroups/1/1":
+            for a, v in self.state.items():
+                self.listener._handle(a, v)
+            return
+        if address in self.state and float(value) == 1.0:
+            self.state[address] = 1.0 - self.state[address]
+
+
+def _button_bridge(make_bridge, fake_osc, macro, initial=0.0):
+    listener = OSCListener(0)
+    b = make_bridge({"m": macro})
+    b.osc_listener = listener
+    b.osc_client = MomentaryFxTotalMix(listener, fake_osc, initial)
+    listener._server = object()
+    return b
+
+
+def test_fx_enable_set_presses_only_when_state_differs(make_bridge, fake_osc):
+    """'On' on an Off device = exactly one press; 'On' again = NO press.
+    The old value write toggled on every fire — two 'On' macros turned
+    the effect off (user-reported: 'effects don't work anymore')."""
+    b = _button_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/3/reverbEnable", "target": {"param": "reverb_enable"},
+        "value": "1.0"}]}, initial=0.0)
+    b.run_macro("m", 0.5)
+    assert b.osc_client.state["/3/reverbEnable"] == 1.0
+    presses = [v for a, v in fake_osc.sent if a == "/3/reverbEnable"]
+    assert presses == [1.0]
+    b.run_macro("m", 0.5)  # already On — must NOT toggle it back off
+    assert b.osc_client.state["/3/reverbEnable"] == 1.0
+    presses = [v for a, v in fake_osc.sent if a == "/3/reverbEnable"]
+    assert presses == [1.0]  # still exactly one press total
+
+
+def test_fx_enable_off_presses_when_on(make_bridge, fake_osc):
+    b = _button_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/3/echoEnable", "target": {"param": "echo_enable"},
+        "value": "0.0"}]}, initial=1.0)
+    b.run_macro("m", 0.5)
+    assert b.osc_client.state["/3/echoEnable"] == 0.0
+    assert [v for a, v in fake_osc.sent if a == "/3/echoEnable"] == [1.0]
+
+
+def test_fx_enable_lfo_presses_on_edges_and_returns(make_bridge, fake_osc):
+    """A threshold LFO on a momentary button must press only on 0/1 EDGES
+    (the raw shaped stream would toggle chaotically) and end where the
+    wave ends — the floor, i.e. back at Off."""
+    b = _button_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/3/reverbEnable", "target": {"param": "reverb_enable"},
+        "value": "{{param}}",
+        "operation": {"type": "lfo", "bars": 1, "bpm": 960,
+                      "steps_per_sec": 200, "threshold": 0.5}}]},
+        initial=0.0)
+    b.run_macro("m", 0.5)
+    presses = [v for a, v in fake_osc.sent if a == "/3/reverbEnable"]
+    assert presses and all(v == 1.0 for v in presses)
+    assert len(presses) % 2 == 0            # each cycle: on-press + off-press
+    assert b.osc_client.state["/3/reverbEnable"] == 0.0  # back where it began
+
+
+def test_fx_enable_refuses_without_state(make_bridge, fake_osc):
+    """No listener = the button state is unknowable, and a blind press is
+    a coin flip — refuse rather than toggle randomly."""
+    b = make_bridge({"m": {"steps": [{
+        "osc": "/3/reverbEnable", "target": {"param": "reverb_enable"},
+        "value": "1.0"}]}})
+    b.run_macro("m", 0.5)
+    assert "/3/reverbEnable" not in [a for a, _ in fake_osc.sent]

@@ -86,6 +86,27 @@ else:
     osc_client = None
     logger.warning("OSC_IP not set — OSC disabled, macros will be skipped")
 
+class _EdgeToggleClient:
+    """OSC-client shim for momentary-button addresses: turns the absolute
+    0/1 stream an operation emits into edge-triggered 1.0 presses (the
+    device toggles on 1.0 and ignores 0.0). Non-button addresses pass
+    through untouched."""
+
+    def __init__(self, real, addr, initial_on):
+        self._real = real
+        self._addr = addr
+        self._on = bool(initial_on)
+
+    def send_message(self, addr, value):
+        if addr != self._addr:
+            self._real.send_message(addr, value)
+            return
+        want = float(value) >= 0.5
+        if want != self._on:
+            self._real.send_message(addr, 1.0)
+            self._on = want
+
+
 # === WEBSOCKET CLIENTS (shared between bridge.py and web_client.py) ===
 ws_clients = []  # list of active FastAPI WebSocket connections
 
@@ -601,6 +622,10 @@ class TotalMixOSCBridge:
                 if _restore_bank:
                     _bank_dirty = True
 
+                _is_button = ("target" in step and
+                              str(step["target"].get("param", "")).lower()
+                              in self.BUTTON_PARAMS)
+
                 if "operation" in step and step.get("value") == "{{param}}":
                     op_config = step["operation"]
                     # Substitute live MIDI clock BPM when the mapping uses "bpm": "clock"
@@ -608,9 +633,21 @@ class TotalMixOSCBridge:
                         resolved_bpm = clock_bpm if clock_bpm else 140
                         op_config = {**op_config, "bpm": resolved_bpm}
                         logger.info(f"   → BPM clock sync: using {resolved_bpm} BPM")
+                    op_client = self.osc_client
+                    if _is_button:
+                        # Momentary button under modulation: sync the real
+                        # state once, then press only on 0/1 edges
+                        initial = self._read_button_state(osc_addr)
+                        if initial is None:
+                            logger.error(f"   → step skipped: {osc_addr} state "
+                                         f"unknowable, cannot modulate a "
+                                         f"momentary button blind")
+                            continue
+                        op_client = _EdgeToggleClient(self.osc_client,
+                                                      osc_addr, initial)
                     OperationRegistry.execute(
                         op_config["type"],
-                        self.osc_client,
+                        op_client,
                         osc_addr,
                         value,
                         op_config,
@@ -625,8 +662,14 @@ class TotalMixOSCBridge:
                 # === NORMAL STATIC STEP ===
                 step_val = value if step.get("value") == "{{param}}" else step.get("value")
                 try:
-                    self.osc_client.send_message(osc_addr, float(step_val))
-                    logger.info(f"   → {osc_addr} = {step_val}")
+                    if _is_button:
+                        # A value write cannot set a momentary button —
+                        # read fresh state, press only if it differs
+                        self._set_button_state(osc_addr,
+                                               float(step_val) >= 0.5)
+                    else:
+                        self.osc_client.send_message(osc_addr, float(step_val))
+                        logger.info(f"   → {osc_addr} = {step_val}")
                 except Exception as e:
                     logger.error(f"OSC send failed: {e}")
                 if _restore_bank:
@@ -741,6 +784,15 @@ class TotalMixOSCBridge:
     # occupy two positions) → /setBankStart offset → write /2/... → restore
     # bank 0 after the step (bankStart is shared global state every other
     # resolve assumes is 0).
+    # Momentary TOGGLE buttons (hardware-verified 2026-08-01): writing 1.0
+    # FLIPS the state and 0.0 does NOTHING. A plain value write therefore
+    # "sets" nothing — firing an 'On' macro twice turned the effect off,
+    # which shipped as user-visible 'effects don't work'. These params are
+    # set via read-fresh-state-then-press-if-different. The /2/ enables
+    # (eq/dyn/alev/lowcut/phase) are UNVERIFIED and assumed settable until
+    # a hardware round says otherwise.
+    BUTTON_PARAMS = {"reverb_enable", "echo_enable"}
+
     CHANNEL_DETAIL_PARAMS = {
         "eq_enable":   "/2/eqEnable",
         "eq_gain_1":   "/2/eqGain1",
@@ -1179,6 +1231,46 @@ class TotalMixOSCBridge:
         if names:
             self._outputs_cache = (time.time(), names)
         return names
+
+    def _read_button_state(self, addr: str, timeout: float = 1.0):
+        """Fresh state of a page-3 momentary button: force a page-3 dump
+        (the /3/ no-op) and read the addr after it. None = unknowable —
+        pressing blind toggles RANDOMLY, so callers must refuse on None.
+        /3/ floats go stale, hence the forced dump (device rule)."""
+        listener = self.osc_listener
+        if listener is None or not listener.running or self.osc_client is None:
+            return None
+        with self._device_lock:
+            before = (listener.state.raw_entry(addr) or {}).get("count", 0)
+            self.osc_client.send_message("/3/faderGroups/1/1", 0.0)
+            fresh = listener.wait_for(
+                lambda st: (st.raw_entry(addr) or {}).get("count", 0) > before,
+                timeout)
+        if not fresh:
+            return None
+        args = (listener.state.raw_entry(addr) or {}).get("args") or []
+        try:
+            return float(args[0]) >= 0.5
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    def _set_button_state(self, addr: str, desired: bool) -> bool:
+        """Set a momentary toggle button to a target state: read fresh,
+        press (1.0) only if it differs. Returns False when the state is
+        unknowable — a blind press is a coin flip, refuse instead."""
+        current = self._read_button_state(addr)
+        if current is None:
+            logger.error(f"   → cannot read {addr} state (no page-3 dump) — "
+                         f"REFUSING the button press (a blind press toggles "
+                         f"randomly)")
+            return False
+        if current != desired:
+            with self._device_lock:
+                self.osc_client.send_message(addr, 1.0)
+            logger.info(f"   → {addr}: pressed (now {'On' if desired else 'Off'})")
+        else:
+            logger.info(f"   → {addr}: already {'On' if desired else 'Off'} — no press")
+        return True
 
     def _confirm_page2_aim(self, channel_name: str, row: str,
                            timeout: float = 0.8) -> bool:

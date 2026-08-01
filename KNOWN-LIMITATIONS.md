@@ -35,6 +35,12 @@ Honest edges of the pre-alpha, kept current so nobody re-discovers them.
 - A `/setSubmix` to the already-selected submix (every stereo pair's
   second index) is a **total no-op — zero feedback**. The walk
   disambiguates silence from a crash with a row-toggle probe.
+- **`/3/reverbEnable` and `/3/echoEnable` are momentary toggle buttons**
+  (1.0 flips, 0.0 is ignored) — the bridge sets them by reading fresh
+  state and pressing only on difference, and modulates them by pressing
+  only on 0/1 edges. The `/2/` enables (eq/dyn/alev/lowcut/phase) are
+  **unverified** and assumed value-settable until a hardware round
+  discriminates press-vs-set for them.
 
 ## Not exposed
 - `/2/reverbSend` — constant sentinel (−3.615/−oo) on every channel;
