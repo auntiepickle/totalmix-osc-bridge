@@ -150,6 +150,7 @@ class TotalMixOSCBridge:
         # to the user (field report) — this drives the UI drift banner.
         self.map_matches_device = None
         self.live_submix_count = None
+        self.input_widths_coverage = None
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -654,6 +655,8 @@ class TotalMixOSCBridge:
                 _is_button = ("target" in step and
                               str(step["target"].get("param", "")).lower()
                               in self.BUTTON_PARAMS)
+                _button_row = (str(step["target"].get("row", 1))
+                               if _is_button else None)
 
                 if "operation" in step and step.get("value") == "{{param}}":
                     op_config = step["operation"]
@@ -666,7 +669,7 @@ class TotalMixOSCBridge:
                     if _is_button:
                         # Momentary button under modulation: sync the real
                         # state once, then press only on 0/1 edges
-                        initial = self._read_button_state(osc_addr)
+                        initial = self._read_button_state(osc_addr, _button_row)
                         if initial is None:
                             logger.error(f"   → step skipped: {osc_addr} state "
                                          f"unknowable, cannot modulate a "
@@ -695,7 +698,8 @@ class TotalMixOSCBridge:
                         # A value write cannot set a momentary button —
                         # read fresh state, press only if it differs
                         self._set_button_state(osc_addr,
-                                               float(step_val) >= 0.5)
+                                               float(step_val) >= 0.5,
+                                               _button_row)
                     else:
                         self.osc_client.send_message(osc_addr, float(step_val))
                         logger.info(f"   → {osc_addr} = {step_val}")
@@ -813,14 +817,16 @@ class TotalMixOSCBridge:
     # occupy two positions) → /setBankStart offset → write /2/... → restore
     # bank 0 after the step (bankStart is shared global state every other
     # resolve assumes is 0).
-    # Momentary TOGGLE buttons (hardware-verified 2026-08-01): writing 1.0
-    # FLIPS the state and 0.0 does NOTHING. A plain value write therefore
-    # "sets" nothing — firing an 'On' macro twice turned the effect off,
-    # which shipped as user-visible 'effects don't work'. These params are
-    # set via read-fresh-state-then-press-if-different. The /2/ enables
-    # (eq/dyn/alev/lowcut/phase) are UNVERIFIED and assumed settable until
-    # a hardware round says otherwise.
-    BUTTON_PARAMS = {"reverb_enable", "echo_enable"}
+    # Momentary TOGGLE buttons (hardware-verified: /3/ FX enables
+    # 2026-08-01, ALL /2/ enables 2026-08-02 — 6/6 unanimous, both rows):
+    # writing 1.0 FLIPS the state and 0.0 does NOTHING. A plain value
+    # write therefore "sets" nothing — set = read fresh state, press only
+    # on difference; modulate = press on 0/1 edges. /2/recordEnable is
+    # deliberately unexposed and untested (DURec record-arm — real-world
+    # consequence); if ever exposed, assume momentary and verify first.
+    BUTTON_PARAMS = {"reverb_enable", "echo_enable",
+                     "eq_enable", "dyn_enable", "lowcut_enable",
+                     "alev_enable", "phase", "phase_r"}
 
     CHANNEL_DETAIL_PARAMS = {
         "eq_enable":   "/2/eqEnable",
@@ -1290,6 +1296,18 @@ class TotalMixOSCBridge:
             matches = True
         if matches:
             self._remember_snapshot_layout(live)
+        # INPUT-side drift is invisible to the output comparison (hardware
+        # incident: one channel un-pairing re-keyed the width map — 0/24
+        # coverage, every input channel-detail macro disarmed, no banner).
+        # Judge width coverage for the LIVE input layout too.
+        self.input_widths_coverage = self._input_width_coverage()
+        cov = self.input_widths_coverage
+        if cov and cov["covered"] < cov["total"]:
+            logger.warning(f"⚠️ Input layout has no full width map: "
+                           f"{cov['covered']}/{cov['total']} live strips "
+                           f"covered — input EQ/Dynamics macros will refuse "
+                           f"(re-pair the channels or POST widths for this "
+                           f"layout)")
         if not matches:
             logger.warning(f"⚠️ Device layout differs from the channel map "
                            f"({len(live)} live outputs vs {len(map_names)} "
@@ -1306,6 +1324,32 @@ class TotalMixOSCBridge:
         self.broadcast_state(macro_event={"type": "map_freshness",
                                           "matches": matches})
         return matches
+
+    def _input_width_coverage(self):
+        """Width coverage of the LIVE input row: {covered, total} or None
+        when the live input bank is unknowable. Only entries refreshed in
+        the last few seconds count — raw state is cumulative and lies
+        (server method note)."""
+        listener = self.osc_listener
+        if listener is None or not listener.running:
+            return None
+        st = listener.state
+        cur = st.current_submix
+        if not cur:
+            return None
+        floor = time.time() - 3.0
+        strips = {ch: d for ch, d in st.submix_snapshot(cur).get("1", {}).items()
+                  if d.get("_seen", 0) >= floor
+                  and str(d.get("name", "")).strip().lower()
+                  not in ("", "n.a.", "n/a")}
+        if not strips:
+            return None
+        widths = self._widths_for_layout(strips)
+        names = [str(d.get("name", "")).strip() for d in strips.values()]
+        covered = sum(1 for n in names
+                      if not isinstance(widths.get(n), bool)
+                      and widths.get(n) in (1, 2))
+        return {"covered": covered, "total": len(names)}
 
     def _remember_snapshot_layout(self, live_outputs):
         """Persist which layout this (workspace, snapshot) uses, so the
@@ -1377,17 +1421,32 @@ class TotalMixOSCBridge:
             json.dump(cm, f, indent=2)
         os.replace(tmp, target)
 
-    def _read_button_state(self, addr: str, timeout: float = 1.0):
-        """Fresh state of a page-3 momentary button: force a page-3 dump
-        (the /3/ no-op) and read the addr after it. None = unknowable —
-        pressing blind toggles RANDOMLY, so callers must refuse on None.
-        /3/ floats go stale, hence the forced dump (device rule)."""
+    def _read_button_state(self, addr: str, row=None, timeout: float = 1.0):
+        """Fresh state of a momentary button. The refresh is picked BY
+        PAGE: /3/ addresses use the page-3 no-op; /2/ addresses use the
+        page-2 row mirror MATCHING THE COMMANDED ROW — which must be
+        threaded in by the caller, never derived from listener belief
+        (the mirror is a WRITE: only the matching one is a no-op, a stale
+        row belief would silently switch rows — same hazard as
+        _confirm_page2_aim). For /2/ addresses the bank must already be
+        aimed at the target channel (the step path aims before writing;
+        the mirror does not move the bank). None = unknowable — pressing
+        blind toggles RANDOMLY, so callers must refuse on None."""
         listener = self.osc_listener
         if listener is None or not listener.running or self.osc_client is None:
             return None
+        if addr.startswith("/2/"):
+            if row is None:
+                logger.error(f"   → cannot read {addr}: page-2 button reads "
+                             f"need the commanded row threaded in — refusing")
+                return None
+            nudge = ({"1": "/2/busInput", "2": "/2/busPlayback",
+                      "3": "/2/busOutput"}.get(str(row), "/2/busInput"), 1.0)
+        else:
+            nudge = ("/3/faderGroups/1/1", 0.0)
         with self._device_lock:
             before = (listener.state.raw_entry(addr) or {}).get("count", 0)
-            self.osc_client.send_message("/3/faderGroups/1/1", 0.0)
+            self.osc_client.send_message(nudge[0], nudge[1])
             fresh = listener.wait_for(
                 lambda st: (st.raw_entry(addr) or {}).get("count", 0) > before,
                 timeout)
@@ -1399,11 +1458,11 @@ class TotalMixOSCBridge:
         except (TypeError, ValueError, IndexError):
             return None
 
-    def _set_button_state(self, addr: str, desired: bool) -> bool:
+    def _set_button_state(self, addr: str, desired: bool, row=None) -> bool:
         """Set a momentary toggle button to a target state: read fresh,
         press (1.0) only if it differs. Returns False when the state is
         unknowable — a blind press is a coin flip, refuse instead."""
-        current = self._read_button_state(addr)
+        current = self._read_button_state(addr, row)
         if current is None:
             logger.error(f"   → cannot read {addr} state (no page-3 dump) — "
                          f"REFUSING the button press (a blind press toggles "

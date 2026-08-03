@@ -172,6 +172,7 @@ async def get_status():
         "map_matches_device": getattr(bridge, "map_matches_device", None),
         "live_submix_count": getattr(bridge, "live_submix_count", None),
         "discovery_status": bridge.discovery_state.get("status"),
+        "input_widths_coverage": getattr(bridge, "input_widths_coverage", None),
         "device_probe": getattr(bridge, "last_probe", None),
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),

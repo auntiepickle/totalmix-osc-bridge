@@ -1152,3 +1152,68 @@ def test_known_snapshot_switch_is_instant(make_bridge, fake_osc, monkeypatch):
     # sends except the switch itself
     first_two = addrs[:2]
     assert first_two == ["/loadQuickWorkspace", "/3/snapshots/7/1"]
+
+
+class MomentaryEqMixedBank(MixedBankTotalMix):
+    """Hardware-accurate /2/ enable: /2/eqEnable toggles on 1.0, ignores
+    0.0 (measured 6/6 on the UFX II); the page-2 row mirror dumps the
+    window's trackname AND the enable state."""
+
+    def __init__(self, listener, fake_osc, initial=1.0):
+        super().__init__(listener, fake_osc)
+        self.eq_state = initial
+
+    def send_message(self, address, value):
+        if address in ("/2/busInput", "/2/busPlayback", "/2/busOutput"):
+            super().send_message(address, value)   # emits /2/trackname
+            self.listener._handle("/2/eqEnable", self.eq_state)
+            return
+        if address == "/2/eqEnable":
+            self.fake_osc.send_message(address, value)
+            if float(value) == 1.0:
+                self.eq_state = 1.0 - self.eq_state
+            return
+        super().send_message(address, value)
+
+
+def _eq_enable_bridge(make_bridge, fake_osc, value, initial):
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
+        "osc": "/2/eqEnable", "value": value,
+        "target": {"channel": "ADAT 5/6", "param": "eq_enable"},
+    }]}, widths=VERIFIED_WIDTHS)
+    b.osc_client = MomentaryEqMixedBank(b.osc_listener, fake_osc, initial)
+    b.osc_client.send_message("/1/busInput", 1.0)
+    fake_osc.clear()
+    return b
+
+
+def test_page2_enable_off_presses_when_on(make_bridge, fake_osc):
+    """#21 closed: /2/ enables are momentary. 'Off' on an On channel =
+    exactly one 1.0 press, read via the ROW MIRROR (the page-3 no-op
+    never refreshes a /2/ address — the trap the server flagged)."""
+    b = _eq_enable_bridge(make_bridge, fake_osc, "0.0", initial=1.0)
+    b.run_macro("m", 0.5)
+    assert b.osc_client.eq_state == 0.0
+    assert [v for a, v in fake_osc.sent if a == "/2/eqEnable"] == [1.0]
+    # the read used the page-2 mirror, not the page-3 no-op
+    assert "/3/faderGroups/1/1" not in fake_osc.addresses()
+    assert "/2/busInput" in fake_osc.addresses()
+
+
+def test_page2_enable_idempotent_when_already_there(make_bridge, fake_osc):
+    """'On' when already On = NO press (the old value write would have
+    toggled it off — the user-visible 'effects don't work' class)."""
+    b = _eq_enable_bridge(make_bridge, fake_osc, "1.0", initial=1.0)
+    b.run_macro("m", 0.5)
+    assert b.osc_client.eq_state == 1.0
+    assert [v for a, v in fake_osc.sent if a == "/2/eqEnable"] == []
+
+
+def test_input_width_coverage_reported(make_bridge, fake_osc):
+    """Input-side drift was invisible (hardware incident: an un-pairing
+    re-keyed the width map, 0/N coverage, no banner). The freshness path
+    now measures width coverage of the live input row."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": []},
+                   widths={"AN 1/2": 2})  # Mavis + ADAT 5/6 uncovered
+    cov = b._input_width_coverage()
+    assert cov == {"covered": 1, "total": 3}

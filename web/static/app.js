@@ -442,11 +442,20 @@ async function checkBankWidth() {
     // indistinguishable from a dead server.
     const driftBanner = document.getElementById('layout-drift-banner');
     if (driftBanner) {
-      const drift = s.map_matches_device === false;
+      const cov = s.input_widths_coverage;
+      const inputDrift = !!(cov && cov.total > 0 && cov.covered < cov.total);
+      const drift = s.map_matches_device === false || inputDrift;
       driftBanner.classList.toggle('hidden', !drift);
       const btn = document.getElementById('layout-drift-btn');
       const txt = document.getElementById('layout-drift-text');
-      if (drift && txt && btn) {
+      if (inputDrift && s.map_matches_device !== false && txt && btn) {
+        // input-side: no walk fixes widths — advise the two real options
+        btn.classList.add('hidden');
+        txt.innerHTML = `<b>Input layout changed</b> — no width map covers ` +
+          `${cov.total - cov.covered} of ${cov.total} live strips, so input ` +
+          `EQ/Dynamics macros will refuse. Re-pair the channels in TotalMix, ` +
+          `or post widths for this layout.`;
+      } else if (drift && txt && btn) {
         if (s.discovery_status === 'running') {
           // auto-walk in flight — progress, not a demand
           btn.classList.add('hidden');
