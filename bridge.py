@@ -530,11 +530,26 @@ class TotalMixOSCBridge:
 
             if (force_switch or not already_on_target) and (ws_name or snap_name):
                 # The switch may have changed the layout — check the map
-                # NOW instead of waiting for a refusal. Off-thread: the
-                # check waits on device feedback and must not delay the
-                # macro's own steps (the device lock still serializes it).
-                threading.Thread(target=self.check_map_freshness,
-                                 daemon=True).start()
+                # NOW instead of waiting for a refusal. When this macro's
+                # OWN steps need the map, the check (and the library
+                # hot-swap) must complete BEFORE the step loop: off-thread
+                # it deadlocks by design — this thread holds the device
+                # lock, so the swap could never land until after the steps
+                # had already refused against the old layout's map (bug:
+                # 'a macro which changes snapshot doesn't work in the new
+                # snapshot'). Step-free switch macros keep the async check.
+                _needs_map = any(("target" in s) or (s.get("osc") == "/setSubmix")
+                                 for s in macro.get("steps", []))
+                if _needs_map and not self._instant_swap_for(ws_name, snap_name):
+                    # First visit to this snapshot: one enumeration
+                    # (~0.2s) resolves the layout — and remembers it, so
+                    # every later switch is instant
+                    self.check_map_freshness()
+                else:
+                    # Map already right (or no steps need it) — verify in
+                    # the background, never in the macro's path
+                    threading.Thread(target=self.check_map_freshness,
+                                     daemon=True).start()
 
             # === EMIT macro_start SO BROWSER CAN SYNC PROGRESS BAR ===
             duration_ms = self._get_macro_duration_ms(macro, clock_bpm=clock_bpm)
@@ -983,9 +998,12 @@ class TotalMixOSCBridge:
             # (first == 1, deltas 1 or 2) still gates against a malformed
             # map; the live-outputs match gates against a stale one.
             subs = (self.channel_map or {}).get("submixes", {})
+            # names come from the dict KEYS — entries are keyed by submix
+            # name, and library-stored maps must resolve regardless of the
+            # inner 'name' field
             entries = sorted(
-                ((int(s["index"]), str(s.get("name", "")).strip())
-                 for s in subs.values()
+                ((int(s["index"]), str(name).strip())
+                 for name, s in subs.items()
                  if isinstance(s.get("index"), (int, float))),
                 key=lambda t: t[0])
             idx_of = {n: i for i, n in entries}
@@ -1270,6 +1288,8 @@ class TotalMixOSCBridge:
         matches = live == map_names
         if not matches and self._try_layout_swap(live):
             matches = True
+        if matches:
+            self._remember_snapshot_layout(live)
         if not matches:
             logger.warning(f"⚠️ Device layout differs from the channel map "
                            f"({len(live)} live outputs vs {len(map_names)} "
@@ -1286,6 +1306,49 @@ class TotalMixOSCBridge:
         self.broadcast_state(macro_event={"type": "map_freshness",
                                           "matches": matches})
         return matches
+
+    def _remember_snapshot_layout(self, live_outputs):
+        """Persist which layout this (workspace, snapshot) uses, so the
+        next switch to it can swap maps INSTANTLY with no device traffic
+        (user: a ready macro must fire instantly, never wait on a walk
+        or an enumeration)."""
+        if not self.current_workspace or not self.current_snapshot:
+            return
+        key = self._layout_key_from_names(live_outputs)
+        slot = f"{self.current_workspace}|{self.current_snapshot}"
+        cm = self.channel_map or {}
+        assoc = cm.setdefault("snapshot_layouts", {})
+        if assoc.get(slot) != key:
+            assoc[slot] = key
+            try:
+                self._persist_channel_map_file(cm)
+            except Exception as e:
+                logger.warning(f"could not persist snapshot-layout memory: {e}")
+
+    def _instant_swap_for(self, ws_name, snap_name) -> bool:
+        """Zero-traffic map swap from snapshot-layout memory. Returns True
+        when the map for the target snapshot's remembered layout is now
+        active — the macro's steps can resolve immediately."""
+        cm = self.channel_map or {}
+        key = (cm.get("snapshot_layouts") or {}).get(f"{ws_name}|{snap_name}")
+        if not key:
+            return False
+        entry = (cm.get("layout_library") or {}).get(key)
+        if entry is None:
+            return False
+        current_key = self._layout_key_from_names(cm.get("submixes", {}).keys())
+        if current_key != key:
+            cm["submixes"] = entry
+            self.channel_map = cm
+            try:
+                self._persist_channel_map_file(cm)
+            except Exception as e:
+                logger.warning(f"instant-swap persist failed: {e}")
+            logger.info(f"⚡ Instant map swap for {ws_name}/{snap_name} "
+                        f"({len(entry)} submixes, from snapshot-layout "
+                        f"memory — no device traffic)")
+        self.map_matches_device = True
+        return True
 
     def _try_layout_swap(self, live_outputs) -> bool:
         """Adopt the stored map for the live output layout, if one exists.

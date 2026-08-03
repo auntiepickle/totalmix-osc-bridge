@@ -1081,3 +1081,74 @@ def test_unknown_layout_triggers_auto_walk(make_bridge, fake_osc, monkeypatch):
     b.auto_walk_cb = lambda: fired.append(1)
     assert b.check_map_freshness() is False
     assert fired == [1]
+
+
+def test_snapshot_switching_macro_works_in_the_new_layout(make_bridge, fake_osc, monkeypatch):
+    """Bug: a macro that switches snapshot refused its own steps — the map
+    hot-swap ran off-thread behind the device lock THIS macro holds, so
+    the steps resolved against the OLD layout's map. The freshness check
+    must complete synchronously before the step loop."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {
+        "workspace": "Pill_setup", "snapshot": "Live",
+        "steps": [{"osc": "/2/eqGain1", "value": "0.6",
+                   "target": {"channel": "RE-150 In", "param": "eq_gain_1",
+                              "row": 3}}],
+    }})
+    lib_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
+    b.channel_map = {
+        "submixes": {"Old A": {"index": 1}, "Old B": {"index": 2}},
+        "layout_library": {lib_key: {
+            "Main": {"index": 1}, "AN 3/4": {"index": 2},
+            "AES": {"index": 4}, "RE-150 In": {"index": 6}}},
+    }
+    b.osc_listener = listener
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    b.run_macro("m", 0.5)
+    # the hot-swap landed BEFORE the step, so the step aimed and fired
+    assert ("/setBankStart", 6.0) in fake_osc.sent
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+    assert b.map_matches_device is True
+    # and the layout is now remembered for this snapshot — the next
+    # switch swaps instantly with zero device traffic
+    assert b.channel_map.get("snapshot_layouts", {}).get(
+        "Pill_setup|live") == b._layout_key_from_names(
+        ["Main", "AN 3/4", "AES", "RE-150 In"])
+
+
+def test_known_snapshot_switch_is_instant(make_bridge, fake_osc, monkeypatch):
+    """User: 'if it's ready to go it should be instant' — a snapshot seen
+    before swaps its map from memory with ZERO device enumeration in the
+    macro's path (the sent list shows no busOutput before the aim)."""
+    listener = OSCListener(0)
+    lib_key = None
+    b = make_bridge({"m": {
+        "workspace": "Pill_setup", "snapshot": "Live",
+        "steps": [{"osc": "/2/eqGain1", "value": "0.6",
+                   "target": {"channel": "RE-150 In", "param": "eq_gain_1",
+                              "row": 3}}],
+    }})
+    lib_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
+    b.channel_map = {
+        "submixes": {"Old A": {"index": 1}, "Old B": {"index": 2}},
+        "layout_library": {lib_key: {
+            "Main": {"index": 1}, "AN 3/4": {"index": 2},
+            "AES": {"index": 4}, "RE-150 In": {"index": 6}}},
+        "snapshot_layouts": {"Pill_setup|live": lib_key},
+    }
+    b.osc_listener = listener
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    b.run_macro("m", 0.5)
+    addrs = [a for a, _ in fake_osc.sent]
+    # the aim happened...
+    assert ("/setBankStart", 6.0) in fake_osc.sent
+    assert ("/2/eqGain1", 0.6) in fake_osc.sent
+    # ...and the FIRST busOutput in the stream belongs to the aim/guard,
+    # not a pre-step enumeration: nothing precedes the snapshot switch
+    # sends except the switch itself
+    first_two = addrs[:2]
+    assert first_two == ["/loadQuickWorkspace", "/3/snapshots/7/1"]
