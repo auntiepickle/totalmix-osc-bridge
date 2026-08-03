@@ -57,6 +57,11 @@ Honest edges of the pre-alpha, kept current so nobody re-discovers them.
   mode descriptions, SET/SWEEP/WOBBLE naming).
 
 ## Device quirks (documented, not ours to fix)
+- Output names cap around **11 characters** and the device may pad with a
+  trailing space — a longer rename can truncate into a name whose
+  stripped form is IDENTICAL to the original, making the rename a no-op
+  from the layout system's point of view. Layout tests should use short,
+  obviously-different names and verify the live name-set.
 - A strip reports `RE-!50 Out` (device-side typo).
 - Page-2 low-cut frequencies read back quantised (250 → 260 Hz).
 - Number of Faders per Bank and other OSC settings are per-workspace and

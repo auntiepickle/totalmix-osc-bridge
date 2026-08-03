@@ -639,6 +639,14 @@ def _apply_discovery_result(force: bool = False):
     new_key = bridge._layout_key_from_names(new_map.get("submixes", {}).keys())
     library[new_key] = new_map.get("submixes", {})
     new_map["layout_library"] = library
+    # snapshot-layout memory is (workspace|snapshot) -> layout key: it
+    # survives a re-walk unchanged, and dropping it silently re-imposed
+    # the one-time learn on every other snapshot (hardware: 4 entries ->
+    # 1 on every apply, including automatic ones). Stale keys are
+    # harmless — the instant swap falls through on a missing library
+    # entry.
+    new_map["snapshot_layouts"] = dict(
+        (bridge.channel_map or {}).get("snapshot_layouts", {}))
 
     # Discovery builds the map from scratch — without this, every apply
     # silently disarmed EQ macros by dropping the verified widths

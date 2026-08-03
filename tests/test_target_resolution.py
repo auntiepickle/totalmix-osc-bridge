@@ -1217,3 +1217,69 @@ def test_input_width_coverage_reported(make_bridge, fake_osc):
                    widths={"AN 1/2": 2})  # Mavis + ADAT 5/6 uncovered
     cov = b._input_width_coverage()
     assert cov == {"covered": 1, "total": 3}
+
+
+def test_remember_refuses_unsettled_reads(make_bridge, fake_osc, monkeypatch):
+    """A single unsettled enumeration once recorded the WRONG layout and
+    the instant swap then trusted it — a new association persists only
+    after a second confirming read."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": []}})
+    b.osc_listener = listener
+
+    class FlappingOutputs(StereoOutputsTotalMix):
+        # the CONFIRMING read (the only enumeration _remember performs)
+        # disagrees with the claimed first read
+        _flip = [["Main", "AN 3/4", "AES"]]
+        def send_message(self, address, value):
+            if address == "/1/busOutput":
+                self.listener._handle(address, 1.0)
+                names = self._flip.pop(0) if self._flip else ["Main"]
+                for n, name in enumerate(names, 1):
+                    self.listener._handle(f"/1/trackname{n}", name)
+                return
+            super().send_message(address, value)
+
+    b.osc_client = FlappingOutputs(listener, fake_osc)
+    listener._server = object()
+    b.channel_map = {"submixes": {}, "layout_library": {}}
+    b.current_workspace, b.current_snapshot = "WS", "snap"
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    b._remember_snapshot_layout(["Main", "AN 3/4"])
+    assert b.channel_map.get("snapshot_layouts", {}) == {}  # not recorded
+
+
+def test_freshness_self_heals_wrong_memory(make_bridge, fake_osc, monkeypatch):
+    """A remembered layout that disagrees with the device is dropped
+    loudly so the next switch re-learns instead of repeating the error."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": []}})
+    b.osc_listener = listener
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    live_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
+    b.channel_map = {
+        "submixes": {"Main": {"index": 1}, "AN 3/4": {"index": 2},
+                     "AES": {"index": 4}, "RE-150 In": {"index": 6}},
+        "layout_library": {live_key: {}},
+        "snapshot_layouts": {"WS|snap": "totally|wrong|key"},
+    }
+    b.current_workspace, b.current_snapshot = "WS", "snap"
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    b.check_map_freshness()
+    assert b.channel_map["snapshot_layouts"].get("WS|snap") != "totally|wrong|key"
+
+
+def test_instant_swap_makes_no_hardware_claim(make_bridge, fake_osc, monkeypatch):
+    """The zero-traffic swap must not set map_matches_device — that claim
+    belongs to a path that actually looked at the device."""
+    b = make_bridge({"m": {"steps": []}})
+    key = b._layout_key_from_names(["A", "B"])
+    b.channel_map = {"submixes": {"X": {"index": 1}},
+                     "layout_library": {key: {"A": {"index": 1},
+                                              "B": {"index": 2}}},
+                     "snapshot_layouts": {"WS|snap": key}}
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    b.map_matches_device = None
+    assert b._instant_swap_for("WS", "snap") is True
+    assert b.map_matches_device is None  # unchanged — async check will claim

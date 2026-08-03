@@ -279,3 +279,27 @@ def test_apply_registers_walk_in_layout_library(monkeypatch):
     new_key = bridge_module.bridge._layout_key_from_names(["New A", "New B"])
     assert set(lib) == {old_lib_key, new_key}          # old walk kept
     assert lib[new_key] == {"New A": {"index": 1}, "New B": {"index": 2}}
+
+
+def test_apply_carries_snapshot_layouts(monkeypatch):
+    """Apply wiped snapshot_layouts (4 entries -> 1 on hardware), silently
+    re-imposing the one-time learn on every other snapshot."""
+    import web.web_client as wc
+    persisted = {}
+    monkeypatch.setattr(wc, "backup_json_files", lambda *a, **k: None)
+    monkeypatch.setattr(wc, "_persist_channel_map",
+                        lambda cm: persisted.update(cm))
+    monkeypatch.setattr(wc, "_live_row1_names", lambda: None)
+    monkeypatch.setattr(bridge_module.bridge, "check_map_freshness",
+                        lambda: None)
+    monkeypatch.setattr(bridge_module.bridge, "channel_map", {
+        "submixes": {"Old": {"index": 1}},
+        "snapshot_layouts": {"WS|a": "k1", "WS|b": "k2"},
+    })
+    monkeypatch.setattr(bridge_module.bridge, "discovery_state", {
+        "status": "done",
+        "channel_map": {"submixes": {"New": {"index": 1}}},
+    })
+    r = client.post("/api/device/discovery/apply", json={})
+    assert r.status_code == 200
+    assert persisted["snapshot_layouts"] == {"WS|a": "k1", "WS|b": "k2"}

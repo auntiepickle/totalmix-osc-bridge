@@ -329,6 +329,12 @@ class TotalMixOSCBridge:
         self._outputs_cache = None
         self._layout_epoch = time.time()
         self.current_workspace = workspace
+        if self.mqtt_client:
+            # keep the retained belief current — run_macro publishes these,
+            # switch_to did not, so a restart absorbed a stale workspace
+            # (hardware: bridge booted believing Work/snap_1)
+            self.mqtt_client.publish("totalmix/workspace", str(ws_slot),
+                                     retain=True)
         logger.info(f"switch_to: workspace '{workspace}' (slot {ws_slot})")
 
         if snapshot:
@@ -352,6 +358,9 @@ class TotalMixOSCBridge:
                 self._outputs_cache = None
                 self._layout_epoch = time.time()
                 self.current_snapshot = snapshot.strip().lower()
+                if self.mqtt_client:
+                    self.mqtt_client.publish("totalmix/snapshot",
+                                             str(snap_num), retain=True)
                 logger.info(f"switch_to: snapshot '{snapshot}' ({osc_addr})")
             else:
                 logger.warning(f"switch_to: snapshot '{snapshot}' not found in '{workspace}'")
@@ -1294,6 +1303,22 @@ class TotalMixOSCBridge:
         matches = live == map_names
         if not matches and self._try_layout_swap(live):
             matches = True
+        # SELF-HEAL a wrong memory: if the current snapshot remembers a
+        # different layout than the device shows, drop the entry loudly —
+        # the next switch re-learns instead of repeating the error
+        # (hardware: one wrong association was persisted and then trusted)
+        if self.current_workspace and self.current_snapshot:
+            slot = f"{self.current_workspace}|{self.current_snapshot}"
+            assoc = (self.channel_map or {}).get("snapshot_layouts", {})
+            live_key = self._layout_key_from_names(live)
+            if slot in assoc and assoc[slot] != live_key:
+                logger.warning(f"🩹 snapshot-layout memory for {slot} was "
+                               f"WRONG — dropping it; next switch re-learns")
+                del assoc[slot]
+                try:
+                    self._persist_channel_map_file(self.channel_map)
+                except Exception as e:
+                    logger.warning(f"could not persist memory heal: {e}")
         if matches:
             self._remember_snapshot_layout(live)
         # INPUT-side drift is invisible to the output comparison (hardware
@@ -1344,6 +1369,14 @@ class TotalMixOSCBridge:
                   not in ("", "n.a.", "n/a")}
         if not strips:
             return None
+        # ADMIT IGNORANCE on a partial refresh: a fresh SUBSET that happens
+        # to be covered read as 100% and the metric could never report a
+        # shortfall unless the whole row refreshed in the window (hardware:
+        # 17/17 reported when the truth was 0/22). Below the known row
+        # size, the honest answer is 'don't know'.
+        known = st.real_strip_count
+        if known and len(strips) < known:
+            return None
         widths = self._widths_for_layout(strips)
         names = [str(d.get("name", "")).strip() for d in strips.values()]
         covered = sum(1 for n in names
@@ -1362,17 +1395,35 @@ class TotalMixOSCBridge:
         slot = f"{self.current_workspace}|{self.current_snapshot}"
         cm = self.channel_map or {}
         assoc = cm.setdefault("snapshot_layouts", {})
-        if assoc.get(slot) != key:
-            assoc[slot] = key
-            try:
-                self._persist_channel_map_file(cm)
-            except Exception as e:
-                logger.warning(f"could not persist snapshot-layout memory: {e}")
+        if assoc.get(slot) == key:
+            return
+        # A NEW or CHANGED association persists only after a SECOND
+        # confirming enumeration — a single unsettled read once recorded
+        # the wrong layout, and the instant swap then trusted it. The
+        # extra row toggle costs ~0.2s and only on new associations.
+        self._outputs_cache = None
+        second = self._live_output_names()
+        if second is None or self._layout_key_from_names(second) != key:
+            logger.warning(f"snapshot-layout association for {slot} not "
+                           f"settled (two reads disagree) — not recording; "
+                           f"the next visit will retry")
+            return
+        assoc[slot] = key
+        try:
+            self._persist_channel_map_file(cm)
+        except Exception as e:
+            logger.warning(f"could not persist snapshot-layout memory: {e}")
 
     def _instant_swap_for(self, ws_name, snap_name) -> bool:
         """Zero-traffic map swap from snapshot-layout memory. Returns True
         when the map for the target snapshot's remembered layout is now
-        active — the macro's steps can resolve immediately."""
+        active — the macro's steps can resolve immediately.
+
+        Deliberately does NOT set map_matches_device: that is a claim
+        about hardware, and this path never looks at the hardware (a
+        wrong memory was persisted once and then trusted — the async
+        check that follows makes the claim, and self-heals the memory
+        if it was wrong; the step guards refuse a wrong map meanwhile)."""
         cm = self.channel_map or {}
         key = (cm.get("snapshot_layouts") or {}).get(f"{ws_name}|{snap_name}")
         if not key:
@@ -1391,7 +1442,6 @@ class TotalMixOSCBridge:
             logger.info(f"⚡ Instant map swap for {ws_name}/{snap_name} "
                         f"({len(entry)} submixes, from snapshot-layout "
                         f"memory — no device traffic)")
-        self.map_matches_device = True
         return True
 
     def _try_layout_swap(self, live_outputs) -> bool:
@@ -1586,6 +1636,18 @@ class TotalMixOSCBridge:
         )
         if listener.start():
             self.osc_listener = listener
+
+            def _startup_check():
+                # One-shot: a layout change made while the bridge was down
+                # (or from the TotalMix GUI) is otherwise unnoticed until
+                # a macro refuses. Delayed so the first feedback can land;
+                # a still-blind listener returns None harmlessly.
+                time.sleep(5.0)
+                try:
+                    self.check_map_freshness()
+                except Exception as e:
+                    logger.debug(f"startup freshness check failed: {e}")
+            threading.Thread(target=_startup_check, daemon=True).start()
 
     def start_mqtt(self):
         """Connect MQTT and start the client loop (web and standalone modes)."""
