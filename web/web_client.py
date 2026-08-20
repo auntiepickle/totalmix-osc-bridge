@@ -225,8 +225,13 @@ def _sanitize_mappings(data: dict) -> dict:
 
 
 def _persist_mappings():
-    """Write bridge.mappings to mappings.json (backup first)."""
+    """Write bridge.mappings to mappings.json (backup first).
+
+    Sanitizes ALL macros, not just the one being saved — a dirty file loaded
+    at startup would otherwise re-persist its legacy runtime fields on every
+    per-macro save forever (server smoke finding, 2026-08-20)."""
     backup_json_files("mappings.json")
+    bridge.mappings = _sanitize_mappings(bridge.mappings)
     target = os.path.join(os.path.dirname(__file__), "../mappings.json")
     with open(target, "w") as f:
         json.dump(bridge.mappings, f, indent=2)

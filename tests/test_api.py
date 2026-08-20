@@ -178,6 +178,38 @@ def test_get_macros_injects_derived_routing_label(macro_crud):
     assert "routing_label" not in bridge_module.bridge.mappings["macros"]["derived_label_macro"]
 
 
+def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
+    """Server smoke finding (2026-08-20): a dirty mappings.json loaded at
+    startup kept its legacy runtime fields through every per-macro save —
+    _strip_runtime only hit the incoming macro. _persist_mappings must
+    sanitize the WHOLE in-memory mappings on every write."""
+    import json as _json
+    import web.web_client as wc
+    monkeypatch.setattr(wc, "backup_json_files", lambda *a, **k: None)
+    out = tmp_path / "mappings.json"
+    real_open = open
+    monkeypatch.setattr(wc, "open",
+                        lambda path, mode="r": real_open(out, mode),
+                        raising=False)
+    saved = bridge_module.bridge.mappings
+    try:
+        bridge_module.bridge.mappings = {"macros": {
+            "legacy_dirty": {"steps": [], "progress": 42, "value": 0.7,
+                             "routing_label": "stale → label"},
+            "clean_one": {"steps": []},
+        }}
+        wc._persist_mappings()
+        # in-memory cleaned...
+        assert bridge_module.bridge.mappings["macros"]["legacy_dirty"] == {"steps": []}
+        # ...and the file on disk too
+        on_disk = _json.loads(out.read_text())
+        assert on_disk["macros"]["legacy_dirty"] == {"steps": []}
+        assert on_disk["macros"]["clean_one"] == {"steps": []}
+    finally:
+        bridge_module.bridge.mappings = saved
+        bridge_module.bridge.mappings_is_example = True
+
+
 def test_sanitize_mappings_pure():
     """_sanitize_mappings strips runtime fields per macro without mutating
     its input (the whole-file save path passes the request body through it)."""
