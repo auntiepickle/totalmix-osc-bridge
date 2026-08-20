@@ -284,10 +284,11 @@ function showSkipReason(name, reason) {
   }, 6000);
 }
 
-// Drift-banner action: walk, wait for completion, apply, refresh
-window.rewalkNow = async function () {
-  const btn = document.getElementById('layout-drift-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Walking…'; }
+// Banner action (drift + stale-map): walk, wait for completion, apply, refresh
+window.rewalkNow = async function (btnId = 'layout-drift-btn') {
+  const btn = document.getElementById(btnId);
+  const origLabel = btn ? btn.textContent.trim() : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Learning…'; }
   try {
     await fetch('/api/device/discover', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -307,8 +308,8 @@ window.rewalkNow = async function () {
     if (btn) btn.textContent = 'Failed — see log';
     console.error('[rewalk]', e);
   } finally {
-    setTimeout(() => { const b = document.getElementById('layout-drift-btn');
-      if (b) { b.disabled = false; b.textContent = 'Re-walk now'; } }, 4000);
+    setTimeout(() => { const b = document.getElementById(btnId);
+      if (b) { b.disabled = false; b.textContent = origLabel || 'Refresh now'; } }, 4000);
   }
 };
 
@@ -425,14 +426,24 @@ async function checkBankWidth() {
     }
 
     // Map stale — the live device has more real channels than the map
-    // knows, so the picker silently under-covers the rig
+    // knows, so the picker silently under-covers the rig. The server kicks
+    // an automatic refresh on this drift; the banner narrates rather than
+    // assigning homework (an end user should never see an API command).
     const live = s.live_strip_count;
     const have = s.channel_map_strip_count || 0;
     const mapStale = !bankTooNarrow && live != null && have > 0 && live > have;
     if (staleBanner) {
-      if (mapStale) {
-        document.getElementById('stale-map-have').textContent = have;
-        document.getElementById('stale-map-live').textContent = live;
+      const sTxt = document.getElementById('stale-map-text');
+      const sBtn = document.getElementById('stale-map-btn');
+      if (mapStale && sTxt && sBtn) {
+        const missing = live - have;
+        if (s.discovery_status === 'running') {
+          sBtn.classList.add('hidden');
+          sTxt.innerHTML = `<b>Your mixer's channels changed</b> — updating now (about 90 seconds). Macros keep working; anything affected waits safely.`;
+        } else {
+          sBtn.classList.remove('hidden');
+          sTxt.innerHTML = `<b>Your mixer's channels changed</b> — ${missing} channel${missing === 1 ? '' : 's'} aren't in the routing picker yet. This refreshes itself within a couple of minutes, or refresh now.`;
+        }
       }
       staleBanner.classList.toggle('hidden', !mapStale);
     }

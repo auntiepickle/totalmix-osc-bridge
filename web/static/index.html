@@ -173,18 +173,23 @@
         <!-- Layout-drift warning: the device's OUTPUT layout no longer matches the walked map (field report: looked like a dead server) -->
         <div id="layout-drift-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
             <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
-            <span id="layout-drift-text" class="flex-1"><b>Device layout changed since the last walk</b> — macros that target outputs will refuse (safely) until the map is refreshed.</span>
+            <span id="layout-drift-text" class="flex-1"><b>Your mixer's layout changed</b> — affected macros will wait safely until the app re-learns it.</span>
             <button id="layout-drift-btn" onclick="rewalkNow()"
                 class="shrink-0 bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-xs px-4 py-2 rounded-xl transition-all">
-                Re-walk now
+                Refresh now
             </button>
         </div>
 
-        <!-- Stale-map warning (hidden unless the live device has more channels than the map knows) -->
+        <!-- Stale-map warning (hidden unless the live device has more channels
+             than the map knows). Self-heals: the server kicks an automatic
+             refresh on this drift; the button is the impatient path. -->
         <div id="stale-map-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
             <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
-            <span class="flex-1">Your channel map covers <b id="stale-map-have">?</b> channels but the device is reporting <b id="stale-map-live">?</b> — new or renamed channels are <b>missing from the routing picker</b>.
-            Re-run discovery to refresh it (<code class="font-mono text-amber-200 bg-amber-900/40 px-1 rounded">POST /api/device/discover</code> then apply, or <code class="font-mono text-amber-200 bg-amber-900/40 px-1 rounded">validate_capture.sh --apply</code>).</span>
+            <span id="stale-map-text" class="flex-1"></span>
+            <button id="stale-map-btn" onclick="rewalkNow('stale-map-btn')"
+                class="shrink-0 bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-xs px-4 py-2 rounded-xl transition-all">
+                Refresh now
+            </button>
         </div>
 
         <!-- Example-mappings warning banner (hidden unless server loaded the fallback) -->
