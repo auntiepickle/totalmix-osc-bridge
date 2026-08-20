@@ -97,8 +97,16 @@ window.API = (function () {
       return _delete(`/api/config/macros/${encodeURIComponent(name)}`);
     },
 
-    /** GET /api/config/channel_map → parsed { submixes: {…} } */
-    getChannelMap() { return _get('/api/config/channel_map'); },
+    /** GET /api/device/picker → { inputs: […], outputs: […], source } (#24) */
+    getPicker() { return _get('/api/device/picker'); },
+
+    /** POST /api/device/sweep → measure the physical table (~20s) */
+    startSweep() {
+      return fetch('/api/device/sweep', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }).then(r => r.json());
+    },
 
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },

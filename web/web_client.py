@@ -331,8 +331,8 @@ async def save_config_channel_map(request: Request):
     """Save JSON body directly to ufx2_channel_map.json and hot-reload into bridge."""
     try:
         data = await request.json()
-        if "submixes" not in data:
-            raise HTTPException(status_code=400, detail="Invalid channel_map: missing 'submixes' key")
+        if "submixes" not in data and "physical_table" not in data:
+            raise HTTPException(status_code=400, detail="Invalid channel_map: needs 'physical_table' (or legacy 'submixes')")
         backup_json_files("ufx2_channel_map.json")
         target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
         with open(target, "w") as f:
@@ -444,6 +444,56 @@ async def get_physical_table():
     return table
 
 
+@app.get("/api/device/picker")
+async def get_picker():
+    """Routing-picker inventory (#6/#24): LIVE names preferred — inputs
+    from the listener's cached current bank (zero device traffic),
+    outputs from a fresh row-3 enumeration (~0.2s, cached) — each mapped
+    to its hw start via the physical table. Falls back to the table's
+    alias lists when the listener is blind (source: 'table')."""
+    table = (bridge.channel_map or {}).get("physical_table") or {}
+    listener = bridge.osc_listener
+    result = {"inputs": [], "outputs": [], "source": {}}
+
+    live_outs = None
+    if bridge.osc_client is not None and listener is not None and listener.running:
+        live_outs = bridge._live_output_names()
+    if live_outs:
+        def _okey(n):
+            hw = pt.resolve_start(table, "outputs", n)
+            return (hw if hw is not None else 999, n)
+        result["outputs"] = [
+            {"hw": pt.resolve_start(table, "outputs", n), "name": n}
+            for n in sorted(live_outs, key=_okey)]
+        result["source"]["outputs"] = "live"
+    else:
+        result["outputs"] = [{"hw": e["hw"], "name": e["name"]}
+                             for e in pt.display_names(table, "outputs")]
+        result["source"]["outputs"] = "table"
+
+    live_ins = None
+    if listener is not None and listener.running:
+        st = listener.state
+        strips = (st.submix_snapshot(st.current_submix).get("1", {})
+                  if st.current_submix else {})
+        names = []
+        for _, d in sorted(strips.items()):
+            n = str(d.get("name", "")).strip()
+            if n and n.lower() not in ("n.a.", "n/a") and n not in names:
+                names.append(n)
+        live_ins = names or None
+    if live_ins:
+        result["inputs"] = [
+            {"hw": pt.resolve_start(table, "inputs", n), "name": n}
+            for n in live_ins]
+        result["source"]["inputs"] = "live"
+    else:
+        result["inputs"] = [{"hw": e["hw"], "name": e["name"]}
+                            for e in pt.display_names(table, "inputs")]
+        result["source"]["inputs"] = "table"
+    return result
+
+
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
@@ -517,7 +567,7 @@ async def upload_channel_map(file: UploadFile = File(...)):
         backup_json_files("ufx2_channel_map.json")
         contents = await file.read()
         data = json.loads(contents)
-        if "submixes" not in data:
+        if "submixes" not in data and "physical_table" not in data:
             raise HTTPException(status_code=400, detail="Invalid ufx2_channel_map.json format")
         target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
         with open(target, "w") as f:

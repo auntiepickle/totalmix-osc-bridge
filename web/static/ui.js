@@ -92,31 +92,28 @@ function macroTargetIssues(m) {
       issues.push(`snapshot "${m.snapshot}" not found in ${m.workspace}`);
     }
   }
-  const subs = (window._channelMap || {}).submixes || {};
-  if (Object.keys(subs).length) {
-    const inputNames = new Set(), playbackNames = new Set();
-    Object.values(subs).forEach(s => Object.entries(s.sends || {}).forEach(([key, sd]) => {
-      // Accept the raw trackname (send.name) AND the send key — older maps
-      // have no inner name, and applyRouting falls back to the key there
-      const pool = (sd.row ?? 1) === 2 ? playbackNames : inputNames;
-      if (sd.name) pool.add(sd.name);
-      pool.add(key);
-    }));
+  // #24: names checked against the LIVE picker inventory. A name absent
+  // right now may still resolve at fire time via the bridge's learned
+  // aliases (a pair absorbed it) — so this stays advisory wording.
+  const picker = window._picker || {};
+  const inputNames = new Set((picker.inputs || []).map(i => i.name));
+  const outputNames = new Set((picker.outputs || []).map(o => o.name));
+  if (inputNames.size || outputNames.size) {
     (m.steps || []).forEach(step => {
       const t = step.target;
       if (!t) return;                              // raw steps: no names to check
       if ((PARAM_DEFS[t.param] || {}).global) return;  // fixed /3/ address
       if (t.row === 3) {
-        if (t.channel && !(t.channel in subs)) {
-          issues.push(`output "${t.channel}" not in channel map`);
+        if (t.channel && !outputNames.has(t.channel)) {
+          issues.push(`output "${t.channel}" not on the device right now`);
         }
         return;
       }
-      if (t.channel && !(t.row === 2 ? playbackNames : inputNames).has(t.channel)) {
-        issues.push(`channel "${t.channel}" not in channel map`);
+      if (t.channel && !inputNames.has(t.channel)) {
+        issues.push(`channel "${t.channel}" not on the device right now`);
       }
-      if (t.submix && !(t.submix in subs)) {
-        issues.push(`submix "${t.submix}" not in channel map`);
+      if (t.submix && !outputNames.has(t.submix)) {
+        issues.push(`submix "${t.submix}" not on the device right now`);
       }
     });
   }
@@ -504,47 +501,46 @@ function _cleanMacro(m) {
 // The step's osc address is kept as a fallback for when feedback is absent.
 
 function _buildSubmixPickerOptions(selected) {
-  const subs = (window._channelMap || {}).submixes || {};
-  return Object.values(subs)
-    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-    .map(s => `<option value="${_esc(s.name)}"${s.name === selected ? ' selected' : ''}>${_esc(s.name)} (submix ${_esc(s.index)})</option>`)
+  // #24: live-fed — the outputs ARE the submixes, one per output channel
+  const outs = (window._picker || {}).outputs || [];
+  return outs
+    .map(o => `<option value="${_esc(o.name)}"${o.name === selected ? ' selected' : ''}>${_esc(o.name)}${o.hw != null ? ` (ch ${_esc(o.hw)})` : ''}</option>`)
     .join('');
 }
 
 window.updateSendPickerOptions = function (name, selectedChannel) {
-  const submixSel = document.getElementById(`routing-submix-${name}`);
-  const sendSel   = document.getElementById(`routing-send-${name}`);
-  if (!submixSel || !sendSel) return;
-  const subs = (window._channelMap || {}).submixes || {};
-  const sub = subs[submixSel.value];
-  const sends = sub ? sub.sends || {} : {};
+  const sendSel = document.getElementById(`routing-send-${name}`);
+  if (!sendSel) return;
+  const picker = window._picker || {};
+  const inputs = picker.inputs || [];
+  const outs   = picker.outputs || [];
   const paramSel = document.getElementById(`routing-param-${name}`);
   const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
+  const inOpts = inputs
+    .map(i => `<option value="${_esc(i.name)}"${i.name === selectedChannel ? ' selected' : ''}>${_esc(i.name)}</option>`)
+    .join('');
   if (def.channelDetail) {
-    // EQ exists on hardware INPUTS and OUTPUTS, not software playback —
-    // exclude row-2 sends, and offer the outputs (= the submixes: one
-    // output strip per submix, aimed by walked index on the bridge side)
-    const inputs = Object.entries(sends)
-      .filter(([, s]) => (s.row ?? 1) !== 2)
-      .map(([sn]) => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)}</option>`)
-      .join('');
-    // Outputs aim by the hardware-MEASURED rule (offset = first hw
-    // channel via the walked index; Main = 0). The bridge only fires it
-    // on all-stereo output layouts and refuses otherwise — a mono-output
-    // layout shows the option but the step refuses safely at fire time.
-    const outputs = Object.values(subs)
-      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-      .map(s => { const v = `__out3__${s.name}`;
-        return `<option value="${_esc(v)}"${v === selectedChannel ? ' selected' : ''}>${_esc(s.name)}</option>`; })
+    // EQ/dynamics exist on hardware INPUTS and OUTPUTS, not software
+    // playback. Outputs aim by their measured hw start on the bridge side.
+    const outOpts = outs
+      .map(o => { const v = `__out3__${o.name}`;
+        return `<option value="${_esc(v)}"${v === selectedChannel ? ' selected' : ''}>${_esc(o.name)}</option>`; })
       .join('');
     sendSel.innerHTML =
-      `<optgroup label="Hardware inputs">${inputs}</optgroup>` +
-      `<optgroup label="Hardware outputs">${outputs}</optgroup>`;
+      `<optgroup label="Hardware inputs">${inOpts}</optgroup>` +
+      `<optgroup label="Hardware outputs">${outOpts}</optgroup>`;
     return;
   }
-  sendSel.innerHTML = Object.keys(sends)
-    .map(sn => `<option value="${_esc(sn)}"${sn === selectedChannel ? ' selected' : ''}>${_esc(sn)}</option>`)
-    .join('') || '<option value="">no channels discovered</option>';
+  // The input channel list is the SAME for every submix (page-1 sends are
+  // row-relative) — plus the software-playback variants of those channels
+  const pbOpts = inputs
+    .map(i => { const v = `__pb__${i.name}`;
+      return `<option value="${_esc(v)}"${v === selectedChannel ? ' selected' : ''}>${_esc(i.name)} (playback)</option>`; })
+    .join('');
+  sendSel.innerHTML = (inOpts
+    ? `<optgroup label="Hardware inputs">${inOpts}</optgroup>`
+      + `<optgroup label="Software playback">${pbOpts}</optgroup>`
+    : '<option value="">no channels — run the channel measurement</option>');
 };
 
 // A macro is "simple-representable" when it matches the canonical patch shape:
@@ -587,18 +583,14 @@ function _currentRouting(m) {
              row: paramStep.target.row,
              param: paramStep.target.param || 'volume' };
   }
-  // Legacy macros: reverse-lookup /setSubmix index and the raw address
-  const subs = (window._channelMap || {}).submixes || {};
+  // Legacy raw-step macros: match the /setSubmix index against the
+  // picker's hw starts (#24: index == hw start)
   const submixStep = (m.steps || []).find(s => s.osc === '/setSubmix');
   const submix = submixStep
-    ? Object.values(subs).find(s => String(s.index) === String(submixStep.value))?.name
+    ? ((window._picker || {}).outputs || [])
+        .find(o => String(o.hw) === String(parseInt(submixStep.value)))?.name
     : undefined;
-  let channel;
-  if (submix && paramStep) {
-    channel = Object.entries(subs[submix]?.sends || {})
-      .find(([, s]) => s.osc_address === paramStep.osc)?.[0];
-  }
-  return { submix, channel };
+  return { submix, channel: undefined };
 }
 
 // ── Parameter descriptors (#12) ──────────────────────────────────────────────
@@ -1007,17 +999,14 @@ window.applyRouting = function (name) {
     return;
   }
   if (!submixSel || !sendSel || !sendSel.value) return;
-  const sub = ((window._channelMap || {}).submixes || {})[submixSel.value];
-  if (!sub) return;
+  // #24: the picker is name-only — parse the selection's routing markers
+  // (__out3__ = hardware output for EQ, __pb__ = software playback)
+  const raw = sendSel.value;
+  const isOut = raw.startsWith('__out3__');
+  const isPb  = raw.startsWith('__pb__');
+  const channelName = isOut ? raw.slice(8) : isPb ? raw.slice(6) : raw;
   if (def0.channelDetail) {
-    // EQ targets a hardware channel directly: input picks resolve by name
-    // against the live bank (verified widths); output picks (__out3__) aim
-    // by walked submix index — row 3 tells the bridge which path
-    const isOut = sendSel.value.startsWith('__out3__');
-    const pickedSend = (sub.sends || {})[sendSel.value];
-    const target = { channel: isOut ? sendSel.value.slice(8)
-                              : ((pickedSend && pickedSend.name) || sendSel.value),
-                     param: paramSel0.value };
+    const target = { channel: channelName, param: paramSel0.value };
     if (isOut) target.row = 3;
     const m0 = _harvestEditor(name);
     m0.steps = (m0.steps || []).filter(s => s.osc !== '/setSubmix');
@@ -1028,44 +1017,34 @@ window.applyRouting = function (name) {
     editDetail(name);
     return;
   }
-  const send = (sub.sends || {})[sendSel.value];
-
   const m = _harvestEditor(name);
   m.steps = m.steps || [];
   // The bridge sends /setSubmix itself when resolving a target —
   // a legacy explicit step would double-send it
   m.steps = m.steps.filter(s => s.osc !== '/setSubmix');
   const paramStep = _routableStep(m, name);
-  // target.channel is the raw trackname (send.name); the picker KEY may
-  // carry a "(playback)" suffix that the device never reports
-  const target = { submix: submixSel.value,
-                   channel: (send && send.name) || sendSel.value };
-  if (send && send.row === 2) target.row = 2;  // software-playback send
+  const target = { submix: submixSel.value, channel: channelName };
+  if (isPb) target.row = 2;
   const paramSel = document.getElementById(`routing-param-${name}`);
   const param = paramSel ? paramSel.value : 'volume';
   if (param !== 'volume') target.param = param;
   const paramDef = PARAM_DEFS[param] || {};
-  // Mute is global-per-channel (#10) and channel-detail params (EQ, #5p2)
-  // are addressed by channel — neither stores a submix
-  if (param === 'mute' || paramDef.channelDetail) delete target.submix;
-  // Fallback address must match the parameter, not always the volume
-  const ch = send ? send.channel : null;
-  const fallbackAddr = !send ? ''
-    : paramDef.channelDetail ? paramDef.addr
-    : param === 'mute' ? `/1/mute/1/${ch}`
-    : param === 'pan'  ? `/1/pan${ch}`
-    : send.osc_address;
+  // Mute is global-per-channel (#10) — no submix scope
+  if (param === 'mute') delete target.submix;
+  // No stored strip addresses anymore (#24): strip numbers are snapshot
+  // state, so new macros carry no fallback — no feedback means the step
+  // skips safely instead of writing a maybe-wrong strip
   if (paramStep) {
     paramStep.target = target;
-    paramStep.osc = fallbackAddr;
+    paramStep.osc = '';
   } else if (param === 'volume') {
     // Volume defaults to a ramp — the classic send macro
-    m.steps.push({ osc: fallbackAddr, target, value: '{{param}}',
-                   operation: { type: 'ramp', bars: 2, bpm: 140 } });
+    m.steps.push({ osc: '', target, value: '{{param}}',
+                   operation: { type: 'ramp', bars: 2, bpm: 140, curve: 'triangle' } });
   } else {
     // Pan/mute default to a SET step so their value widgets (slider,
     // toggle) appear immediately — switch to RAMP/LFO via the mode select
-    m.steps.push({ osc: fallbackAddr, target,
+    m.steps.push({ osc: '', target,
                    value: String(paramDef.default ?? 0.5) });
   }
   editDetail(name);
@@ -1082,34 +1061,36 @@ window.addEditorStep = function (name, kind) {
     return;
   }
   // New steps are born ROUTED (#14): mapping addresses is the bridge's job.
-  // The step takes the routing picker's CURRENT selections.
+  // The step takes the routing picker's CURRENT selections (#24: name-only).
   const submixSel = document.getElementById(`routing-submix-${name}`);
   const sendSel   = document.getElementById(`routing-send-${name}`);
   const paramSel  = document.getElementById(`routing-param-${name}`);
-  const sub  = submixSel ? ((window._channelMap || {}).submixes || {})[submixSel.value] : null;
-  const send = sub && sendSel ? (sub.sends || {})[sendSel.value] : null;
+  const raw = sendSel ? sendSel.value : '';
   const param = paramSel ? paramSel.value : 'volume';
   const def = PARAM_DEFS[param] || {};
-  if (!send) {  // no channel map loaded — raw fallback is all we can offer
+  if (!raw || !submixSel || !submixSel.value) {
+    // no picker inventory — raw fallback is all we can offer
     m.steps.push({ osc: '', value: kind === 'operation' ? '{{param}}' : '1.0',
-                   ...(kind === 'operation' ? { operation: { type: 'ramp', bars: 2, bpm: 140 } } : {}) });
+                   ...(kind === 'operation' ? { operation: { type: 'ramp', bars: 2, bpm: 140, curve: 'triangle' } } : {}) });
     editDetail(name);
     return;
   }
-  const target = { channel: send.name || sendSel.value };
+  const isOut = raw.startsWith('__out3__');
+  const isPb  = raw.startsWith('__pb__');
+  const target = { channel: isOut ? raw.slice(8) : isPb ? raw.slice(6) : raw };
   if (param !== 'volume') target.param = param;
-  if (param !== 'mute') target.submix = submixSel.value;
-  if (send.row === 2) target.row = 2;
-  const ch = send.channel;
-  const fallback = param === 'mute' ? `/1/mute/1/${ch}`
-    : param === 'pan' ? `/1/pan${ch}` : send.osc_address;
+  if (param !== 'mute' && !def.channelDetail) target.submix = submixSel.value;
+  if (isPb) target.row = 2;
+  if (isOut) target.row = 3;
   if (kind === 'operation') {
-    const op = { type: 'ramp', bars: 2, bpm: 140 };
+    const op = { type: 'ramp', bars: 2, bpm: 140, curve: 'triangle' };
     if (def.mod?.threshold) op.threshold = 0.5;
     if (def.mod?.range) op.range = [def.min ?? 0, def.max ?? 1];
-    m.steps.push({ osc: fallback, target, value: '{{param}}', operation: op });
+    m.steps.push({ osc: def.channelDetail ? def.addr : '', target,
+                   value: '{{param}}', operation: op });
   } else {
-    m.steps.push({ osc: fallback, target, value: String(def.default ?? 1.0) });
+    m.steps.push({ osc: def.channelDetail ? def.addr : '', target,
+                   value: String(def.default ?? 1.0) });
   }
   editDetail(name);
 };
@@ -1364,7 +1345,7 @@ function _renderAdvancedEditor(name, m, panel) {
 
   // Routing picker — restored to the macro's current routing, only when a
   // discovered channel map is loaded
-  const hasChannelMap = Object.keys((window._channelMap || {}).submixes || {}).length > 0;
+  const hasChannelMap = ((window._picker || {}).outputs || []).length > 0;
   const routing = _currentRouting(m);
   const routingPickerHtml = hasChannelMap ? `<div>
     <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Routing (from your device)</div>
@@ -1468,8 +1449,8 @@ function _renderAdvancedEditor(name, m, panel) {
   // Populate the cascading send picker, restoring the macro's current send,
   // and set the submix dropdown's enabled state for the current parameter
   if (hasChannelMap) {
-    updateSendPickerOptions(name, routing.row === 3
-      ? `__out3__${routing.channel}` : routing.channel);
+    updateSendPickerOptions(name, routing.row === 3 ? `__out3__${routing.channel}`
+      : routing.row === 2 ? `__pb__${routing.channel}` : routing.channel);
     updateParamScope(name);
   }
 }
@@ -1484,7 +1465,7 @@ function _renderSimpleEditor(name, m, panel) {
   const step = shape.step;
   const i = shape.stepIndex;
 
-  const hasChannelMap = Object.keys((window._channelMap || {}).submixes || {}).length > 0;
+  const hasChannelMap = ((window._picker || {}).outputs || []).length > 0;
   const routing = _currentRouting(m);
 
   // WHAT — the same picker selects (same ids) as the advanced editor, so
@@ -1583,8 +1564,8 @@ function _renderSimpleEditor(name, m, panel) {
   </div>`;
 
   if (hasChannelMap) {
-    updateSendPickerOptions(name, routing.row === 3
-      ? `__out3__${routing.channel}` : routing.channel);
+    updateSendPickerOptions(name, routing.row === 3 ? `__out3__${routing.channel}`
+      : routing.row === 2 ? `__pb__${routing.channel}` : routing.channel);
     updateParamScope(name);
   }
 }
@@ -1670,20 +1651,18 @@ async function deleteMacroUI(name) {
 const MACRO_NAME_RE = /^[A-Za-z0-9_\-]{1,64}$/;
 
 function _blankMacroTemplate() {
-  const subs = Object.values((window._channelMap || {}).submixes || {})
-    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-  const first = subs[0];
-  const firstSendName = first ? Object.keys(first.sends || {})[0] : null;
-  const firstSend = firstSendName ? first.sends[firstSendName] : null;
+  const picker = window._picker || {};
+  const firstOut = (picker.outputs || [])[0];
+  const firstIn  = (picker.inputs || [])[0];
   const step = {
-    osc: firstSend ? firstSend.osc_address : '/1/volume1',
+    osc: '',
     value: '{{param}}',
     operation: { type: 'ramp', bars: 2, bpm: 140, curve: 'triangle' },
   };
   // Name-based target — live-resolved at fire time (strip indices drift
   // with stereo-link state, names don't)
-  if (first && firstSendName) {
-    step.target = { submix: first.name, channel: firstSendName };
+  if (firstOut && firstIn) {
+    step.target = { submix: firstOut.name, channel: firstIn.name };
   }
   return {
     description: '',

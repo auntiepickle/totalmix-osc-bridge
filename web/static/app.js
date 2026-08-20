@@ -54,10 +54,9 @@ function _onWSMessage(event) {
     } else if (ev.type === 'macro_skipped') {
       flashLEDSkipped(ev.name);
       showSkipReason(ev.name, ev.reason);
-    } else if (ev.type === 'map_freshness'
-               || ev.type === 'discovery_complete'
-               || ev.type === 'discovery_progress') {
-      checkBankWidth();  // refresh the drift banner promptly
+    } else if (ev.type === 'sweep_complete') {
+      loadPicker();      // fresh table — refresh the routing inventory
+      checkBankWidth();
     } else if (ev.type === 'macro_created' || ev.type === 'macro_updated'
                || ev.type === 'macro_deleted') {
       // Another tab changed the macro set — re-sync cards. Skip when the
@@ -284,32 +283,29 @@ function showSkipReason(name, reason) {
   }, 6000);
 }
 
-// Banner action (drift + stale-map): walk, wait for completion, apply, refresh
-window.rewalkNow = async function (btnId = 'layout-drift-btn') {
+// Sweep action (#24): measure the physical table (~20s, read-only on the
+// device) and refresh the picker when it lands
+window.sweepNow = async function (btnId = 'sweep-btn') {
   const btn = document.getElementById(btnId);
   const origLabel = btn ? btn.textContent.trim() : '';
-  if (btn) { btn.disabled = true; btn.textContent = 'Learning…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Measuring…'; }
   try {
-    await fetch('/api/device/discover', {method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({submix_count: 32, settle_s: 1.0})});
-    for (let i = 0; i < 90; i++) {
+    await API.startSweep();
+    for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
-      const d = await fetch('/api/device/discovery').then(r => r.json());
-      if (d.status !== 'running') break;
+      const d = await fetch('/api/device/sweep').then(r => r.json());
+      if (d.status !== 'running') {
+        if (btn) btn.textContent = d.status === 'done' ? 'Done ✓' : 'Failed — see log';
+        break;
+      }
     }
-    if (btn) btn.textContent = 'Applying…';
-    const res = await fetch('/api/device/discovery/apply', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: '{}'});
-    if (btn) btn.textContent = res.ok ? 'Done ✓' : `Apply failed (${res.status})`;
-    await loadMacros();
-    checkBankWidth();
+    await loadPicker();
   } catch (e) {
     if (btn) btn.textContent = 'Failed — see log';
-    console.error('[rewalk]', e);
+    console.error('[sweep]', e);
   } finally {
     setTimeout(() => { const b = document.getElementById(btnId);
-      if (b) { b.disabled = false; b.textContent = origLabel || 'Refresh now'; } }, 4000);
+      if (b) { b.disabled = false; b.textContent = origLabel || 'Measure channels'; } }, 4000);
   }
 };
 
@@ -364,14 +360,16 @@ async function loadSnapshotMap() {
   }
 }
 
-// ── Channel map — fetched once for the routing picker in the macro editor ────
-async function loadChannelMap() {
+// ── Picker inventory (#24) — live names + physical-table hw starts ──────────
+async function loadPicker() {
   try {
-    window._channelMap = await API.getChannelMap();
-    console.log(`[UI] Channel map loaded — ${Object.keys((window._channelMap || {}).submixes || {}).length} submixes`);
+    window._picker = await API.getPicker();
+    console.log(`[UI] Picker loaded — ${(window._picker.inputs || []).length} inputs, `
+      + `${(window._picker.outputs || []).length} outputs `
+      + `(${JSON.stringify(window._picker.source)})`);
   } catch (e) {
-    console.warn('[UI] Could not load channel map:', e);
-    window._channelMap = {};
+    console.warn('[UI] Could not load picker:', e);
+    window._picker = { inputs: [], outputs: [], source: {} };
   }
 }
 
@@ -424,39 +422,27 @@ async function checkBankWidth() {
       bankBanner.classList.toggle('hidden', !bankTooNarrow);
     }
 
-    // (No strip-count banner: input strip counts change with EVERY snapshot
-    // — pairing is per-snapshot state, i.e. normal operation, not drift.
-    // 2026-08-20 architecture review. The picker's channel inventory going
-    // live-fed removes the last reader of this comparison.)
-
-    // Output-layout drift: the device no longer matches the walked map.
-    // Field report: without this banner a refusing macro was
-    // indistinguishable from a dead server.
-    const driftBanner = document.getElementById('layout-drift-banner');
-    if (driftBanner) {
-      const cov = s.input_widths_coverage;
-      const inputDrift = !!(cov && cov.total > 0 && cov.covered < cov.total);
-      const drift = s.map_matches_device === false || inputDrift;
-      driftBanner.classList.toggle('hidden', !drift);
-      const btn = document.getElementById('layout-drift-btn');
-      const txt = document.getElementById('layout-drift-text');
-      if (inputDrift && s.map_matches_device !== false && txt && btn) {
-        // input-side: no walk fixes widths — advise the two real options
-        btn.classList.add('hidden');
-        txt.innerHTML = `<b>Input layout changed</b> — no width map covers ` +
-          `${cov.total - cov.covered} of ${cov.total} live strips, so input ` +
-          `EQ/Dynamics macros will refuse. Re-pair the channels in TotalMix, ` +
-          `or post widths for this layout.`;
-      } else if (drift && txt && btn) {
-        if (s.discovery_status === 'running') {
-          // auto-walk in flight — progress, not a demand
+    // (#24: no drift banners at all — the physical table is layout-
+    // invariant and per-write confirmations carry correctness. The one
+    // setup-time banner: the table has never been measured.)
+    const sweepBanner = document.getElementById('sweep-needed-banner');
+    if (sweepBanner) {
+      const tbl = s.physical_table || {};
+      const present = tbl.present || {};
+      const needed = !(present.inputs && present.outputs);
+      const running = s.sweep_status === 'running';
+      const txt = document.getElementById('sweep-needed-text');
+      const btn = document.getElementById('sweep-btn');
+      if (needed && txt && btn) {
+        if (running) {
           btn.classList.add('hidden');
-          txt.innerHTML = '<b>New layout detected</b> — learning it now (auto-walk running, ~30s)…';
+          txt.innerHTML = `<b>Learning your mixer's channels</b> — about 20 seconds, one time only.`;
         } else {
           btn.classList.remove('hidden');
-          txt.innerHTML = '<b>Device layout changed since the last walk</b> — macros that target outputs will refuse (safely) until the map is refreshed.';
+          txt.innerHTML = `<b>One-time setup</b> — the app needs ~20 seconds to learn your mixer's channels (read-only, nothing changes on the device).`;
         }
       }
+      sweepBanner.classList.toggle('hidden', !needed);
     }
 
     // Device unresponsive — driven ONLY by a failed probe (an idle mixer
@@ -496,7 +482,7 @@ window.addEventListener('load', async () => {
   initWebMIDI();
   // Load snapshot map and bridge state in parallel — populate dropdowns as
   // soon as both resolve rather than waiting for the first WS broadcast.
-  await Promise.all([loadSnapshotMap(), prefillBridgeState(), loadChannelMap()]);
+  await Promise.all([loadSnapshotMap(), prefillBridgeState(), loadPicker()]);
   checkMappingsSource();
   pollHealth();
   setInterval(pollHealth, 15000);
