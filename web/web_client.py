@@ -481,17 +481,13 @@ async def get_picker():
                              for e in pt.display_names(table, "outputs")]
         result["source"]["outputs"] = "table"
 
+    # TASK-8 finding: the listener's cached bank can be the OUTGOING
+    # snapshot's input row right after a switch — serving it as 'live'
+    # made the picker lie. Provoke a fresh, settled dump instead (~0.4s,
+    # 2s-cached), exactly like resolution does.
     live_ins = None
-    if listener is not None and listener.running:
-        st = listener.state
-        strips = (st.submix_snapshot(st.current_submix).get("1", {})
-                  if st.current_submix else {})
-        names = []
-        for _, d in sorted(strips.items()):
-            n = str(d.get("name", "")).strip()
-            if n and n.lower() not in ("n.a.", "n/a") and n not in names:
-                names.append(n)
-        live_ins = names or None
+    if bridge.osc_client is not None and listener is not None and listener.running:
+        live_ins = bridge._live_input_names()
     if live_ins:
         result["inputs"] = [
             {"hw": pt.resolve_start(table, "inputs", n), "name": n}

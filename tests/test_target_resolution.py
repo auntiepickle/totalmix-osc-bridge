@@ -253,6 +253,34 @@ def test_first_fire_after_switch_matches_settled_bank(make_bridge, fake_osc):
     assert ("/1/volume6", 0.5) not in fake_osc.sent
 
 
+def test_live_input_names_never_serves_the_outgoing_row(make_bridge, fake_osc):
+    """TASK-8 step-7 hardware failure: the picker served the OUTGOING
+    snapshot's input row labeled 'live'. _live_input_names must provoke a
+    fresh dump and return only post-provoke content."""
+    class FreshOnToggle(LiveFakeTotalMix):
+        def on_bus(self, address):
+            if address == "/1/busInput":
+                self.listener._handle("/1/labelSubmix", "Main")
+                for n, name in {1: "AN 1", 2: "AN 2", 3: "RE-101"}.items():
+                    self.listener._handle(f"/1/trackname{n}", name)
+
+    listener = OSCListener(0)
+    # stale pre-existing bank: the outgoing snapshot's pairing
+    listener._handle("/1/labelSubmix", "Main")
+    listener._handle("/1/trackname1", "AN 1/2")
+    listener._handle("/1/trackname2", "Mic 10")
+    b = make_bridge({})
+    b.osc_listener = listener
+    b.osc_client = FreshOnToggle(listener, fake_osc)
+    listener._server = object()
+    names = b._live_input_names()
+    assert names == ["AN 1", "AN 2", "RE-101"]      # fresh content only
+    assert "Mic 10" not in names
+    # and the provoke toggled rows (the guaranteed state change)
+    assert ("/1/busPlayback", 1.0) in fake_osc.sent
+    assert ("/1/busInput", 1.0) in fake_osc.sent
+
+
 def test_confirmed_different_label_refuses_write(make_bridge, fake_osc):
     """#24: the measured index is safe to SEND, but when the device
     CONFIRMS a label no alias covers, writing anywhere would land on the

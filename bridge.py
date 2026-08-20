@@ -376,6 +376,7 @@ class TotalMixOSCBridge:
         with self._device_lock:
             self.osc_client.send_message("/loadQuickWorkspace", float(ws_slot))
         self._outputs_cache = None
+        self._inputs_cache = None
         self._layout_epoch = time.time()
         self.current_workspace = workspace
         if self.mqtt_client:
@@ -405,6 +406,7 @@ class TotalMixOSCBridge:
                 with self._device_lock:
                     self.osc_client.send_message(osc_addr, 1.0)
                 self._outputs_cache = None
+                self._inputs_cache = None
                 self._layout_epoch = time.time()
                 self.current_snapshot = snapshot.strip().lower()
                 if self.mqtt_client:
@@ -556,6 +558,7 @@ class TotalMixOSCBridge:
                     # state captured before this instant are void (a stale
                     # cache here once could approve a crashing /setSubmix)
                     self._outputs_cache = None
+                    self._inputs_cache = None
                     self._layout_epoch = time.time()
                     logger.info(f"   → Switched workspace to '{ws_name}' (slot {ws_slot})")
                     self.current_workspace = ws_name
@@ -582,6 +585,7 @@ class TotalMixOSCBridge:
                     self.osc_client.send_message(osc_addr, 1.0)
                     # Snapshots re-pair strips and can change layouts too
                     self._outputs_cache = None
+                    self._inputs_cache = None
                     self._layout_epoch = time.time()
                     logger.info(f"   → Switched snapshot to '{snap_name}' (OSC {osc_addr} = 1.0)")
                     self.current_snapshot = snap_name
@@ -1225,6 +1229,48 @@ class TotalMixOSCBridge:
                      f"'{submix_name}' (live strips: {real}) — refusing the "
                      f"stored address, it may point at a different channel now")
         return index, None, "not_in_bank"
+
+    def _live_input_names(self, timeout: float = 1.5):
+        """Fresh input-row names via a provoked dump (row toggle), settled
+        to quiescence. TASK-8 hardware findings baked in: dumps stream
+        VALUES FIRST and TRACKNAMES LAST (~200ms apart), so freshness is
+        judged by post-provoke arrival AND a settle window, never by raw
+        strip timestamps alone; and the picker must never serve the
+        outgoing snapshot's row as 'live'. Ordered list of real names.
+        Cached ~2s. None = cannot tell."""
+        cached = getattr(self, "_inputs_cache", None)
+        if cached and time.time() - cached[0] < 2.0:
+            return cached[1]
+        listener = self.osc_listener
+        if listener is None or not listener.running or self.osc_client is None:
+            return None
+        t0 = time.time()
+        before = listener.state.message_count
+        with self._device_lock:
+            # exactly one of the two is a guaranteed state change
+            self.osc_client.send_message("/1/busPlayback", 1.0)
+            self.osc_client.send_message("/1/busInput", 1.0)
+        if not listener.wait_for(lambda s: s.message_count > before, timeout):
+            return None
+        deadline = t0 + timeout
+        while time.time() < deadline:      # settle: outlast the whole dump
+            b = listener.state.message_count
+            if not listener.wait_for(lambda s: s.message_count > b, 0.15):
+                break
+        st = listener.state
+        strips = (st.submix_snapshot(st.current_submix).get("1", {})
+                  if st.current_submix else {})
+        names = []
+        for _, d in sorted(strips.items()):
+            if d.get("_seen", 0) < t0:
+                continue                    # pre-provoke content: not live
+            n = str(d.get("name", "")).strip()
+            if n and n.lower() not in ("n.a.", "n/a") and n not in names:
+                names.append(n)
+        if names:
+            self._inputs_cache = (time.time(), names)
+            return names
+        return None
 
     def _live_output_names(self, timeout: float = 1.5):
         """Names of the live output strips (row 3), from a fresh busOutput
