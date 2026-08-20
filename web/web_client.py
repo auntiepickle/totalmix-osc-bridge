@@ -166,16 +166,11 @@ async def get_status():
          for sub in channel_map.get("submixes", {}).values()),
         default=0,
     )
-    # Zero-click healing: more live input strips than the map knows (GUI-side
-    # re-pair/rename) is fixed by a walk, so kick the auto-walk rather than
-    # asking the user to. _auto_walk carries its own 120s cooldown, running
-    # and listener guards, and the AUTO_WALK_NEW_LAYOUTS opt-out.
-    if (live_strips is not None and map_strip_count
-            and live_strips > map_strip_count):
-        try:
-            _auto_walk()
-        except Exception as e:
-            logger.warning(f"auto-walk on strip-count drift failed: {e}")
+    # NOTE (2026-08-20 architecture review): input strip counts change with
+    # EVERY snapshot (pairing is per-snapshot) — that is normal operation,
+    # not drift. An earlier version auto-walked here and made snapshot
+    # switches trigger 90s walks in a loop. Strip counts are reported for
+    # telemetry only; nothing acts on them.
     return {
         "osc_bank_width": bank_width,
         "live_strip_count": live_strips,

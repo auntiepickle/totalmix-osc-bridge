@@ -180,17 +180,9 @@
             </button>
         </div>
 
-        <!-- Stale-map warning (hidden unless the live device has more channels
-             than the map knows). Self-heals: the server kicks an automatic
-             refresh on this drift; the button is the impatient path. -->
-        <div id="stale-map-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
-            <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
-            <span id="stale-map-text" class="flex-1"></span>
-            <button id="stale-map-btn" onclick="rewalkNow('stale-map-btn')"
-                class="shrink-0 bg-amber-500 hover:bg-amber-400 active:scale-95 text-black font-bold text-xs px-4 py-2 rounded-xl transition-all">
-                Refresh now
-            </button>
-        </div>
+        <!-- (The old stale-map strip-count banner is gone by design: input
+             strip counts change with every snapshot — normal operation, not
+             drift. 2026-08-20 architecture review.) -->
 
         <!-- Example-mappings warning banner (hidden unless server loaded the fallback) -->
         <div id="example-mappings-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">

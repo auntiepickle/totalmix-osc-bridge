@@ -178,10 +178,11 @@ def test_get_macros_injects_derived_routing_label(macro_crud):
     assert "routing_label" not in bridge_module.bridge.mappings["macros"]["derived_label_macro"]
 
 
-def test_status_kicks_auto_walk_on_strip_count_drift(monkeypatch):
-    """User finding (2026-08-20): the stale-map banner told end users to POST
-    an API endpoint. Strip-count drift is walkable, so the status computation
-    now kicks the auto-walk itself (cooldown-guarded) — the banner narrates."""
+def test_status_never_drives_the_device_on_strip_count_drift(monkeypatch):
+    """Architecture review 2026-08-20: input strip counts change with EVERY
+    snapshot (pairing is per-snapshot state) — that is normal operation.
+    An earlier version auto-walked on this comparison and made snapshot
+    switches trigger 90s walks in a loop. GET /api/status must be pure."""
     from types import SimpleNamespace
     import web.web_client as wc
     calls = []
@@ -194,12 +195,7 @@ def test_status_kicks_auto_walk_on_strip_count_drift(monkeypatch):
             f"C{i}": {"row": 1, "channel": i} for i in range(1, 23)}}},  # 22
     })
     assert client.get("/api/status").status_code == 200
-    assert calls, "23 live vs 22 mapped strips must kick the auto-walk"
-
-    calls.clear()
-    fake_listener.state.real_strip_count = 22  # no drift
-    client.get("/api/status")
-    assert not calls
+    assert not calls, "strip-count drift is snapshot-normal — never walk on it"
 
 
 def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):

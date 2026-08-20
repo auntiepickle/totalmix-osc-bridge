@@ -27,6 +27,14 @@
 - `routing_label` is derived at read time from the current channel map,
   never persisted (persisted labels rotted when the device renamed outputs).
 
+### Strip-count "drift" reclassified as normal (architecture review 2026-08-20)
+- Input strip counts change with every snapshot (pairing is per-snapshot
+  state). The strip-count banner and the auto-walk trigger on that
+  comparison are REMOVED — snapshot switches no longer cause banners or
+  90-second walks. Direction: per-device fixed hardware-channel table
+  (RME documents /setSubmix and /setBankStart as hardware-mono indexed)
+  and, longer-term, TotalMix FX 2.1 Global OSC.
+
 ### Retained MQTT belief stays current
 - A device-CONFIRMED MQTT-driven workspace/snapshot switch now republishes
   the retained `totalmix/workspace` / `totalmix/snapshot` topics (macro
