@@ -90,17 +90,21 @@ Smooth value change over musical time. Duration = `bars x 4 x 60 / bpm` seconds.
 {
   "osc": "/1/volume2",
   "value": "{{param}}",
-  "operation": { "type": "lfo", "bars": 4, "bpm": 140, "depth": 1.0 }
+  "operation": { "type": "lfo", "bars": 4, "bpm": 140, "rate": 1.0, "depth": 1.0 }
 }
 ```
 
-Sine wave oscillation. One full cycle per bar.
+Beat-synced wave, starting and ending at the sweep floor. `bars` sets how long it
+runs, `rate` how fast it cycles.
 
 | Field | Default | Description |
 |---|---|---|
 | `bars` | `2` | Total duration |
 | `bpm` | `140` | Tempo. Accepts `"clock"` same as ramp. |
+| `rate` | `1.0` | Cycles per beat. Total cycles = `round(bars x 4 x rate)`, minimum 1 — always a whole number so the wave ends where it began. |
 | `depth` | `1.0` | Amplitude (0.0-1.0) |
+| `range` | param full range | `[lo, hi]` sweep window, same as ramp |
+| `threshold` | — | Gate point for toggle params (mute), same as ramp |
 
 ---
 

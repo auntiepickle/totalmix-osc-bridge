@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Simple patch mode (#9)
+- New default editor for simple-representable macros (one routed step, at
+  most one MIDI trigger): three labeled groups — What (routing), How
+  (behavior: SET / RAMP / LFO cards with waveform glyphs and one-line
+  descriptions), When (trigger) — no raw steps, no JSON. A projection over
+  the same mappings.json schema; the advanced editor stays one toggle away
+  and is the automatic fallback for multi-step / raw-OSC macros.
+- Routing changes in simple mode apply immediately (no "Set routing" click).
+- New macros and duplicates of simple macros open in simple mode.
+
+### Ramp/LFO editor controls (#19, UI half)
+- Ramp `curve` (one-way linear vs up-and-back triangle) and LFO `rate`
+  (cycles per beat: ¼ ½ 1 2 4) are now editable in both editors; read-only
+  view shows the LFO rate. Mode changes seed the matching control and drop
+  the other so stored JSON stays canonical.
+- `use_value_as_param` ("use value") is now visible and editable per trigger
+  (it was always saved as true but never shown).
+
+### Config hygiene
+- Every save path strips runtime fields (name, value, progress, lfo_active,
+  last_trigger, osc_preview, midi_trigger, routing_label) from macros —
+  the raw-JSON editor will show them disappear on save; that is intended.
+- `routing_label` is derived at read time from the current channel map,
+  never persisted (persisted labels rotted when the device renamed outputs).
+
+### Pre-flight validity (#22 seed)
+- Macro cards show an amber warning icon, and the detail/editors a red
+  strip, when a macro's stored names (channel, submix, output, workspace,
+  snapshot) are missing from the loaded maps — the same refusals the bridge
+  enforces at fire time, made visible before firing. Advisory only.
+
 ## v0.1.0-alpha — 2026-08-01 · feature-complete pre-alpha
 
 First tagged revision. Everything below is hardware-verified on an RME

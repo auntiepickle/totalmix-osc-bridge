@@ -147,6 +147,51 @@ def test_macro_create_rejects_non_object_body(macro_crud):
     assert len(macro_crud) == 0
 
 
+def test_upsert_strips_runtime_fields(macro_crud):
+    """run_macro merges runtime fields into the browser's macros{} object, so
+    editor saves round-tripped them into mappings.json — strip on save."""
+    from web.web_client import RUNTIME_FIELDS
+    body = {
+        "description": "keep me",
+        "steps": [{"osc": "/1/volume1", "value": "0.5"}],
+        # runtime pollution the browser sends back after a fire
+        "name": "runtime_strip_macro", "value": 0.7, "progress": 42,
+        "lfo_active": True, "last_trigger": "CC44", "osc_preview": "/1/volume1",
+        "midi_trigger": "CC44 · ch1", "routing_label": "stale → label",
+    }
+    r = client.post("/api/config/macros/runtime_strip_macro", json=body)
+    assert r.status_code == 200
+    stored = bridge_module.bridge.mappings["macros"]["runtime_strip_macro"]
+    assert not any(f in stored for f in RUNTIME_FIELDS)
+    assert stored["description"] == "keep me" and stored["steps"]
+
+
+def test_get_macros_injects_derived_routing_label(macro_crud):
+    """routing_label is derived at read time, never persisted — stored copies
+    rot when the device renames outputs."""
+    body = {"steps": [{"target": {"submix": "Sub X", "channel": "AN 3"},
+                       "value": "{{param}}"}]}
+    r = client.post("/api/config/macros/derived_label_macro", json=body)
+    assert r.status_code == 200
+    served = client.get("/api/macros").json()["derived_label_macro"]
+    assert served["routing_label"] == "AN 3 → Sub X"
+    assert "routing_label" not in bridge_module.bridge.mappings["macros"]["derived_label_macro"]
+
+
+def test_sanitize_mappings_pure():
+    """_sanitize_mappings strips runtime fields per macro without mutating
+    its input (the whole-file save path passes the request body through it)."""
+    from web.web_client import _sanitize_mappings
+    original = {"macros": {"m1": {"steps": [], "progress": 1, "value": 0.2},
+                           "weird": "not-a-dict"},
+                "other_key": True}
+    out = _sanitize_mappings(original)
+    assert out["macros"]["m1"] == {"steps": []}
+    assert out["macros"]["weird"] == "not-a-dict"   # passthrough, no crash
+    assert out["other_key"] is True
+    assert original["macros"]["m1"]["progress"] == 1  # input untouched
+
+
 def test_root_redirects_to_ui():
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (301, 302, 307)

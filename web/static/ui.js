@@ -76,15 +76,77 @@ function getMidiTriggerLabel(m) {
 }
 
 // ── Card HTML ─────────────────────────────────────────────────────────────────
+// Pre-flight validity (#22 seed, shipped with #9): check a macro's stored
+// names against the LOADED caches only — cheap, advisory, no network. The
+// bridge still refuses at fire time; this just makes refusals visible before
+// anyone fires. Returns [] when nothing is loaded to check against.
+function macroTargetIssues(m) {
+  const issues = [];
+  const snapMap = window._snapshotMap || {};
+  if (m.workspace && m.snapshot && Object.keys(snapMap).length) {
+    const wsEntry = snapMap[m.workspace];
+    if (!wsEntry) {
+      issues.push(`workspace "${m.workspace}" not found in snapshot map`);
+    } else if (!Object.values(wsEntry.snapshots || {})
+        .some(v => String(v).toLowerCase() === String(m.snapshot).toLowerCase())) {
+      issues.push(`snapshot "${m.snapshot}" not found in ${m.workspace}`);
+    }
+  }
+  const subs = (window._channelMap || {}).submixes || {};
+  if (Object.keys(subs).length) {
+    const inputNames = new Set(), playbackNames = new Set();
+    Object.values(subs).forEach(s => Object.entries(s.sends || {}).forEach(([key, sd]) => {
+      // Accept the raw trackname (send.name) AND the send key — older maps
+      // have no inner name, and applyRouting falls back to the key there
+      const pool = (sd.row ?? 1) === 2 ? playbackNames : inputNames;
+      if (sd.name) pool.add(sd.name);
+      pool.add(key);
+    }));
+    (m.steps || []).forEach(step => {
+      const t = step.target;
+      if (!t) return;                              // raw steps: no names to check
+      if ((PARAM_DEFS[t.param] || {}).global) return;  // fixed /3/ address
+      if (t.row === 3) {
+        if (t.channel && !(t.channel in subs)) {
+          issues.push(`output "${t.channel}" not in channel map`);
+        }
+        return;
+      }
+      if (t.channel && !(t.row === 2 ? playbackNames : inputNames).has(t.channel)) {
+        issues.push(`channel "${t.channel}" not in channel map`);
+      }
+      if (t.submix && !(t.submix in subs)) {
+        issues.push(`submix "${t.submix}" not in channel map`);
+      }
+    });
+  }
+  return [...new Set(issues)];
+}
+
+// Red issue strip shared by the read-only detail and both editors
+function _issueStripHTML(issues, withSnapshotFixButton) {
+  if (!issues.length) return '';
+  const fixBtn = withSnapshotFixButton
+    && issues.some(s => s.includes('snapshot map') || s.startsWith('snapshot '))
+    ? `<button onclick="openEditor('snapshot_map')" class="underline hover:text-red-300 ml-1">Fix in editor</button>`
+    : '';
+  return `<div class="flex items-center gap-2 bg-red-900/20 border border-red-800/40 text-red-400 text-xs px-3 py-2 rounded-lg">
+    <i class="fas fa-triangle-exclamation shrink-0"></i>
+    <span>${_esc(issues.join(' · '))}${fixBtn}</span>
+  </div>`;
+}
+
 function createMacroCardHTML(name, m) {
   const midiLabel   = getMidiTriggerLabel(m);
   const routingLabel = m.routing_label || '—';
+  const issues = macroTargetIssues(m);
   return `
 <div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200">
-    <!-- Header: LED · name/desc · MIDI badge -->
+    <!-- Header: LED · name/desc · warn badge · MIDI badge -->
     <div class="flex items-center gap-3 mb-1">
         <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
         <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
+        ${issues.length ? `<i class="fas fa-triangle-exclamation text-amber-400 text-xs shrink-0" title="${_esc(issues.join('; '))}"></i>` : ''}
         ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
     </div>
     <!-- Description + routing label -->
@@ -263,25 +325,10 @@ function toggleDetail(name) {
   };
   const fireModeClass = fireModeColors[fireMode] || fireModeColors.IGNORE;
 
-  // Check if ws/snapshot can be resolved in the loaded snapshot map
-  const snapMap = window._snapshotMap || {};
-  const wsEntry = snapMap[m.workspace];
-  const wsResolved = !!wsEntry;
-  const ssResolved = wsResolved && Object.values(wsEntry.snapshots || {})
-    .some(v => String(v).toLowerCase() === String(m.snapshot || '').toLowerCase());
-
   let html = `<div class="space-y-3 text-zinc-300 text-sm">`;
 
-  // Snapshot map validation warning
-  if (m.workspace && m.snapshot && (!wsResolved || !ssResolved)) {
-    const missing = !wsResolved ? `workspace "${m.workspace}"` : `snapshot "${m.snapshot}" in ${m.workspace}`;
-    html += `<div class="flex items-center gap-2 bg-red-900/20 border border-red-800/40 text-red-400 text-xs px-3 py-2 rounded-lg">
-      <i class="fas fa-triangle-exclamation shrink-0"></i>
-      <span>${missing} not found in snapshot map — WS/SS switch will always fire.
-        <button onclick="openEditor('snapshot_map')" class="underline hover:text-red-300 ml-1">Fix in editor</button>
-      </span>
-    </div>`;
-  }
+  // Pre-flight issues: stored names vs the loaded snapshot + channel maps
+  html += _issueStripHTML(macroTargetIssues(m), true);
 
   // Top row: fire mode badge + duration + Edit button
   html += `<div class="flex items-center justify-between gap-2">
@@ -309,7 +356,9 @@ function toggleDetail(name) {
         const bars  = op.bars || 2;
         const bpm   = op.bpm;
         const bpmLabel = bpm === 'clock' ? '<span class="text-orange-400/80">clock</span>' : (bpm || 140);
-        const curve = op.curve ? ` · ${op.curve}` : '';
+        const curve = op.type === 'lfo'
+          ? ` · ${op.rate ?? 1}×/beat`
+          : (op.curve ? ` · ${op.curve}` : '');
         const opColors = { RAMP: 'text-amber-400', LFO: 'text-purple-400' };
         const opColor = opColors[opType] || 'text-zinc-400';
         html += `<div class="flex items-center gap-2 font-mono bg-zinc-900/60 px-2.5 py-1.5 rounded-lg">
@@ -347,6 +396,12 @@ function toggleDetail(name) {
   }
 
   // Workspace / Snapshot — names only, no raw indices
+  const snapMap = window._snapshotMap || {};
+  const wsEntry = snapMap[m.workspace];
+  const wsResolved = !m.workspace || !Object.keys(snapMap).length || !!wsEntry;
+  const ssResolved = !m.snapshot || !Object.keys(snapMap).length
+    || (!!wsEntry && Object.values(wsEntry.snapshots || {})
+        .some(v => String(v).toLowerCase() === String(m.snapshot).toLowerCase()));
   const wsColor  = wsResolved  ? 'text-zinc-400' : 'text-red-400/70';
   const ssColor  = ssResolved  ? 'text-zinc-400' : 'text-red-400/70';
   const wsLabel  = m.workspace || '—';
@@ -492,9 +547,40 @@ window.updateSendPickerOptions = function (name, selectedChannel) {
     .join('') || '<option value="">no channels discovered</option>';
 };
 
+// A macro is "simple-representable" when it matches the canonical patch shape:
+// exactly one routed step (SET value or {{param}}-driven op) and at most one
+// MIDI trigger. Reads only steps/midi_triggers, so runtime fields merged into
+// macros{} by WS updates can't change the verdict.
+function simpleModeShape(m) {
+  const steps = (m && m.steps) || [];
+  if (steps.length !== 1) return null;
+  const step = steps[0];
+  if (!step || !step.target) return null;
+  const v = step.value;
+  const valueOk = v === '{{param}}' ||
+    (v !== '' && v != null && Number.isFinite(parseFloat(v)));
+  if (!valueOk) return null;
+  const triggers = m.midi_triggers || [];
+  if (triggers.length > 1) return null;
+  return { step, stepIndex: 0, trigger: triggers[0] || null };
+}
+
+// The step applyRouting should retarget: the {{param}} step as always — or, in
+// simple mode, the macro's single routed step even when it is a SET (numeric
+// value). Without this, re-routing a SET patch would push a second step.
+function _routableStep(m, name) {
+  const steps = (m && m.steps) || [];
+  return steps.find(s => s.value === '{{param}}')
+    || ((window._editorModes || {})[name] === 'simple'
+        ? steps.find(s => s.target) : null);
+}
+
 // Current routing of the buffer's param step — used to restore picker state
 function _currentRouting(m) {
-  const paramStep = (m.steps || []).find(s => s.value === '{{param}}');
+  // Prefer the {{param}} step; fall back to any routed step so a SET-only
+  // patch (numeric value, no operation) still restores its picker state
+  const paramStep = (m.steps || []).find(s => s.value === '{{param}}')
+    || (m.steps || []).find(s => s.target);
   if (paramStep && paramStep.target) {
     return { submix: paramStep.target.submix,
              channel: paramStep.target.channel,
@@ -654,6 +740,74 @@ Object.assign(PARAM_DEFS, {
   phase_r:       _detailToggle('Phase Invert R',    '/2/phaseRight'),
 });
 
+// Behavior descriptor registry (#19) — one entry per step mode, consumed by
+// both the advanced step editor and the simple patch editor. Defaults must
+// match operations.py (curve 'triangle', rate 1.0). Glyphs are inline SVG on
+// currentColor — no Tailwind involvement, so deploy stays pull-only.
+const _glyphSvg = (inner) =>
+  `<svg viewBox="0 0 40 12" width="40" height="12" aria-hidden="true"
+      style="vertical-align:middle;flex-shrink:0">${inner}</svg>`;
+const OP_DEFS = {
+  set: {
+    label: 'SET',
+    desc: 'Jump straight to a value',
+    glyph: _glyphSvg('<polyline points="1,10 20,10 20,2 39,2" fill="none" stroke="currentColor" stroke-width="1.5"/>'),
+  },
+  ramp: {
+    label: 'RAMP',
+    desc: 'Glide over time — one-way or up-and-back',
+    glyph: _glyphSvg('<polyline points="1,10 28,2 39,2" fill="none" stroke="currentColor" stroke-width="1.5"/>'),
+    curves: [['linear', 'One-way — parks at the destination'],
+             ['triangle', 'Up & back — parks where it started']],
+    defaultCurve: 'triangle',
+  },
+  lfo: {
+    label: 'LFO',
+    desc: 'Wave on the beat until the bars run out',
+    glyph: _glyphSvg('<path d="M1,6 Q6,0 11,6 T21,6 T31,6 T39,6" fill="none" stroke="currentColor" stroke-width="1.5"/>'),
+    rates: [[0.25, '¼ per beat'], [0.5, '½ per beat'], [1, '1 per beat'],
+            [2, '2 per beat'], [4, '4 per beat']],
+    defaultRate: 1,
+  },
+};
+
+// Curve / rate select for an operation step, from the OP_DEFS descriptor.
+// A stored value outside the preset list gets its own option — otherwise the
+// select would silently rewrite it to the first preset on the next harvest.
+function _opExtraControls(name, i, op, sc) {
+  if (op.type === 'lfo') {
+    const def = OP_DEFS.lfo;
+    const rate = Number.isFinite(parseFloat(op.rate)) ? parseFloat(op.rate) : def.defaultRate;
+    let opts = def.rates.map(([v, lbl]) =>
+      `<option value="${v}"${rate === v ? ' selected' : ''}>${lbl}</option>`).join('');
+    if (!def.rates.some(([v]) => v === rate)) {
+      opts += `<option value="${rate}" selected>${rate} per beat</option>`;
+    }
+    return `<div class="flex gap-2 items-center">
+      <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0"
+          title="How fast the wave cycles — bars set how long it runs">rate</span>
+      <select data-field="steps.${i}.operation.rate" data-numeric class="${sc} flex-1">${opts}</select>
+    </div>`;
+  }
+  const def = OP_DEFS.ramp;
+  const curve = op.curve || def.defaultCurve;
+  const opts = def.curves.map(([v, lbl]) =>
+    `<option value="${v}"${curve === v ? ' selected' : ''}>${lbl}</option>`).join('');
+  return `<div class="flex gap-2 items-center">
+    <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0"
+        title="Where the glide ends up when the bars run out">curve</span>
+    <select data-field="steps.${i}.operation.curve" class="${sc} flex-1">${opts}</select>
+  </div>`;
+}
+
+// One-line mode description + waveform glyph, shown under the mode select
+function _opModeDesc(mode) {
+  const def = OP_DEFS[mode] || OP_DEFS.set;
+  return `<div class="flex gap-2 items-center text-[10px] text-zinc-600">
+    <span class="text-zinc-500">${def.glyph}</span><span>${def.desc}</span>
+  </div>`;
+}
+
 function _buildParamOptions(selected) {
   const chan = ['volume', 'mute', 'pan'];
   const chanOpts = chan.map(p =>
@@ -741,6 +895,15 @@ window.changeStepMode = function (name, i, mode) {
     if (def.mod?.threshold && step.operation.threshold == null) step.operation.threshold = 0.5;
     if (def.mod?.range && !Array.isArray(step.operation.range)) {
       step.operation.range = [def.min ?? 0, def.max ?? 1];
+    }
+    // Seed the mode's own control and drop the other's (#19) — keeps the
+    // stored JSON canonical (a ramp never carries a rate, an LFO no curve)
+    if (mode === 'ramp') {
+      if (step.operation.curve == null) step.operation.curve = OP_DEFS.ramp.defaultCurve;
+      delete step.operation.rate;
+    } else if (mode === 'lfo') {
+      if (step.operation.rate == null) step.operation.rate = OP_DEFS.lfo.defaultRate;
+      delete step.operation.curve;
     }
   }
   editDetail(name);
@@ -834,7 +997,7 @@ window.applyRouting = function (name) {
     // Global FX parameter — no channel/submix, fixed address fallback
     const g = _harvestEditor(name);
     g.steps = (g.steps || []).filter(s => s.osc !== '/setSubmix');
-    const pStep = g.steps.find(s => s.value === '{{param}}');
+    const pStep = _routableStep(g, name);
     const gTarget = { param: paramSel0.value };
     if (pStep) { pStep.target = gTarget; pStep.osc = def0.addr; }
     else g.steps.push({ osc: def0.addr, target: gTarget, value: '{{param}}',
@@ -858,7 +1021,7 @@ window.applyRouting = function (name) {
     if (isOut) target.row = 3;
     const m0 = _harvestEditor(name);
     m0.steps = (m0.steps || []).filter(s => s.osc !== '/setSubmix');
-    const pStep0 = m0.steps.find(s => s.value === '{{param}}');
+    const pStep0 = _routableStep(m0, name);
     if (pStep0) { pStep0.target = target; pStep0.osc = def0.addr; }
     else m0.steps.push({ osc: def0.addr, target,
                          value: String(def0.default ?? 0.5) });
@@ -872,7 +1035,7 @@ window.applyRouting = function (name) {
   // The bridge sends /setSubmix itself when resolving a target —
   // a legacy explicit step would double-send it
   m.steps = m.steps.filter(s => s.osc !== '/setSubmix');
-  const paramStep = m.steps.find(s => s.value === '{{param}}');
+  const paramStep = _routableStep(m, name);
   // target.channel is the raw trackname (send.name); the picker KEY may
   // carry a "(playback)" suffix that the device never reports
   const target = { submix: submixSel.value,
@@ -996,6 +1159,110 @@ window.removeEditorTrigger = function (name, i) {
   editDetail(name);
 };
 
+// Shared editor input classes (advanced editor, simple editor, and helpers)
+const EDIT_IC = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-full';
+const EDIT_SC = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none';
+const EDIT_NC = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-20 text-center';
+
+// Per-macro editor mode ('simple' | 'advanced'), decided on open: simple when
+// the macro matches the canonical patch shape, advanced otherwise (#9)
+window._editorModes = window._editorModes || {};
+
+window.setEditorMode = function (name, mode) {
+  _harvestEditor(name);
+  window._editorModes[name] = mode;
+  editDetail(name);
+};
+
+// Simple | Advanced toggle shown at the top of both editors
+function _editorModeToggle(name, active) {
+  const simpleable = !!simpleModeShape(window._editBuffers[name] || macros[name]);
+  const btn = (mode, label, on, enabled, title) => enabled
+    ? `<button onclick="setEditorMode('${name}','${mode}')" title="${title}"
+        class="text-xs px-3 py-1 rounded-lg transition-all ${on
+          ? 'bg-orange-500 text-black font-bold'
+          : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white'}">${label}</button>`
+    : `<button disabled title="${title}"
+        class="text-xs px-3 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-600">${label}</button>`;
+  return `<div class="flex gap-2 items-center">
+    ${btn('simple', 'Simple', active === 'simple', simpleable,
+          simpleable ? 'One routing, one behavior, one trigger'
+                     : 'Advanced macro — multiple steps, raw OSC or several triggers cannot be shown in simple mode')}
+    ${btn('advanced', 'Advanced', active === 'advanced', true,
+          'Full step list, raw OSC, multiple triggers')}
+  </div>`;
+}
+
+// Bars / BPM / clock row for an operation step — shared by both editors
+function _timingControls(name, i, op) {
+  const nc = EDIT_NC;
+  return `<div class="flex gap-2 items-center">
+    <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
+    <span class="text-zinc-500 text-xs shrink-0">bars @</span>
+    <input data-field="steps.${i}.operation.bpm" id="bpm-input-${name}-${i}"
+        type="${op.bpm==='clock'?'text':'number'}" min="20" max="400"
+        value="${op.bpm==='clock'?'clock':_esc(op.bpm??140)}"
+        class="${nc}" ${op.bpm==='clock'?'disabled':''}>
+    <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
+        title="Sync to live MIDI clock tempo">
+      <input type="checkbox" id="bpm-clock-cb-${name}-${i}" class="w-3 h-3 accent-orange-500"
+          ${op.bpm==='clock'?'checked':''}
+          onchange="toggleBPMClock('${name}',${i})">
+      clock
+    </label>
+  </div>`;
+}
+
+// One MIDI trigger row — shared by both editors. 'use value' feeds the CC
+// value / velocity into {{param}} (was always saved true but never editable).
+function _triggerRow(name, t, i) {
+  const sc = EDIT_SC, nc = EDIT_NC;
+  const type    = t.type || 'control_change';
+  const isNote  = type === 'note_on' || type === 'note_off';
+  const numField = isNote ? `midi_triggers.${i}.note`   : `midi_triggers.${i}.number`;
+  const numValue = isNote ? (t.note ?? 0)               : (t.number ?? 0);
+  return `<div class="flex gap-2 items-center flex-wrap bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
+    <select data-field="midi_triggers.${i}.type" class="${sc} shrink-0">
+      <option value="control_change"${type==='control_change'?' selected':''}>CC</option>
+      <option value="note_on"${type==='note_on'?' selected':''}>Note On</option>
+      <option value="note_off"${type==='note_off'?' selected':''}>Note Off</option>
+    </select>
+    <span class="text-zinc-500 text-xs shrink-0">#</span>
+    <input data-field="${numField}" type="number" min="0" max="127" value="${_esc(numValue)}" class="${nc}">
+    <span class="text-zinc-500 text-xs shrink-0">ch</span>
+    <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
+    <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
+        title="Use the CC value (or note velocity) as the macro's parameter at fire time">
+      <input type="checkbox" data-field="midi_triggers.${i}.use_value_as_param"
+          class="w-3 h-3 accent-orange-500"${t.use_value_as_param ? ' checked' : ''}>
+      use value
+    </label>
+    <button id="learn-btn-${name}-${i}" onclick="learnTrigger('${name}',${i})"
+        title="Capture the next CC or note from any device (or the MIDI emulator)"
+        class="shrink-0 text-xs px-2 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-cyan-400 hover:text-white transition-all">learn</button>
+    <button onclick="removeEditorTrigger('${name}',${i})" title="Remove trigger"
+        class="shrink-0 w-8 text-zinc-600 hover:text-red-400 transition-colors"><i class="fas fa-xmark"></i></button>
+  </div>`;
+}
+
+// Save / Cancel / Delete footer — shared by both editors
+function _editorFooter(name) {
+  return `<div class="flex gap-2 pt-2 border-t border-zinc-800">
+    <button id="edit-save-${name}" onclick="saveInlineEdit('${name}')"
+        class="flex-1 bg-orange-500 hover:bg-orange-400 active:scale-95 text-black font-bold py-2 rounded-xl text-sm transition-all">
+      Save
+    </button>
+    <button onclick="cancelInlineEdit('${name}')"
+        class="px-5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-xl text-sm transition-all">
+      Cancel
+    </button>
+    <button onclick="deleteMacroUI('${name}')" title="Delete this macro"
+        class="px-4 bg-zinc-900 hover:bg-red-900/40 border border-zinc-800 hover:border-red-800/60 text-zinc-600 hover:text-red-400 py-2 rounded-xl text-sm transition-all">
+      <i class="fas fa-trash text-xs"></i>
+    </button>
+  </div>`;
+}
+
 function editDetail(name) {
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
@@ -1008,10 +1275,21 @@ function editDetail(name) {
   panel.classList.remove('hidden');
   if (arrow) arrow.style.transform = 'rotate(180deg)';
 
+  // Pick the editor: simple when representable (and not overridden), else
+  // advanced. A macro that stops being representable falls back safely.
+  const simpleable = !!simpleModeShape(m);
+  let mode = window._editorModes[name];
+  if (mode !== 'simple' && mode !== 'advanced') mode = simpleable ? 'simple' : 'advanced';
+  if (mode === 'simple' && !simpleable) mode = 'advanced';
+  window._editorModes[name] = mode;
+
+  if (mode === 'simple') _renderSimpleEditor(name, m, panel);
+  else _renderAdvancedEditor(name, m, panel);
+}
+
+function _renderAdvancedEditor(name, m, panel) {
   // Shared input CSS classes
-  const ic  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-full';
-  const sc  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none';
-  const nc  = 'bg-zinc-900 border border-zinc-700 focus:border-orange-400 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none w-20 text-center';
+  const ic = EDIT_IC, sc = EDIT_SC, nc = EDIT_NC;
 
   // Remove-step button (shared)
   const _removeBtn = (i) => `<button onclick="removeEditorStep('${name}',${i})" title="Remove step"
@@ -1056,21 +1334,9 @@ function editDetail(name) {
           ${modeSel(op.type === 'lfo' ? 'lfo' : 'ramp')}
           ${_removeBtn(i)}
         </div>
-        <div class="flex gap-2 items-center">
-          <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
-          <span class="text-zinc-500 text-xs shrink-0">bars @</span>
-          <input data-field="steps.${i}.operation.bpm" id="bpm-input-${name}-${i}"
-              type="${op.bpm==='clock'?'text':'number'}" min="20" max="400"
-              value="${op.bpm==='clock'?'clock':_esc(op.bpm??140)}"
-              class="${nc}" ${op.bpm==='clock'?'disabled':''}>
-          <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
-              title="Sync to live MIDI clock tempo">
-            <input type="checkbox" id="bpm-clock-cb-${name}-${i}" class="w-3 h-3 accent-orange-500"
-                ${op.bpm==='clock'?'checked':''}
-                onchange="toggleBPMClock('${name}',${i})">
-            clock
-          </label>
-        </div>
+        ${_timingControls(name, i, op)}
+        ${_opExtraControls(name, i, op, sc)}
+        ${_opModeDesc(op.type === 'lfo' ? 'lfo' : 'ramp')}
         ${step.target ? _modControls(name, i, step) : ''}
       </div>`;
     } else {
@@ -1094,28 +1360,7 @@ function editDetail(name) {
   }).join('');
 
   // MIDI triggers — type-aware: CC uses 'number', Note On/Off use 'note'
-  const midiHtml = (m.midi_triggers || []).map((t, i) => {
-    const type    = t.type || 'control_change';
-    const isNote  = type === 'note_on' || type === 'note_off';
-    const numField = isNote ? `midi_triggers.${i}.note`   : `midi_triggers.${i}.number`;
-    const numValue = isNote ? (t.note ?? 0)               : (t.number ?? 0);
-    return `<div class="flex gap-2 items-center bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
-      <select data-field="midi_triggers.${i}.type" class="${sc} shrink-0">
-        <option value="control_change"${type==='control_change'?' selected':''}>CC</option>
-        <option value="note_on"${type==='note_on'?' selected':''}>Note On</option>
-        <option value="note_off"${type==='note_off'?' selected':''}>Note Off</option>
-      </select>
-      <span class="text-zinc-500 text-xs shrink-0">#</span>
-      <input data-field="${numField}" type="number" min="0" max="127" value="${_esc(numValue)}" class="${nc}">
-      <span class="text-zinc-500 text-xs shrink-0">ch</span>
-      <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
-      <button id="learn-btn-${name}-${i}" onclick="learnTrigger('${name}',${i})"
-          title="Capture the next CC or note from any device (or the MIDI emulator)"
-          class="shrink-0 text-xs px-2 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-cyan-400 hover:text-white transition-all">learn</button>
-      <button onclick="removeEditorTrigger('${name}',${i})" title="Remove trigger"
-          class="shrink-0 w-8 text-zinc-600 hover:text-red-400 transition-colors"><i class="fas fa-xmark"></i></button>
-    </div>`;
-  }).join('');
+  const midiHtml = (m.midi_triggers || []).map((t, i) => _triggerRow(name, t, i)).join('');
 
   // Routing picker — restored to the macro's current routing, only when a
   // discovered channel map is loaded
@@ -1149,6 +1394,9 @@ function editDetail(name) {
   </div>` : '';
 
   panel.innerHTML = `<div class="space-y-3 text-sm">
+
+    ${_editorModeToggle(name, 'advanced')}
+    ${_issueStripHTML(macroTargetIssues(m), false)}
 
     <input data-field="description" value="${_esc(m.description)}"
         class="${ic}" placeholder="Description">
@@ -1213,25 +1461,127 @@ function editDetail(name) {
       </button>
     </div>
 
-    <div class="flex gap-2 pt-2 border-t border-zinc-800">
-      <button id="edit-save-${name}" onclick="saveInlineEdit('${name}')"
-          class="flex-1 bg-orange-500 hover:bg-orange-400 active:scale-95 text-black font-bold py-2 rounded-xl text-sm transition-all">
-        Save
-      </button>
-      <button onclick="cancelInlineEdit('${name}')"
-          class="px-5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-xl text-sm transition-all">
-        Cancel
-      </button>
-      <button onclick="deleteMacroUI('${name}')" title="Delete this macro"
-          class="px-4 bg-zinc-900 hover:bg-red-900/40 border border-zinc-800 hover:border-red-800/60 text-zinc-600 hover:text-red-400 py-2 rounded-xl text-sm transition-all">
-        <i class="fas fa-trash text-xs"></i>
-      </button>
-    </div>
+    ${_editorFooter(name)}
 
   </div>`;
 
   // Populate the cascading send picker, restoring the macro's current send,
   // and set the submix dropdown's enabled state for the current parameter
+  if (hasChannelMap) {
+    updateSendPickerOptions(name, routing.row === 3
+      ? `__out3__${routing.channel}` : routing.channel);
+    updateParamScope(name);
+  }
+}
+
+// Simple patch editor (#9): one routing, one behavior, one trigger — a
+// projection over the same macro object the advanced editor writes. Renders
+// only for macros that pass simpleModeShape(); everything else stays advanced.
+function _renderSimpleEditor(name, m, panel) {
+  const ic = EDIT_IC, sc = EDIT_SC, nc = EDIT_NC;
+  const shape = simpleModeShape(m);
+  if (!shape) { _renderAdvancedEditor(name, m, panel); return; }
+  const step = shape.step;
+  const i = shape.stepIndex;
+
+  const hasChannelMap = Object.keys((window._channelMap || {}).submixes || {}).length > 0;
+  const routing = _currentRouting(m);
+
+  // WHAT — the same picker selects (same ids) as the advanced editor, so
+  // updateSendPickerOptions / updateParamScope / applyRouting work verbatim.
+  // No "Set routing" button: every change applies immediately.
+  const whatHtml = hasChannelMap ? `<div class="flex gap-2 items-center flex-wrap">
+      <div class="flex-1 min-w-[120px]">
+        <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Input channel</div>
+        <select id="routing-send-${name}" onchange="applyRouting('${name}')" class="${sc} w-full"></select>
+      </div>
+      <span class="text-zinc-500 text-xs shrink-0">→</span>
+      <div class="flex-1 min-w-[160px]">
+        <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Output submix</div>
+        <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}');applyRouting('${name}')" class="${sc} w-full">
+          ${_buildSubmixPickerOptions(routing.submix)}
+        </select>
+      </div>
+      <div class="shrink-0">
+        <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Parameter</div>
+        <select id="routing-param-${name}" onchange="updateParamScope('${name}');applyRouting('${name}')" class="${sc}">
+          ${_buildParamOptions(routing.param)}
+        </select>
+      </div>
+    </div>`
+    : `<div class="text-xs text-zinc-500 italic">no channels discovered yet — run discovery from the gear menu first</div>`;
+
+  // HOW — mode cards from OP_DEFS, then the active mode's controls
+  const mode = step.operation ? (step.operation.type === 'lfo' ? 'lfo' : 'ramp') : 'set';
+  const cards = ['set', 'ramp', 'lfo'].map(k => {
+    const d = OP_DEFS[k];
+    const on = k === mode;
+    return `<button onclick="changeStepMode('${name}',${i},'${k}')" title="${d.desc}"
+        class="flex-1 py-2 rounded-xl text-center transition-all ${on
+          ? 'bg-orange-500 text-black font-bold'
+          : 'bg-zinc-900/80 border border-zinc-800 text-zinc-400 hover:text-white'}">
+      <div>${d.glyph}</div>
+      <div class="text-xs">${d.label}</div>
+    </button>`;
+  }).join('');
+  const behaviorControls = mode === 'set'
+    ? `<div class="flex gap-2 items-center">${_valueControl(name, i, step, nc, sc)}</div>`
+    : `${_timingControls(name, i, step.operation)}
+       ${_opExtraControls(name, i, step.operation, sc)}
+       ${_modControls(name, i, step)}`;
+
+  // WHEN — at most one trigger in simple mode
+  const t = shape.trigger;
+  const whenHtml = t ? _triggerRow(name, t, 0)
+    : `<button onclick="addEditorTrigger('${name}')"
+        class="text-xs text-zinc-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
+        <i class="fas fa-plus text-[9px]"></i> MIDI trigger
+      </button>`;
+
+  panel.innerHTML = `<div class="space-y-3 text-sm">
+
+    ${_editorModeToggle(name, 'simple')}
+    ${_issueStripHTML(macroTargetIssues(m), false)}
+
+    <input data-field="description" value="${_esc(m.description)}"
+        class="${ic}" placeholder="Description">
+
+    <div class="flex gap-2">
+      <div class="flex-1">
+        <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Workspace</div>
+        <select data-field="workspace" class="${ic}" onchange="updateSnapshotOptions('${name}', this.value)">
+          ${_buildWorkspaceOptions(m.workspace)}
+        </select>
+      </div>
+      <div class="flex-1">
+        <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Snapshot</div>
+        <select id="snapshot-select-${name}" data-field="snapshot" class="${ic}">
+          ${_buildSnapshotOptions(m.workspace, m.snapshot)}
+        </select>
+      </div>
+    </div>
+
+    <div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest">What — routing</div>
+      ${whatHtml}
+    </div>
+
+    <div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest">How — behavior</div>
+      <div class="flex gap-2">${cards}</div>
+      ${_opModeDesc(mode)}
+      ${behaviorControls}
+    </div>
+
+    <div class="bg-zinc-900/80 border border-zinc-800 p-2.5 rounded-xl space-y-2">
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest">When — trigger</div>
+      ${whenHtml}
+    </div>
+
+    ${_editorFooter(name)}
+
+  </div>`;
+
   if (hasChannelMap) {
     updateSendPickerOptions(name, routing.row === 3
       ? `__out3__${routing.channel}` : routing.channel);
@@ -1259,7 +1609,9 @@ function _harvestEditor(name) {
     const last = isNaN(lastRaw) ? lastRaw : Number(lastRaw);
     if (el.type === 'checkbox') {
       obj[last] = el.checked;
-    } else if (el.type === 'number') {
+    } else if (el.type === 'number' || el.type === 'range' || el.dataset.numeric !== undefined) {
+      // data-numeric: selects whose values are numbers (LFO rate) — harvesting
+      // them as strings would break strict-=== consumers and JSON hygiene
       obj[last] = el.value === '' ? 0 : parseFloat(el.value);
     } else {
       obj[last] = el.value;
@@ -1276,7 +1628,8 @@ async function saveInlineEdit(name) {
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
 
   try {
-    await API.saveMacro(name, m);
+    // Belt-and-braces with the server-side strip: never send runtime fields
+    await API.saveMacro(name, _cleanMacro(m));
     window._lastLocalSave = { name, ts: Date.now() };  // suppress own WS echo
     macros[name] = JSON.parse(JSON.stringify(m));
     cancelInlineEdit(name);
@@ -1305,6 +1658,7 @@ async function deleteMacroUI(name) {
   try {
     await API.deleteMacro(name);
     delete window._editBuffers[name];
+    delete window._editorModes[name];
     delete macros[name];
     renderCards();
   } catch (e) {
@@ -1324,7 +1678,7 @@ function _blankMacroTemplate() {
   const step = {
     osc: firstSend ? firstSend.osc_address : '/1/volume1',
     value: '{{param}}',
-    operation: { type: 'ramp', bars: 2, bpm: 140 },
+    operation: { type: 'ramp', bars: 2, bpm: 140, curve: 'triangle' },
   };
   // Name-based target — live-resolved at fire time (strip indices drift
   // with stereo-link state, names don't)
@@ -1391,6 +1745,8 @@ async function createNewMacro() {
     requestAnimationFrame(() => {
       const card = document.getElementById(`card-${name}`);
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // New patches open simple (#9); duplicates of advanced macros open advanced
+      window._editorModes[name] = simpleModeShape(body) ? 'simple' : 'advanced';
       editDetail(name);
     });
   } catch (e) {

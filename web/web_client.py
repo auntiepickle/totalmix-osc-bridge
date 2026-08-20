@@ -55,10 +55,16 @@ async def index_fallback():
 
 @app.get("/api/macros")
 async def get_macros():
-    """Return all macros from the live bridge mappings (updated by live editor + reload)."""
+    """Return all macros from the live bridge mappings (updated by live editor + reload).
+
+    routing_label is derived at read time — persisted copies rot when the device
+    renames outputs (an3_to_adat1_send kept saying "ADAT 1" after the rename)."""
     macros = bridge.mappings.get("macros", {})
     logger.info(f"✅ /api/macros → serving {len(macros)} macro cards to web client")
-    return macros
+    return {
+        name: {**m, "routing_label": bridge.get_routing_label(name)}
+        for name, m in macros.items()
+    }
 
 
 class TriggerBody(BaseModel):
@@ -195,6 +201,28 @@ async def get_snapshot_map():
 
 MACRO_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
+# run_macro merges these into live state; the browser's macros{} object carries
+# them, so editor saves used to round-trip them into mappings.json. Strip on
+# every save path — must mirror RUNTIME_FIELDS in web/static/ui.js.
+RUNTIME_FIELDS = (
+    "name", "value", "progress", "lfo_active",
+    "last_trigger", "osc_preview", "midi_trigger", "routing_label",
+)
+
+
+def _strip_runtime(macro: dict) -> dict:
+    return {k: v for k, v in macro.items() if k not in RUNTIME_FIELDS}
+
+
+def _sanitize_mappings(data: dict) -> dict:
+    macros = data.get("macros")
+    if isinstance(macros, dict):
+        data = {**data, "macros": {
+            name: _strip_runtime(m) if isinstance(m, dict) else m
+            for name, m in macros.items()
+        }}
+    return data
+
 
 def _persist_mappings():
     """Write bridge.mappings to mappings.json (backup first)."""
@@ -222,7 +250,7 @@ async def upsert_macro(macro_name: str, request: Request):
                 detail="Macro name must be 1-64 chars: letters, digits, _ or -",
             )
         created = macro_name not in bridge.mappings.setdefault("macros", {})
-        bridge.mappings["macros"][macro_name] = data
+        bridge.mappings["macros"][macro_name] = _strip_runtime(data)
         _persist_mappings()
         logger.info(f"✅ Macro '{macro_name}' {'created' if created else 'updated'} via editor")
         bridge.broadcast_state(macro_event={
@@ -263,6 +291,7 @@ async def save_config_mappings(request: Request):
         data = await request.json()
         if "macros" not in data:
             raise HTTPException(status_code=400, detail="Invalid mappings.json: missing 'macros' key")
+        data = _sanitize_mappings(data)
         backup_json_files("mappings.json")
         target = os.path.join(os.path.dirname(__file__), "../mappings.json")
         with open(target, "w") as f:
@@ -736,6 +765,7 @@ async def upload_mappings(file: UploadFile = File(...)):
         data = json.loads(contents)
         if "macros" not in data:
             raise HTTPException(status_code=400, detail="Invalid mappings.json format")
+        data = _sanitize_mappings(data)
         target = os.path.join(os.path.dirname(__file__), "../mappings.json")
         with open(target, "w") as f:
             json.dump(data, f, indent=2)

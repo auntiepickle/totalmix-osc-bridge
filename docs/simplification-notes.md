@@ -35,17 +35,15 @@ dropdown groups, no OSC strings, no JSON.
 
 ## Concrete simplifications to make later
 
-- **Patch = routing + behavior + trigger.** Store as the same mappings.json
-  format (the simple editor is a projection, not a new schema). Advanced
-  JSON stays as the escape hatch — already true of the current editor.
-- **Derive `routing_label` at read time** from the channel map instead of
-  persisting it into mappings.json. Persisted copies go stale (see
-  `an3_to_adat1_send` — label still says "ADAT 1", device says "RE-150 In").
-- **Stop persisting runtime fields.** `run_macro` merges `value`, `progress`,
-  `last_trigger`, `osc_preview`, `midi_trigger`, `name` into live state, and
-  UI saves have written them into mappings.json. The UI already strips them
-  when duplicating (`RUNTIME_FIELDS` in ui.js); the server should strip them
-  on every save so config stays config.
+- ~~Patch = routing + behavior + trigger~~ **DONE (2026-08-20, #9): simple
+  patch mode shipped.** Same mappings.json schema (projection, not a new
+  format); simple opens by default for simple-representable macros, advanced
+  is one toggle away and the automatic fallback.
+- ~~Derive `routing_label` at read time~~ **DONE (2026-08-20):**
+  `GET /api/macros` derives it per request; saves strip any persisted copy.
+- ~~Stop persisting runtime fields~~ **DONE (2026-08-20):** all three save
+  paths (`upsert_macro`, whole-file POST, upload) strip `RUNTIME_FIELDS`
+  server-side; the editor also strips before sending.
 - **MIDI-learn for triggers.** The browser already sees every CC (midi.js);
   a "learn" button that captures the next CC beats typing numbers.
 - **Channel test pulse.** When picking a send, a "wiggle" button that sends a
