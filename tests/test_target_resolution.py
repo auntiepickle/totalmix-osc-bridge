@@ -193,6 +193,64 @@ class WrongLabelTotalMix(LiveFakeTotalMix):
         self.listener._handle("/1/labelSubmix", "Something Else Out")
 
 
+class RacyDumpTotalMix(LiveFakeTotalMix):
+    """Models the TASK-6 step-5 hardware failure: a PRE-switch bank dump
+    (old snapshot's strip numbering) lands with fresh timestamps just
+    before resolution; the TRUE bank arrives only when a row-toggle
+    provokes a dump. /setSubmix to the already-selected submix is a total
+    no-op (hardware fact) — it dumps nothing."""
+
+    STALE_BANK = {1: "AN 1/2", 6: "Pill Out"}           # old numbering
+    TRUE_BANK = {1: "AN 1/2", 6: "AN 7/8", 7: "Pill Out"}  # current
+
+    def __init__(self, listener, fake_osc):
+        super().__init__(listener, fake_osc)
+        self._row_selected = None
+
+    def dump_bank(self, index):
+        pass  # already-selected submix: total no-op
+
+    def on_bus(self, address):
+        # a REPEATED select of the same row is a no-op; a row CHANGE dumps
+        if address == self._row_selected:
+            return
+        self._row_selected = address
+        if address == "/1/busInput":
+            self.listener._handle("/1/labelSubmix", "Main")
+            for n, name in self.TRUE_BANK.items():
+                self.listener._handle(f"/1/trackname{n}", name)
+
+    def inject_stale_dump(self):
+        self.listener._handle("/1/labelSubmix", "Main")
+        for n, name in self.STALE_BANK.items():
+            self.listener._handle(f"/1/trackname{n}", name)
+
+
+def test_stale_fresh_dump_never_wins_the_match(make_bridge, fake_osc):
+    """TASK-6 hardware failure (wrong-fader write): a pre-switch dump with
+    fresh stamps must NOT be matched — strips must postdate THIS
+    resolution's own sends, and when the no-op switch yields no dump the
+    resolver provokes one and matches the TRUE bank."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": [{
+        "target": {"submix": "Main", "channel": "Mic 10"},
+        "value": "0.5",
+    }]}})
+    b.channel_map = cmap(
+        extra_inputs={"8": ["Mic 10", "Pill Out"], "9": ["Mic 10", "Pill Out"]},
+        extra_outputs={"0": ["Main"]})
+    b.osc_listener = listener
+    b.osc_client = RacyDumpTotalMix(listener, fake_osc)
+    listener._server = object()
+    # the race: an old-content dump lands fresh, right before the fire
+    b.osc_client.inject_stale_dump()
+    b.run_macro("m", 0.5)
+    # OLD numbering had Pill Out at strip 6 — writing 6 moved AN 7/8 on
+    # hardware. The write must land on the TRUE bank's strip 7.
+    assert ("/1/volume7", 0.5) in fake_osc.sent
+    assert ("/1/volume6", 0.5) not in fake_osc.sent
+
+
 def test_confirmed_different_label_refuses_write(make_bridge, fake_osc):
     """#24: the measured index is safe to SEND, but when the device
     CONFIRMS a label no alias covers, writing anywhere would land on the
@@ -430,21 +488,26 @@ def test_probe_without_listener_is_unavailable(make_bridge, fake_osc):
 
 
 def test_mute_target_resolves_without_touching_submix(make_bridge, fake_osc):
-    """Mute is global-per-channel (#10): resolution uses whatever bank is
-    already visible and NEVER sends /setSubmix — the user's selected submix
-    stays put."""
+    """Mute is global-per-channel (#10): resolution NEVER sends /setSubmix —
+    the user's selected submix stays put. TASK-6 hardening: a pre-fire
+    'warm' bank is no longer trusted (stale numbering hazard) — the
+    row-toggle provoke fetches a fresh dump instead."""
     macro = {"steps": [{
         "target": {"channel": "AN 3", "param": "mute"},  # no submix at all
         "value": "1.0",
     }]}
+
+    class DumpOnToggle(LiveFakeTotalMix):
+        def on_bus(self, address):
+            if address == "/1/busInput":
+                self.listener._handle("/1/labelSubmix", "Phones 1")
+                self.listener._handle("/1/trackname2", "AN 3")
+
     listener = OSCListener(0)
-    # Warm state: some earlier dump already showed the bank
-    listener._handle("/1/labelSubmix", "Phones 1")
-    listener._handle("/1/trackname2", "AN 3")
     b = make_bridge({"m": macro})
     b.channel_map = cmap()
     b.osc_listener = listener
-    b.osc_client = LiveFakeTotalMix(listener, fake_osc)
+    b.osc_client = DumpOnToggle(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.0)
     assert ("/1/mute/1/2", 1.0) in fake_osc.sent

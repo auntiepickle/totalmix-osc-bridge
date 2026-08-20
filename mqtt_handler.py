@@ -243,6 +243,8 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
                         timeout=2.0, fallback_sleep=0,
                         what=f"MQTT workspace slot {ws_slot} switch")
+                    if bridge.state_confirmed:
+                        bridge._layout_epoch = time.time()  # TASK-6 race hardening
                     bridge.update_workspace(name=ws_name or f"slot_{ws_slot}")
                     if bridge.state_confirmed:
                         # Refresh the retained belief — MQTT-driven switches
@@ -268,6 +270,8 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                                 and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
                             timeout=1.0, fallback_sleep=0,
                             what=f"MQTT snapshot #{snap_num} recall")
+                        if bridge.state_confirmed:
+                            bridge._layout_epoch = time.time()  # TASK-6 race hardening
                         logger.info(f"Snapshot #{snap_num} recalled ({osc_addr})")
                         client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
 

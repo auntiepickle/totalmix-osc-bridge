@@ -569,6 +569,12 @@ class TotalMixOSCBridge:
                         lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
                         timeout=2.0, fallback_sleep=1.0,
                         what=f"workspace '{ws_name}' switch")
+                    # TASK-6 race hardening: dumps that raced in BETWEEN the
+                    # command and its confirmation can carry pre-switch
+                    # content with fresh stamps — re-stamp the epoch so only
+                    # post-confirmation banks are trusted for matching
+                    if self.state_confirmed:
+                        self._layout_epoch = time.time()
 
                 if snap_name and snap_num is not None:
                     osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
@@ -589,6 +595,8 @@ class TotalMixOSCBridge:
                             and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
                         timeout=1.0, fallback_sleep=0.3,
                         what=f"snapshot '{snap_name}' recall")
+                    if self.state_confirmed:
+                        self._layout_epoch = time.time()  # TASK-6 race hardening
             else:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
@@ -1080,9 +1088,12 @@ class TotalMixOSCBridge:
         # Freshness watermark: DeviceState accumulates banks across layout
         # changes, and a STALE bank winning name resolution writes another
         # channel's strip index (review finding — mute had no page-2
-        # confirmation to catch it). Entries older than the watermark are
-        # invisible to matching.
-        _fresh_floor = self._layout_epoch
+        # confirmation to catch it). #24 TASK-6 hardware finding: the epoch
+        # alone is NOT enough — a pre-switch dump can land AFTER the switch
+        # command with fresh stamps (the wrong-fader race, step 5). Strips
+        # must postdate THIS resolution's own sends: anything older may
+        # describe the previous snapshot's numbering.
+        _fresh_floor = max(self._layout_epoch, _t_switch)
 
         def _match_in(strips):
             # Exact name first, stereo-pair cover second — a pair strip's
@@ -1128,19 +1139,7 @@ class TotalMixOSCBridge:
                 return None
             return _match_in(state.submix_snapshot(state.current_submix).get(row, {}))
 
-        if channel_scoped:
-            # No submix switch happened, so there may be no fresh dump to
-            # wait on. If nothing FRESH matches, provoke a dump with the
-            # probe's row-toggle trick (guaranteed change) — stale banks
-            # are invisible to the matcher, so this fires whenever the
-            # only candidates are old (review finding).
-            if find_strip(listener.state) is None:
-                other = "/1/busPlayback" if bus_addr == "/1/busInput" else "/1/busInput"
-                logger.info(f"   → no fresh match in listener state — "
-                            f"provoking a dump ({other} → {bus_addr})")
-                self.osc_client.send_message(other, 1.0)
-                self.osc_client.send_message(bus_addr, 1.0)
-        elif not listener.wait_for(
+        if not channel_scoped and not listener.wait_for(
                 lambda st: _submix_label_ok(st.current_submix), timeout):
             # Distinguish SILENCE (no label followed the switch — feedback
             # loss, stored-address fallback stays legitimate) from a
@@ -1158,6 +1157,19 @@ class TotalMixOSCBridge:
                            f"within {timeout}s — using stored address")
             return index, None, "no_feedback"
 
+        # If nothing already matches post-floor, provoke a dump with the
+        # probe's row-toggle trick (guaranteed change). This runs for BOTH
+        # paths now: a /setSubmix to the already-selected submix is a total
+        # no-op (zero messages, hardware fact), so a fresh-strips floor
+        # would otherwise starve — and after a snapshot switch the only
+        # candidates may be stale-content dumps (the TASK-6 race).
+        if find_strip(listener.state) is None:
+            other = "/1/busPlayback" if bus_addr == "/1/busInput" else "/1/busInput"
+            logger.info(f"   → no fresh post-switch match — provoking a dump "
+                        f"({other} → {bus_addr})")
+            self.osc_client.send_message(other, 1.0)
+            self.osc_client.send_message(bus_addr, 1.0)
+
         remaining = max(0.0, deadline - time.time())
         if listener.wait_for(lambda st: find_strip(st) is not None, remaining):
             strip = find_strip(listener.state)
@@ -1166,8 +1178,15 @@ class TotalMixOSCBridge:
                     listener.state.current_submix).get(row, {})
                     .get(strip, {}).get("name", ""))
                 if strip_name.strip().lower() != wanted_ch:
-                    logger.info(f"   → pair-matched '{channel_name}' to strip "
-                                f"'{strip_name}' (stereo link changed)")
+                    if self._names_cover(strip_name, channel_name):
+                        logger.info(f"   → pair-matched '{channel_name}' to strip "
+                                    f"'{strip_name}' (stereo link changed)")
+                    else:
+                        # Distinct tag (TASK-6 reporting gap): the learned-
+                        # alias branch must be tellable from the log alone
+                        logger.info(f"   → ALIAS-resolved '{channel_name}' via "
+                                    f"covering channel '{strip_name}' (same hw "
+                                    f"channel, physical table)")
                 # Write address is always page 1 — the bus selection above
                 # decides which row the write lands on
                 addr = self._param_address(param, strip)

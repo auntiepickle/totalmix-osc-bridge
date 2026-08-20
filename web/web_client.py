@@ -444,6 +444,16 @@ async def get_physical_table():
     return table
 
 
+@app.post("/api/device/probe")
+async def probe_device():
+    """Liveness probe (kept through #24 — TASK 6 deviation fix): a state-
+    changing row toggle that must produce a dump. The only sound aliveness
+    check; silence from an idle mixer is not evidence."""
+    result = bridge.probe_device()
+    bridge.last_probe = result
+    return result
+
+
 @app.get("/api/device/picker")
 async def get_picker():
     """Routing-picker inventory (#6/#24): LIVE names preferred — inputs
