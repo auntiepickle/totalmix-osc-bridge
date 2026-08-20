@@ -1170,29 +1170,48 @@ class TotalMixOSCBridge:
             self.osc_client.send_message(other, 1.0)
             self.osc_client.send_message(bus_addr, 1.0)
 
-        remaining = max(0.0, deadline - time.time())
-        if listener.wait_for(lambda st: find_strip(st) is not None, remaining):
+        # TASK-7 hardware finding: a candidate match in a bank that is STILL
+        # STREAMING can be the outgoing snapshot's content — the first fire
+        # after a switch exact-matched 'Mic 10' at its OLD strip while the
+        # true dump was in flight. Never match mid-burst: once a candidate
+        # appears, wait for message-flow quiescence (no new messages for
+        # SETTLE_S), then re-match on the SETTLED bank. Fire-2 on hardware
+        # proved settled banks match correctly; this makes every fire a
+        # fire-2. Costs ~SETTLE_S per page-1 resolution.
+        SETTLE_S = 0.15
+        strip = None
+        while time.time() < deadline:
+            if not listener.wait_for(lambda st: find_strip(st) is not None,
+                                     max(0.0, deadline - time.time())):
+                break
+            while time.time() < deadline:
+                _before = listener.state.message_count
+                if not listener.wait_for(
+                        lambda st: st.message_count > _before, SETTLE_S):
+                    break  # quiescent — the burst has ended
             strip = find_strip(listener.state)
             if strip is not None:
-                strip_name = str(listener.state.submix_snapshot(
-                    listener.state.current_submix).get(row, {})
-                    .get(strip, {}).get("name", ""))
-                if strip_name.strip().lower() != wanted_ch:
-                    if self._names_cover(strip_name, channel_name):
-                        logger.info(f"   → pair-matched '{channel_name}' to strip "
-                                    f"'{strip_name}' (stereo link changed)")
-                    else:
-                        # Distinct tag (TASK-6 reporting gap): the learned-
-                        # alias branch must be tellable from the log alone
-                        logger.info(f"   → ALIAS-resolved '{channel_name}' via "
-                                    f"covering channel '{strip_name}' (same hw "
-                                    f"channel, physical table)")
-                # Write address is always page 1 — the bus selection above
-                # decides which row the write lands on
-                addr = self._param_address(param, strip)
-                logger.info(f"   → live-resolved '{channel_name}' {param} → strip {strip} "
-                            f"({addr}, row {row})")
-                return index, addr, "resolved"
+                break  # settled AND matching — trustworthy
+        if strip is not None:
+            strip_name = str(listener.state.submix_snapshot(
+                listener.state.current_submix).get(row, {})
+                .get(strip, {}).get("name", ""))
+            if strip_name.strip().lower() != wanted_ch:
+                if self._names_cover(strip_name, channel_name):
+                    logger.info(f"   → pair-matched '{channel_name}' to strip "
+                                f"'{strip_name}' (stereo link changed)")
+                else:
+                    # Distinct tag (TASK-6 reporting gap): the learned-
+                    # alias branch must be tellable from the log alone
+                    logger.info(f"   → ALIAS-resolved '{channel_name}' via "
+                                f"covering channel '{strip_name}' (same hw "
+                                f"channel, physical table)")
+            # Write address is always page 1 — the bus selection above
+            # decides which row the write lands on
+            addr = self._param_address(param, strip)
+            logger.info(f"   → live-resolved '{channel_name}' {param} → strip {strip} "
+                        f"({addr}, row {row})")
+            return index, addr, "resolved"
 
         strips = listener.state.submix_snapshot(listener.state.current_submix).get(row, {})
         # Filter the placeholder strips past the hardware channel count —

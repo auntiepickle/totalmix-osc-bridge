@@ -194,13 +194,14 @@ class WrongLabelTotalMix(LiveFakeTotalMix):
 
 
 class RacyDumpTotalMix(LiveFakeTotalMix):
-    """Models the TASK-6 step-5 hardware failure: a PRE-switch bank dump
-    (old snapshot's strip numbering) lands with fresh timestamps just
-    before resolution; the TRUE bank arrives only when a row-toggle
-    provokes a dump. /setSubmix to the already-selected submix is a total
-    no-op (hardware fact) — it dumps nothing."""
+    """Models the TASK-6/7 hardware failures, in the server's exact shape:
+    the OUTGOING snapshot's bank content (with 'Mic 10' EXACTLY at strip 6
+    — the exact-match trap) arrives with post-floor timestamps first; the
+    TRUE bank (AN 7/8 at 6, covering 'Pill Out' at 7) streams in a beat
+    later, mid-settle. /setSubmix to the already-selected submix is a
+    total no-op (hardware fact) — it dumps nothing."""
 
-    STALE_BANK = {1: "AN 1/2", 6: "Pill Out"}           # old numbering
+    STALE_BANK = {1: "AN 1/2", 6: "Mic 10"}                # outgoing content
     TRUE_BANK = {1: "AN 1/2", 6: "AN 7/8", 7: "Pill Out"}  # current
 
     def __init__(self, listener, fake_osc):
@@ -216,21 +217,24 @@ class RacyDumpTotalMix(LiveFakeTotalMix):
             return
         self._row_selected = address
         if address == "/1/busInput":
+            # the outgoing snapshot's content lands FIRST (post-floor
+            # stamps — the TASK-7 fire-1 poison)...
             self.listener._handle("/1/labelSubmix", "Main")
-            for n, name in self.TRUE_BANK.items():
+            for n, name in self.STALE_BANK.items():
                 self.listener._handle(f"/1/trackname{n}", name)
 
-    def inject_stale_dump(self):
-        self.listener._handle("/1/labelSubmix", "Main")
-        for n, name in self.STALE_BANK.items():
-            self.listener._handle(f"/1/trackname{n}", name)
+            # ...and the TRUE dump streams in a beat later, mid-settle
+            def _true_dump():
+                for n, name in self.TRUE_BANK.items():
+                    self.listener._handle(f"/1/trackname{n}", name)
+            threading.Timer(0.05, _true_dump).start()
 
 
-def test_stale_fresh_dump_never_wins_the_match(make_bridge, fake_osc):
-    """TASK-6 hardware failure (wrong-fader write): a pre-switch dump with
-    fresh stamps must NOT be matched — strips must postdate THIS
-    resolution's own sends, and when the no-op switch yields no dump the
-    resolver provokes one and matches the TRUE bank."""
+def test_first_fire_after_switch_matches_settled_bank(make_bridge, fake_osc):
+    """TASK-7 hardware failure (first-fire wrong-fader write): a candidate
+    match in a still-streaming bank must NOT win — the resolver settles
+    (quiescence) and re-matches. Stale content had 'Mic 10' exactly at
+    strip 6; the settled TRUE bank covers it at strip 7 via 'Pill Out'."""
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [{
         "target": {"submix": "Main", "channel": "Mic 10"},
@@ -242,11 +246,9 @@ def test_stale_fresh_dump_never_wins_the_match(make_bridge, fake_osc):
     b.osc_listener = listener
     b.osc_client = RacyDumpTotalMix(listener, fake_osc)
     listener._server = object()
-    # the race: an old-content dump lands fresh, right before the fire
-    b.osc_client.inject_stale_dump()
     b.run_macro("m", 0.5)
-    # OLD numbering had Pill Out at strip 6 — writing 6 moved AN 7/8 on
-    # hardware. The write must land on the TRUE bank's strip 7.
+    # Exact-matching stale strip 6 mid-burst moved AN 7/8 on hardware.
+    # The FIRST fire must land on the settled TRUE bank's strip 7.
     assert ("/1/volume7", 0.5) in fake_osc.sent
     assert ("/1/volume6", 0.5) not in fake_osc.sent
 
