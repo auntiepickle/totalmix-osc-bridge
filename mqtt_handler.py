@@ -161,6 +161,22 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         None,
                     )
                     bridge.update_workspace(name=ws_name or f"slot_{num}")
+                    # The retained snapshot usually arrives BEFORE the
+                    # workspace, so it was absorbed as an unresolved snap_N
+                    # (never matching already_on_target, and minting phantom
+                    # snapshot_layouts keys on every restart). Re-resolve it
+                    # now that the workspace is known.
+                    pending = getattr(bridge, "_retained_snapshot_num", None)
+                    if pending is not None:
+                        bridge._retained_snapshot_num = None
+                        if ws_name:
+                            v = (SNAPSHOT_MAP.get(ws_name, {})
+                                 .get("snapshots", {}).get(str(pending)))
+                            snap_name = (v.get("name") if isinstance(v, dict) else v)
+                            if snap_name:
+                                bridge.update_snapshot(name=snap_name)
+                                logger.info(f"Retained snapshot {pending} re-resolved "
+                                            f"to '{snap_name}' after workspace absorbed")
                 else:
                     ws = getattr(bridge, "current_workspace", None)
                     snap_name = None
@@ -168,6 +184,10 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         v = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(num))
                         # dict-format map entries: {"name": ..., "index": ...}
                         snap_name = (v.get("name") if isinstance(v, dict) else v)
+                    if snap_name is None:
+                        # workspace not absorbed yet — park the number so the
+                        # workspace branch above can resolve it to a real name
+                        bridge._retained_snapshot_num = num
                     bridge.update_snapshot(name=snap_name or f"snap_{num}")
                 bridge.state_confirmed = False  # belief only, device untouched
                 logger.info(f"Retained {msg.topic} = {payload} absorbed as belief "
@@ -188,7 +208,10 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                          if isinstance(data, dict) and data.get("slot") == ws_slot),
                         None,
                     )
-                    if ws_name and ws_name == getattr(bridge, "current_workspace", None):
+                    if (ws_name and ws_name == getattr(bridge, "current_workspace", None)
+                            and getattr(bridge, "state_confirmed", None)):
+                        # skip only from a device-confirmed belief — an absorbed
+                        # retained belief can be stale (device moved while down)
                         logger.debug(f"Workspace slot {ws_slot} already active — skipping OSC")
                         bridge.update_workspace(name=ws_name)
                         return

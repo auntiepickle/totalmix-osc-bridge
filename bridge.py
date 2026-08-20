@@ -215,6 +215,7 @@ class TotalMixOSCBridge:
                     )
                 else:
                     logger.info("✅ Loaded ufx2_channel_map.json")
+                self._purge_placeholder_layout_keys()
                 return
             except FileNotFoundError:
                 continue
@@ -223,6 +224,29 @@ class TotalMixOSCBridge:
                 break
         self.channel_map = {}
         self.channel_map_is_example = False
+
+    def _purge_placeholder_layout_keys(self):
+        """Drop snapshot_layouts keys minted from unresolved placeholder
+        beliefs (ws|snap_N or slot_N|snap) — wrong data that accumulated
+        before startup absorption resolved names; minting is now guarded
+        but persisted phantoms need healing once."""
+        assoc = (self.channel_map or {}).get("snapshot_layouts")
+        if not assoc:
+            return
+        def _is_phantom(k):
+            ws, _, snap = str(k).partition("|")
+            return bool(re.fullmatch(r"slot_\d+", ws)
+                        or re.fullmatch(r"snap_\d+", snap))
+        bad = [k for k in assoc if _is_phantom(k)]
+        for k in bad:
+            logger.warning(f"🧹 dropping phantom snapshot-layout key '{k}' "
+                           f"(minted from an unresolved placeholder name)")
+            del assoc[k]
+        if bad:
+            try:
+                self._persist_channel_map_file(self.channel_map)
+            except Exception as e:
+                logger.warning(f"could not persist phantom-key purge: {e}")
 
     def _get_macro_duration_ms(self, macro: dict, clock_bpm: float = None) -> int:
         """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events).
@@ -470,7 +494,13 @@ class TotalMixOSCBridge:
                         break
 
             # === STATE-AWARE SWITCH ===
+            # state_confirmed gate: an absorbed retained belief can be stale
+            # (device moved while the bridge was down). Now that startup
+            # resolves it to a REAL name it can match the target — skipping
+            # the switch would leave the device on the wrong snapshot. One
+            # redundant recall after a restart is the price of correctness.
             already_on_target = (
+                bool(self.state_confirmed) and
                 self.current_workspace == ws_name and
                 self.current_snapshot == snap_name and
                 ws_name is not None and snap_name is not None
@@ -1306,8 +1336,12 @@ class TotalMixOSCBridge:
         # SELF-HEAL a wrong memory: if the current snapshot remembers a
         # different layout than the device shows, drop the entry loudly —
         # the next switch re-learns instead of repeating the error
-        # (hardware: one wrong association was persisted and then trusted)
-        if self.current_workspace and self.current_snapshot:
+        # (hardware: one wrong association was persisted and then trusted).
+        # ONLY from a device-confirmed belief: an absorbed retained belief
+        # can be stale (device moved while the bridge was down), and healing
+        # against it destroyed a CORRECT entry / would mint a wrong one
+        # (hardware: stale Pill_setup|relax belief vs live Blank layout)
+        if self.state_confirmed and self.current_workspace and self.current_snapshot:
             slot = f"{self.current_workspace}|{self.current_snapshot}"
             assoc = (self.channel_map or {}).get("snapshot_layouts", {})
             live_key = self._layout_key_from_names(live)
@@ -1319,7 +1353,7 @@ class TotalMixOSCBridge:
                     self._persist_channel_map_file(self.channel_map)
                 except Exception as e:
                     logger.warning(f"could not persist memory heal: {e}")
-        if matches:
+        if matches and self.state_confirmed:
             self._remember_snapshot_layout(live)
         # INPUT-side drift is invisible to the output comparison (hardware
         # incident: one channel un-pairing re-keyed the width map — 0/24
@@ -1390,6 +1424,16 @@ class TotalMixOSCBridge:
         (user: a ready macro must fire instantly, never wait on a walk
         or an enumeration)."""
         if not self.current_workspace or not self.current_snapshot:
+            return
+        # Never mint a key from an unresolved placeholder belief
+        # (snap_N / slot_N): it duplicates the real entry under a name
+        # nothing looks up and regenerates every restart (hardware:
+        # Pill_setup|snap_7 shadowing Pill_setup|relax)
+        if (re.fullmatch(r"snap_\d+", str(self.current_snapshot))
+                or re.fullmatch(r"slot_\d+", str(self.current_workspace))):
+            logger.info(f"snapshot-layout memory NOT recorded for "
+                        f"{self.current_workspace}|{self.current_snapshot} — "
+                        f"belief name is an unresolved placeholder")
             return
         key = self._layout_key_from_names(live_outputs)
         slot = f"{self.current_workspace}|{self.current_snapshot}"
