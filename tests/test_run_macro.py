@@ -68,7 +68,11 @@ def test_workspace_snapshot_switch_and_state_awareness(make_bridge, fake_osc):
     assert b.current_workspace == "Pill_setup"
     assert b.current_snapshot == "reset"
 
-    # Second run on the same target must not re-send the switch sequence
+    # Second run on the same target must not re-send the switch sequence.
+    # The skip requires a device-CONFIRMED belief (c308beb) — without
+    # feedback the first switch stays unconfirmed, so arm it explicitly
+    # (feedback-less deployments now re-send the switch every time, by design)
+    b.state_confirmed = True
     fake_osc.clear()
     b.run_macro("vol", 0.6)
     assert "/loadQuickWorkspace" not in fake_osc.addresses()

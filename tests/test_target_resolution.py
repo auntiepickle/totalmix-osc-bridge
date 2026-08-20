@@ -1106,6 +1106,10 @@ def test_snapshot_switching_macro_works_in_the_new_layout(make_bridge, fake_osc,
     b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
     listener._server = object()
     monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    # Model the device confirming the WS/SS switch — layout memory is only
+    # recorded from confirmed state (c308beb), and the test fake does not
+    # emit snapshot-confirmation feedback
+    monkeypatch.setattr(b, "_wait_device", lambda *a, **k: True)
     b.run_macro("m", 0.5)
     # the hot-swap landed BEFORE the step, so the step aimed and fired
     assert ("/setBankStart", 6.0) in fake_osc.sent
@@ -1265,9 +1269,38 @@ def test_freshness_self_heals_wrong_memory(make_bridge, fake_osc, monkeypatch):
         "snapshot_layouts": {"WS|snap": "totally|wrong|key"},
     }
     b.current_workspace, b.current_snapshot = "WS", "snap"
+    # The heal only runs from a device-confirmed belief (c308beb): a stale
+    # retained belief once destroyed a CORRECT entry on hardware
+    b.state_confirmed = True
     monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
     b.check_map_freshness()
     assert b.channel_map["snapshot_layouts"].get("WS|snap") != "totally|wrong|key"
+
+
+def test_freshness_never_heals_or_learns_from_unconfirmed_belief(
+        make_bridge, fake_osc, monkeypatch):
+    """An absorbed retained belief is display-only (c308beb): healing or
+    minting layout memory against it destroyed a correct entry and recorded
+    a wrong one on hardware within 90s. With state_confirmed falsy, the
+    freshness check must leave snapshot_layouts completely untouched."""
+    listener = OSCListener(0)
+    b = make_bridge({"m": {"steps": []}})
+    b.osc_listener = listener
+    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
+    listener._server = object()
+    live_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
+    b.channel_map = {
+        "submixes": {"Main": {"index": 1}, "AN 3/4": {"index": 2},
+                     "AES": {"index": 4}, "RE-150 In": {"index": 6}},
+        "layout_library": {live_key: {}},
+        "snapshot_layouts": {"WS|snap": "totally|wrong|key"},
+    }
+    b.current_workspace, b.current_snapshot = "WS", "snap"
+    b.state_confirmed = False  # belief absorbed from retained MQTT only
+    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
+    b.check_map_freshness()
+    # wrong entry NOT dropped, and no new association minted over it
+    assert b.channel_map["snapshot_layouts"] == {"WS|snap": "totally|wrong|key"}
 
 
 def test_instant_swap_makes_no_hardware_claim(make_bridge, fake_osc, monkeypatch):
