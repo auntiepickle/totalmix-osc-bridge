@@ -178,3 +178,63 @@ def test_retained_macro_trigger_ignored(handler):
     client.on_message(client, None,
                       msg("totalmix/macro/known_macro", "0.5", retain=True))
     assert bridge.run_macro_calls == []          # would fire on every restart
+
+
+def test_confirmed_mqtt_workspace_switch_republishes_retained(handler):
+    """MQTT-driven switches left the retained topics at the last MACRO
+    switch, so every restart restored a belief that old (server finding,
+    2026-08-20). A CONFIRMED switch now refreshes the retained value."""
+    client, bridge, _ = handler
+    client.on_message(client, None, msg("totalmix/workspace", "2"))
+    assert bridge.state_confirmed is True
+    assert ("totalmix/workspace", "2") in client.published
+
+
+def test_confirmed_mqtt_snapshot_switch_republishes_retained(handler):
+    client, bridge, _ = handler
+    client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    assert bridge.state_confirmed is True
+    assert ("totalmix/snapshot", "3") in client.published
+
+
+def test_unconfirmed_switch_does_not_republish(handler, monkeypatch):
+    """No device confirmation → the retained belief must NOT be refreshed
+    (we would be persisting a commanded belief the device may not hold)."""
+    client, bridge, sent_osc = handler
+    monkeypatch.setattr(
+        bridge, "_wait_device",
+        lambda predicate, timeout, fallback_sleep, what="": False)
+    client.on_message(client, None, msg("totalmix/workspace", "2"))
+    client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    assert sent_osc  # switches were still commanded
+    assert ("totalmix/workspace", "2") not in client.published
+    assert ("totalmix/snapshot", "3") not in client.published
+
+
+def test_own_republish_echo_suppressed_exactly_once(handler):
+    """The broker echoes our own retained republish back as a live message —
+    exactly that one delivery is dropped (no OSC re-send), but an identical
+    genuine command afterwards processes normally."""
+    client, bridge, sent_osc = handler
+    client.on_message(client, None, msg("totalmix/workspace", "2"))
+    osc_after_first = list(sent_osc)
+    # the echo of our own republish arrives (live delivery, same payload)
+    client.on_message(client, None, msg("totalmix/workspace", "2"))
+    assert sent_osc == osc_after_first           # echo drove nothing
+    # a genuine identical command later is NOT swallowed (marker consumed);
+    # it takes the already-on-target skip path, which updates state again
+    updates_before = len(bridge.workspace_updates)
+    client.on_message(client, None, msg("totalmix/workspace", "2"))
+    assert len(bridge.workspace_updates) > updates_before
+
+
+def test_ws_and_snap_echo_markers_are_independent(handler):
+    """A snapshot republish must not unmask a pending workspace echo."""
+    client, bridge, sent_osc = handler
+    client.on_message(client, None, msg("totalmix/workspace", "2"))
+    client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    osc_after_commands = list(sent_osc)
+    # echoes arrive late, after both commands — both must be dropped
+    client.on_message(client, None, msg("totalmix/workspace", "2"))
+    client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    assert sent_osc == osc_after_commands

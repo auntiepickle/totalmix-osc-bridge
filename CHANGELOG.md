@@ -27,6 +27,13 @@
 - `routing_label` is derived at read time from the current channel map,
   never persisted (persisted labels rotted when the device renamed outputs).
 
+### Retained MQTT belief stays current
+- A device-CONFIRMED MQTT-driven workspace/snapshot switch now republishes
+  the retained `totalmix/workspace` / `totalmix/snapshot` topics (macro
+  switches always did) — restarts no longer restore a belief as old as the
+  last macro. The bridge's own echo is dropped per-topic per-payload, once;
+  unconfirmed switches never refresh the retained value.
+
 ### Pre-flight validity (#22 seed)
 - Macro cards show an amber warning icon, and the detail/editors a red
   strip, when a macro's stored names (channel, submix, output, workspace,

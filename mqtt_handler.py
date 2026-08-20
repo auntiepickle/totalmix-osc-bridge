@@ -42,6 +42,15 @@ def load_snapshot_map() -> bool:
         return False
 
 
+def _mark_own_republish(bridge, topic, payload):
+    """Remember a retained republish we are about to send so on_message can
+    drop exactly its echo (per topic — a ws republish must not unmask a
+    pending snapshot echo or vice versa)."""
+    marks = getattr(bridge, "_own_retained_republish", None) or {}
+    marks[topic] = (payload, time.time())
+    bridge._own_retained_republish = marks
+
+
 def publish_snapshot_map(client):
     if not SNAPSHOT_MAP:
         return
@@ -132,6 +141,16 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         # would trigger on_message again and overwrite current_workspace/snapshot
         # with stale slot numbers mid-ramp.
         if msg.topic in ("totalmix/workspace", "totalmix/snapshot"):
+            # Our own retained republish (below) echoes back as a live
+            # delivery — drop exactly that one message, not a time window,
+            # so a genuine command arriving right after still processes
+            marks = getattr(bridge, "_own_retained_republish", None) or {}
+            mark = marks.get(msg.topic)
+            if (mark and not msg.retain and mark[0] == payload
+                    and time.time() - mark[1] < 5.0):
+                del marks[msg.topic]
+                logger.debug(f"Suppressed own retained republish echo on {msg.topic}")
+                return
             if getattr(bridge, "_suppress_handler", False):
                 logger.debug(f"Suppressed {msg.topic} (macro in progress)")
                 return
@@ -225,6 +244,14 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         timeout=2.0, fallback_sleep=0,
                         what=f"MQTT workspace slot {ws_slot} switch")
                     bridge.update_workspace(name=ws_name or f"slot_{ws_slot}")
+                    if bridge.state_confirmed:
+                        # Refresh the retained belief — MQTT-driven switches
+                        # left the topic at the last MACRO switch, so every
+                        # restart restored a belief that old (server finding)
+                        _mark_own_republish(bridge, "totalmix/workspace", payload)
+                        client.publish("totalmix/workspace", payload, retain=True)
+                        logger.info(f"Retained totalmix/workspace refreshed = "
+                                    f"{payload} (confirmed MQTT switch)")
                 except ValueError:
                     logger.warning(f"Non-integer workspace payload ignored: {payload!r}")
 
@@ -249,6 +276,11 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         if ws and ws in SNAPSHOT_MAP:
                             snap_name = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(snap_num))
                         bridge.update_snapshot(name=snap_name or f"snap_{snap_num}")
+                        if bridge.state_confirmed:
+                            _mark_own_republish(bridge, "totalmix/snapshot", payload)
+                            client.publish("totalmix/snapshot", payload, retain=True)
+                            logger.info(f"Retained totalmix/snapshot refreshed = "
+                                        f"{payload} (confirmed MQTT switch)")
                 except ValueError:
                     logger.warning(f"Non-integer snapshot payload ignored: {payload!r}")
 
