@@ -497,6 +497,50 @@ def _auto_walk():
 bridge.auto_walk_cb = _auto_walk
 
 
+class SweepBody(BaseModel):
+    rows: list = ["inputs", "outputs"]
+    settle_s: float = 0.3
+    reset: bool = False
+
+
+@app.post("/api/device/sweep")
+async def start_sweep(body: SweepBody = SweepBody()):
+    """Measure the physical hardware-channel table (#24): /setBankStart
+    0..33 + row-mirror nudge + /2/trackname read per offset, both rows.
+    Read-only w.r.t. mixer state; never sends /setSubmix. Replaces the
+    discovery walk as the learning mechanism."""
+    if bridge.osc_client is None:
+        raise HTTPException(status_code=503, detail="OSC client not configured")
+    if bridge.osc_listener is None or not bridge.osc_listener.running:
+        raise HTTPException(status_code=503, detail="OSC listener not running")
+    if bridge.sweep_state.get("status") == "running":
+        raise HTTPException(status_code=409, detail="Sweep already running")
+    if bridge.discovery_state.get("status") == "running":
+        raise HTTPException(status_code=409, detail="Discovery walk running")
+    threading.Thread(
+        target=bridge.run_sweep,
+        kwargs={"rows": tuple(body.rows), "settle_s": body.settle_s,
+                "reset": body.reset},
+        daemon=True,
+    ).start()
+    return {"status": "started", "rows": body.rows,
+            "estimated_s": round(len(body.rows) * 34 * (body.settle_s + 0.2), 1)}
+
+
+@app.get("/api/device/sweep")
+async def get_sweep_status():
+    return bridge.sweep_state
+
+
+@app.get("/api/device/physical_table")
+async def get_physical_table():
+    table = (bridge.channel_map or {}).get("physical_table")
+    if not table:
+        raise HTTPException(status_code=404,
+                            detail="No physical table — run POST /api/device/sweep")
+    return table
+
+
 @app.post("/api/device/discover")
 async def start_discovery(body: DiscoverBody = DiscoverBody()):
     """Walk all output submixes (/setSubmix 1..N) and build a channel-map

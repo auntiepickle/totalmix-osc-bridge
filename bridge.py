@@ -12,6 +12,7 @@ from osc import get_client
 from mqtt_handler import setup_mqtt
 from osc_monitor import osc_monitor
 from operations import OperationRegistry
+import physical_table as pt
 
 # === CENTRAL LOGGING ===
 logging.basicConfig(
@@ -145,6 +146,7 @@ class TotalMixOSCBridge:
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
         self.last_probe = None              # result of the last device liveness probe
         self.discovery_state = {"status": "idle"}  # channel-map discovery job state
+        self.sweep_state = {"status": "idle"}      # physical-table sweep job state (#24)
         # Live-vs-map freshness verdict (None = unknown). A stale map after
         # a snapshot change refused correctly but looked like a dead server
         # to the user (field report) — this drives the UI drift banner.
@@ -216,6 +218,7 @@ class TotalMixOSCBridge:
                 else:
                     logger.info("✅ Loaded ufx2_channel_map.json")
                 self._purge_placeholder_layout_keys()
+                self._migrate_physical_table()
                 return
             except FileNotFoundError:
                 continue
@@ -247,6 +250,32 @@ class TotalMixOSCBridge:
                 self._persist_channel_map_file(self.channel_map)
             except Exception as e:
                 logger.warning(f"could not persist phantom-key purge: {e}")
+
+    def _migrate_physical_table(self):
+        """#24: seed the fixed hardware-channel table from legacy walked data.
+
+        Legacy walked submix indices ARE hw starts (trackname-sweep-proven)
+        except the first output, stored as index 1 while its start is 0.
+        In-memory only — nothing is persisted until the first sweep
+        completes, so the legacy file stays intact for rollback. Inputs are
+        NOT derivable from legacy data (width maps lost channel ordering);
+        that row waits for the sweep."""
+        cm = self.channel_map or {}
+        if cm.get("physical_table") or not cm.get("submixes"):
+            return
+        outputs = pt.build_outputs_from_legacy(cm)
+        if not outputs:
+            return
+        table = pt.empty_table()
+        table["rows"]["outputs"] = outputs
+        table["source"]["outputs"] = "legacy_migration"
+        cm["physical_table"] = table
+        logger.info(f"🗺 physical_table seeded from legacy walk data — "
+                    f"{len(outputs)} output channels (in-memory; run "
+                    f"POST /api/device/sweep to measure and persist)")
+
+    def _physical_table(self):
+        return (self.channel_map or {}).get("physical_table")
 
     def _get_macro_duration_ms(self, macro: dict, clock_bpm: float = None) -> int:
         """Return ramp/LFO duration in ms, or 400 for instant macros (used for WS progress events).
@@ -1571,7 +1600,7 @@ class TotalMixOSCBridge:
         return True
 
     def _confirm_page2_aim(self, channel_name: str, row: str,
-                           timeout: float = 0.8) -> bool:
+                           timeout: float = 0.8, offset=None) -> bool:
         """Confirm the page-2 window shows the INTENDED channel before a
         write (#20: /2/trackname names the aimed channel, and the row-
         mirror no-op reliably triggers a fresh 90-message page-2 dump —
@@ -1586,10 +1615,39 @@ class TotalMixOSCBridge:
         Returns True only on a confirmed match. A mismatch refuses, and
         SILENCE refuses too: the dump primitive is verified reliable, so
         no confirmation means something is genuinely wrong."""
-        listener = self.osc_listener
-        if listener is None or not listener.running:
-            logger.error("   → no listener to confirm the page-2 aim — refusing")
+        shown = self._read_page2_trackname(row, timeout)
+        if shown is None:
+            logger.error(f"   → no page-2 dump followed the row-mirror nudge "
+                         f"within {timeout}s — the confirmation primitive is "
+                         f"verified reliable, so REFUSING the write")
             return False
+        row_key = {"1": "inputs", "2": "playbacks", "3": "outputs"}.get(str(row))
+        if shown == channel_name.strip() or self._names_cover(shown, channel_name):
+            logger.info(f"   → page-2 aim CONFIRMED by /2/trackname ('{shown}')")
+            self._record_table_observation(row_key, offset, shown)
+            return True
+        # Alias-default rule (#24): the targeted name and the shown name are
+        # known aliases of the SAME hardware channel ("Mic 10" targeted while
+        # the device shows "Pill Out" covering 8-9) — measured co-occurrence,
+        # so this cannot cross-match unrelated strips
+        table = self._physical_table()
+        if (table is not None and offset is not None and row_key
+                and pt.covers(table, row_key, offset, channel_name, shown)):
+            logger.info(f"   → page-2 aim CONFIRMED via alias: '{channel_name}' "
+                        f"is covered by '{shown}' at hw {offset}")
+            return True
+        logger.error(f"   → page-2 window shows '{shown}', intended "
+                     f"'{channel_name}' — aim landed WRONG, refusing the write")
+        return False
+
+    def _read_page2_trackname(self, row: str, timeout: float = 0.8):
+        """Read which channel the page-2 window currently shows, by nudging
+        the COMMANDED row's /2/ mirror (a verified-idempotent no-op that
+        triggers a fresh page-2 dump) and reading /2/trackname from it.
+        None = no dump followed (refuse-worthy: the primitive is reliable)."""
+        listener = self.osc_listener
+        if listener is None or not listener.running or self.osc_client is None:
+            return None
         st = listener.state
         entry = st.raw_entry("/2/trackname")
         before = entry["count"] if entry else 0
@@ -1600,19 +1658,132 @@ class TotalMixOSCBridge:
             lambda s: (s.raw_entry("/2/trackname") or {}).get("count", 0) > before,
             timeout)
         if not fresh:
-            logger.error(f"   → no page-2 dump followed the row-mirror nudge "
-                         f"within {timeout}s — the confirmation primitive is "
-                         f"verified reliable, so REFUSING the write")
-            return False
+            return None
         entry = st.raw_entry("/2/trackname") or {}
         args = entry.get("args") or []
-        shown = str(args[0]).strip() if args else ""
-        if shown == channel_name.strip() or self._names_cover(shown, channel_name):
-            logger.info(f"   → page-2 aim CONFIRMED by /2/trackname ('{shown}')")
-            return True
-        logger.error(f"   → page-2 window shows '{shown}', intended "
-                     f"'{channel_name}' — aim landed WRONG, refusing the write")
-        return False
+        return str(args[0]).strip() if args else ""
+
+    def _record_table_observation(self, row_key, offset, shown):
+        """Incremental alias learning: every confirmed aim teaches the table.
+        Persisted immediately (cheap, infrequent) unless running from the
+        example map."""
+        table = self._physical_table()
+        if table is None or offset is None or not row_key or not shown:
+            return
+        if pt.merge_observation(table, row_key, offset, shown):
+            if not self.channel_map_is_example:
+                try:
+                    self._persist_channel_map_file(self.channel_map)
+                except Exception as e:
+                    logger.warning(f"could not persist table observation: {e}")
+
+    SWEEP_BOUNDARY_EXTRA = 4  # probe past the hw end to verify saturation
+
+    def run_sweep(self, rows=("inputs", "outputs"), settle_s: float = 0.3,
+                  reset: bool = False):
+        """Measure the physical table from the device's own mouth (#24):
+        for each hw offset 0..N+3, /setBankStart → row-mirror nudge →
+        read /2/trackname. Read-only w.r.t. mixer state — the only state
+        touched is bank position and row selection, both restored. NEVER
+        sends /setSubmix (the sole fatal operation).
+
+        Offsets past the hardware end must SATURATE at the last channel's
+        name (sweep-proven); a NEW name there means channels_per_row is
+        wrong for this device — abort without persisting."""
+        listener = self.osc_listener
+        if listener is None or not listener.running or self.osc_client is None:
+            self.sweep_state = {"status": "error",
+                                "error": "no OSC client/listener"}
+            return self.sweep_state
+        row_defs = {"inputs": ("/1/busInput", "1"),
+                    "outputs": ("/1/busOutput", "3")}
+        rows = [r for r in rows if r in row_defs]
+        table = self._physical_table()
+        if table is None:
+            table = pt.empty_table()
+            self.channel_map.setdefault("physical_table", table)
+            self.channel_map["physical_table"] = table
+        n = table.get("channels_per_row", pt.CHANNELS_PER_ROW)
+        total = len(rows) * (n + self.SWEEP_BOUNDARY_EXTRA)
+        self.sweep_state = {"status": "running", "progress": 0, "total": total,
+                            "rows": rows}
+        observed_all = {}
+        try:
+            with self._device_lock:
+                try:
+                    for row in rows:
+                        bus_addr, row_num = row_defs[row]
+                        self.osc_client.send_message(bus_addr, 1.0)
+                        observed = {}
+                        for offset in range(0, n + self.SWEEP_BOUNDARY_EXTRA):
+                            self.osc_client.send_message("/setBankStart",
+                                                         float(offset))
+                            if settle_s:
+                                time.sleep(settle_s)
+                            name = self._read_page2_trackname(row_num)
+                            if name is None:
+                                raise RuntimeError(
+                                    f"{row} sweep: no page-2 dump at offset "
+                                    f"{offset} — device unresponsive, aborting")
+                            observed[offset] = name
+                            self.sweep_state["progress"] += 1
+                            self.broadcast_state(macro_event={
+                                "type": "sweep_progress",
+                                "row": row,
+                                "progress": self.sweep_state["progress"],
+                                "total": total})
+                        last_real = observed.get(n - 1)
+                        for b in range(n, n + self.SWEEP_BOUNDARY_EXTRA):
+                            if observed.get(b) and observed[b] != last_real:
+                                raise RuntimeError(
+                                    f"{row} sweep: offset {b} shows "
+                                    f"'{observed[b]}' past the assumed "
+                                    f"hardware end ({n}) — channels_per_row "
+                                    f"is wrong for this device, aborting "
+                                    f"without persisting")
+                        observed_all[row] = observed
+                finally:
+                    self.osc_client.send_message("/setBankStart", 0.0)
+                    self.osc_client.send_message("/1/busInput", 1.0)
+            row_map = {"inputs": "inputs", "outputs": "outputs"}
+            for row, observed in observed_all.items():
+                key = row_map[row]
+                if reset:
+                    table.setdefault("rows", {})[key] = {}
+                for offset in range(0, n):
+                    name = observed.get(offset)
+                    if name:
+                        pt.merge_observation(table, key, offset, name)
+                table.setdefault("last_sweep", {})[key] = time.time()
+                table.setdefault("source", {})[key] = "sweep"
+            # Legacy structures are superseded once BOTH rows are measured —
+            # prune them from the persisted file (backup is the .tmp+replace
+            # atomic write plus the config backups on the web side)
+            pruned = []
+            if all(table.get("source", {}).get(r) == "sweep"
+                   for r in ("inputs", "outputs")):
+                for legacy in ("width_maps", "channel_widths",
+                               "layout_library", "snapshot_layouts"):
+                    if legacy in (self.channel_map or {}):
+                        del self.channel_map[legacy]
+                        pruned.append(legacy)
+            # A sweep measures the REAL device — always persist. This is how
+            # a fresh install bootstraps its channel map (no walk needed).
+            self._persist_channel_map_file(self.channel_map)
+            self.channel_map_is_example = False
+            self.sweep_state = {"status": "done", "rows": rows,
+                                "pruned_legacy": pruned,
+                                "table": pt.summarize(table)}
+            logger.info(f"🗺 sweep complete — rows {rows}, legacy pruned: "
+                        f"{pruned or 'none'}")
+            self.broadcast_state(macro_event={"type": "sweep_complete",
+                                              "rows": rows})
+        except Exception as e:
+            logger.error(f"sweep failed: {e}")
+            self.sweep_state = {"status": "error", "error": str(e)}
+            self.broadcast_state(macro_event={"type": "sweep_error",
+                                              "error": str(e)})
+        return self.sweep_state
 
     def probe_device(self, timeout: float = 2.5):
         """Liveness probe: send a state-CHANGING command and confirm a
