@@ -15,6 +15,7 @@ import logging
 import asyncio
 
 from bridge import bridge, ws_clients, MAPPINGS, SNAPSHOT_MAP
+import physical_table as pt
 
 logger = logging.getLogger(__name__)
 
@@ -180,10 +181,11 @@ async def get_status():
         # state_confirmed says whether the device confirmed the last switch
         "state_confirmed": getattr(bridge, "state_confirmed", None),
         # Live-vs-map drift (output side): False drives the UI banner
-        "map_matches_device": getattr(bridge, "map_matches_device", None),
-        "live_submix_count": getattr(bridge, "live_submix_count", None),
-        "discovery_status": bridge.discovery_state.get("status"),
-        "input_widths_coverage": getattr(bridge, "input_widths_coverage", None),
+        # #24: no drift concept — per-write confirmations carry correctness.
+        # The physical table summary + sweep status are the honest surface.
+        "physical_table": pt.summarize(
+            (bridge.channel_map or {}).get("physical_table") or {}),
+        "sweep_status": bridge.sweep_state.get("status"),
         "device_probe": getattr(bridge, "last_probe", None),
         "macros": len(bridge.mappings.get("macros", {})),
         "channel_map_submixes": len(channel_map.get("submixes", {})),
@@ -399,103 +401,6 @@ async def get_device_state():
     return bridge.osc_listener.state.to_dict()
 
 
-class DiscoverBody(BaseModel):
-    # Stereo-paired outputs take two indices each, so real submixes can sit
-    # well past 16 (seen live: ADAT outputs above index 16 on a UFX II)
-    submix_count: int = 32
-    settle_s: float = 1.0
-    include_playback: bool = True
-
-
-def _launch_walk(submix_count=32, settle_s=1.0, include_playback=True,
-                 auto_apply=False):
-    """Start the discovery walk thread (shared by the endpoint and the
-    auto-walk path). Caller must have verified no walk is running."""
-    bridge.discovery_state = {"status": "running", "progress": 0,
-                              "total": submix_count}
-
-    def _progress(i, total, label):
-        bridge.discovery_state.update({"progress": i, "current_label": label})
-        bridge.broadcast_state(macro_event={
-            "type": "discovery_progress", "progress": i, "total": total,
-            "label": label,
-        })
-
-    def _run():
-        from discovery import discover_channel_map
-        try:
-            # Device lock: a walk's /setSubmix stream must not interleave
-            # with a concurrent macro's aim/writes (review finding [1] —
-            # the walk was the one sender left outside the lock)
-            with bridge._device_lock:
-                channel_map, walk_log = discover_channel_map(
-                    bridge.osc_client, bridge.osc_listener,
-                    submix_count=submix_count, settle_s=settle_s,
-                    progress_cb=_progress, include_playback=include_playback,
-                )
-            draft_path = os.path.join(os.path.dirname(__file__),
-                                      "../discovered_channel_map.json")
-            with open(draft_path, "w") as f:
-                json.dump(channel_map, f, indent=2)
-            bridge.discovery_state = {
-                "status": "done",
-                "channel_map": channel_map,
-                "walk_log": walk_log,
-                "submixes": len(channel_map["submixes"]),
-            }
-            logger.info(f"✅ Discovery draft saved → discovered_channel_map.json "
-                        f"({len(channel_map['submixes'])} submixes)")
-            bridge.broadcast_state(macro_event={
-                "type": "discovery_complete",
-                "submixes": len(channel_map["submixes"]),
-            })
-            if auto_apply:
-                try:
-                    res = _apply_discovery_result(force=False)
-                    logger.info(f"🤖 auto-walk applied — "
-                                f"{res.get('submixes')} submixes; layout "
-                                f"learned, no click needed")
-                except HTTPException as e:
-                    logger.error(f"auto-walk apply refused: {e.detail} — "
-                                 f"the drift banner stays up with the "
-                                 f"manual button")
-        except Exception as e:
-            logger.error(f"Discovery failed: {e}", exc_info=True)
-            bridge.discovery_state = {"status": "error", "error": str(e)}
-            bridge.broadcast_state(macro_event={
-                "type": "discovery_error", "error": str(e),
-            })
-
-    threading.Thread(target=_run, daemon=True).start()
-
-
-# Auto-walk unknown layouts (default ON): the drift banner demanded a
-# click per never-walked layout; the user wants zero clicks. Guarded by a
-# cooldown so a failing layout cannot walk-loop.
-AUTO_WALK = os.getenv("AUTO_WALK_NEW_LAYOUTS", "true").strip().lower() == "true"
-_auto_walk_state = {"t": 0.0}
-
-
-def _auto_walk():
-    if not AUTO_WALK:
-        return
-    import time as _time
-    now = _time.time()
-    if now - _auto_walk_state["t"] < 120:
-        return
-    if bridge.discovery_state.get("status") == "running":
-        return
-    if bridge.osc_client is None or bridge.osc_listener is None             or not bridge.osc_listener.running:
-        return
-    _auto_walk_state["t"] = now
-    logger.info("🤖 Unknown layout — auto-walking it now "
-                "(AUTO_WALK_NEW_LAYOUTS=true; set false to get the manual "
-                "banner button instead)")
-    _launch_walk(auto_apply=True)
-
-
-bridge.auto_walk_cb = _auto_walk
-
 
 class SweepBody(BaseModel):
     rows: list = ["inputs", "outputs"]
@@ -515,8 +420,6 @@ async def start_sweep(body: SweepBody = SweepBody()):
         raise HTTPException(status_code=503, detail="OSC listener not running")
     if bridge.sweep_state.get("status") == "running":
         raise HTTPException(status_code=409, detail="Sweep already running")
-    if bridge.discovery_state.get("status") == "running":
-        raise HTTPException(status_code=409, detail="Discovery walk running")
     threading.Thread(
         target=bridge.run_sweep,
         kwargs={"rows": tuple(body.rows), "settle_s": body.settle_s,
@@ -541,235 +444,6 @@ async def get_physical_table():
     return table
 
 
-@app.post("/api/device/discover")
-async def start_discovery(body: DiscoverBody = DiscoverBody()):
-    """Walk all output submixes (/setSubmix 1..N) and build a channel-map
-    draft from the feedback. Runs in a background thread — poll
-    GET /api/device/discovery or watch discovery_* WebSocket events."""
-    if bridge.osc_client is None:
-        raise HTTPException(status_code=503, detail="OSC client not configured")
-    if bridge.osc_listener is None or not bridge.osc_listener.running:
-        raise HTTPException(status_code=503, detail="OSC listener not running")
-    if bridge.discovery_state.get("status") == "running":
-        raise HTTPException(status_code=409, detail="Discovery already running")
-
-    _launch_walk(body.submix_count, body.settle_s, body.include_playback)
-    # Playback capture adds two extra settles per REAL submix; the real count
-    # is unknown up front, so estimate the worst case (every index real)
-    per_index = body.settle_s * (3 if body.include_playback else 1)
-    return {"status": "started", "submix_count": body.submix_count,
-            "estimated_s": body.submix_count * per_index}
-
-
-class WidthsBody(BaseModel):
-    widths: dict
-    layout: Optional[list] = None
-
-
-@app.post("/api/device/widths")
-async def set_widths(body: WidthsBody):
-    """Store a verified width map (strip name -> 1|2) for one layout.
-
-    Widths are layout-scoped (#16): the same strip name can have different
-    widths in different snapshots, so entries are keyed by the layout's
-    row-1 name set — by default the LIVE one, or an explicit `layout` list
-    of strip names. EQ aiming consults the map matching the live layout at
-    fire time, so hand-entered or fingerprint-derived widths stop rotting
-    when snapshots rotate."""
-    bad = {k: v for k, v in body.widths.items()
-           if isinstance(v, bool) or v not in (1, 2)}
-    if bad:
-        raise HTTPException(status_code=422,
-                            detail=f"widths must be 1 or 2: {bad}")
-    if body.layout:
-        names = [str(n).strip() for n in body.layout if str(n).strip()]
-    else:
-        live = _live_row1_names()
-        if not live:
-            raise HTTPException(
-                status_code=409,
-                detail="listener has no live layout to key the widths to — "
-                       "run the connection check (or wiggle a fader) so the "
-                       "bank is known, or pass an explicit layout: [names]")
-        names = sorted(live)
-    key = bridge._layout_key_from_names(names)
-    uncovered = sorted(n for n in names if n not in body.widths)
-    # Never inherit the EXAMPLE map: persisting onto it would write the
-    # example's submixes/indices out as the user's real config, and stale
-    # example indices feed the /setSubmix path (review finding)
-    cm = ({"submixes": {}} if getattr(bridge, "channel_map_is_example", False)
-          else bridge.channel_map) or {"submixes": {}}
-    cm.setdefault("width_maps", {})[key] = dict(body.widths)
-    _persist_channel_map(cm)
-    total = sum(body.widths.get(n, 0) for n in names)
-    logger.info(f"✅ width map stored for a {len(names)}-strip layout "
-                f"({total} hw channels covered, {len(uncovered)} uncovered)")
-    return {"status": "success", "layout_strips": len(names),
-            "hw_channels_covered": total, "uncovered": uncovered}
-
-
-@app.post("/api/device/probe")
-async def probe_device():
-    """Liveness probe: sends a state-changing command and confirms feedback.
-    Briefly flips the selected submix (restored after) — user-triggered only,
-    never on a timer. Silence alone is NOT evidence of a freeze."""
-    result = bridge.probe_device()
-    if result.get("alive") is None:
-        raise HTTPException(status_code=503, detail=result.get("reason", "probe unavailable"))
-    return result
-
-
-@app.get("/api/device/discovery")
-async def get_discovery():
-    """Status and result of the last discovery run."""
-    return bridge.discovery_state
-
-
-def _row1_names(channel_map):
-    """The input-strip name set — the layout identity used to decide whether
-    channel_widths may carry across a discovery apply."""
-    return {str(s.get("name", "")).strip()
-            for sub in (channel_map or {}).get("submixes", {}).values()
-            for s in sub.get("sends", {}).values() if s.get("row", 1) == 1}
-
-
-def _persist_channel_map(cm):
-    """Write the channel map to disk (backup first) and hot-reload it."""
-    backup_json_files("ufx2_channel_map.json")
-    target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
-    with open(target, "w") as f:
-        json.dump(cm, f, indent=2)
-    bridge._load_channel_map()
-
-
-def _carry_widths(old_map, new_map):
-    """Preserve channel_widths across a discovery apply ONLY when the strip
-    layout is unchanged. Widths are LAYOUT-scoped (hardware-proven: RE-101 is
-    width 2 in one snapshot and width 1 in another), so carrying them across
-    a layout change could mis-aim page-2 writes — refusal is safe, a stale
-    width is not. Returns True if carried."""
-    # Layout-KEYED width maps are immune to layout change by construction
-    # (each entry only ever matches its own layout) — carry them verbatim.
-    wm = (old_map or {}).get("width_maps")
-    if wm:
-        new_map["width_maps"] = wm
-    widths = (old_map or {}).get("channel_widths")
-    if not widths:
-        return False
-    if _row1_names(old_map) == _row1_names(new_map):
-        new_map["channel_widths"] = widths
-        return True
-    return False
-
-
-def _live_row1_names():
-    """Strip names on the live device's input row — from the CURRENT bank
-    only. A union across every bank ever seen mixed layouts together and
-    mis-keyed width maps (review finding: widths stored under a phantom
-    union layout never match at fire time, silently disarming EQ). None
-    when the listener is absent or blind."""
-    lst = bridge.osc_listener
-    if lst is None or not lst.running:
-        return None
-    st = lst.state
-    if not st.current_submix:
-        return None
-    floor = getattr(bridge, "_layout_epoch", 0.0)
-    names = set()
-    for _ch, d in st.submix_snapshot(st.current_submix).get("1", {}).items():
-        if d.get("_seen", 0) < floor:
-            continue
-        n = str(d.get("name", "")).strip()
-        if n and n.lower() not in ("n.a.", "n/a"):
-            names.add(n)
-    return names or None
-
-
-class ApplyBody(BaseModel):
-    force: bool = False
-
-
-@app.post("/api/device/discovery/apply")
-async def apply_discovery(body: ApplyBody = ApplyBody()):
-    """Promote the last discovery result to the live ufx2_channel_map.json."""
-    return _apply_discovery_result(body.force)
-
-
-def _apply_discovery_result(force: bool = False):
-    state = bridge.discovery_state
-    if state.get("status") != "done" or "channel_map" not in state:
-        raise HTTPException(status_code=409, detail="No completed discovery to apply")
-    new_map = state["channel_map"]
-
-    # Sanity guard: a mid-walk device freeze produces a walk that "completes"
-    # with one submix (the one it was parked on) — applying that clobbers a
-    # good map (happened live). Refuse a dramatic collapse unless forced.
-    old_subs = len((bridge.channel_map or {}).get("submixes", {}))
-    new_subs = len(new_map["submixes"])
-    if not force and old_subs >= 4 and new_subs * 2 < old_subs:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Walk found only {new_subs} submixes vs {old_subs} in the "
-                   f"live map — the device may have stopped responding "
-                   f"mid-walk. Probe it (POST /api/device/probe), re-run "
-                   f"discovery, or pass {{\"force\": true}} to apply anyway.")
-
-    # LAYOUT LIBRARY: every applied walk is remembered under its output-
-    # layout key so later snapshot swaps hot-swap instead of re-walking.
-    # Carried verbatim (layout-keyed = immune to layout change), then the
-    # new walk registers itself.
-    library = dict((bridge.channel_map or {}).get("layout_library", {}))
-    new_key = bridge._layout_key_from_names(new_map.get("submixes", {}).keys())
-    library[new_key] = new_map.get("submixes", {})
-    new_map["layout_library"] = library
-    # snapshot-layout memory is (workspace|snapshot) -> layout key: it
-    # survives a re-walk unchanged, and dropping it silently re-imposed
-    # the one-time learn on every other snapshot (hardware: 4 entries ->
-    # 1 on every apply, including automatic ones). Stale keys are
-    # harmless — the instant swap falls through on a missing library
-    # entry.
-    new_map["snapshot_layouts"] = dict(
-        (bridge.channel_map or {}).get("snapshot_layouts", {}))
-
-    # Discovery builds the map from scratch — without this, every apply
-    # silently disarmed EQ macros by dropping the verified widths
-    carried = _carry_widths(bridge.channel_map, new_map)
-    if carried:
-        logger.info("channel_widths preserved across discovery apply (layout unchanged)")
-    elif (bridge.channel_map or {}).get("channel_widths"):
-        logger.warning("⚠️ channel_widths DROPPED: the strip layout changed across "
-                       "this discovery — EQ macros will refuse until widths are "
-                       "re-derived or re-entered for the new layout")
-
-    # 'carried' only says old-map names == new-map names. Widths are CONSUMED
-    # against LIVE strip names, a different namespace — report coverage of
-    # the live layout so carried:true can't masquerade as EQ-is-armed
-    # (observed live: carried widths keyed on a 17-strip layout with a
-    # 23-strip device — 16 live strips uncovered, EQ fully disarmed).
-    live = _live_row1_names()
-    widths = {}
-    if live is not None:
-        key = bridge._layout_key_from_names(live)
-        widths = (new_map.get("width_maps", {}).get(key)
-                  or new_map.get("channel_widths", {}))
-    coverage = None
-    if live is not None:
-        uncovered = sorted(n for n in live if n not in widths)
-        coverage = {"live_strips": len(live),
-                    "covered": len(live) - len(uncovered),
-                    "uncovered": uncovered}
-        if uncovered and widths:
-            logger.warning(f"⚠️ channel_widths cover {coverage['covered']}/"
-                           f"{len(live)} live strips — EQ will refuse on: "
-                           f"{uncovered}")
-
-    _persist_channel_map(new_map)
-    bridge.channel_map_is_example = False
-    bridge.check_map_freshness()
-    logger.info(f"✅ Discovered channel map applied ({new_subs} submixes)")
-    return {"status": "success", "submixes": new_subs,
-            "channel_widths_carried": carried,
-            "widths_live_coverage": coverage}
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

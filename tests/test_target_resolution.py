@@ -30,6 +30,30 @@ TARGET_MACRO = {
     }],
 }
 
+# #24: the fixed per-device table — measured hw starts. RE-150 In is the
+# renamed ADAT 1 at output hw 14 (covers 15 when paired), sweep-proven.
+PHYSICAL_TABLE = {
+    "schema_version": 1, "channels_per_row": 30,
+    "rows": {
+        "outputs": {"14": ["RE-150 In"], "15": ["ADAT 2", "RE-150 In"]},
+        "inputs": {},
+    },
+    "last_sweep": {}, "source": {"outputs": "sweep"},
+}
+
+
+def cmap(extra_inputs=None, extra_outputs=None):
+    """Deep-copied channel map with the physical table — tests must never
+    share the mutable alias lists (aim confirmations append to them)."""
+    import copy
+    m = copy.deepcopy(CHANNEL_MAP)
+    m["physical_table"] = copy.deepcopy(PHYSICAL_TABLE)
+    if extra_inputs:
+        m["physical_table"]["rows"]["inputs"].update(extra_inputs)
+    if extra_outputs:
+        m["physical_table"]["rows"]["outputs"].update(extra_outputs)
+    return m
+
 
 class LiveFakeTotalMix:
     """Answers /setSubmix by pushing feedback where AN 1/2 are now LINKED —
@@ -83,7 +107,7 @@ class LiveFakeTotalMix:
 
 def make_target_bridge(make_bridge, fake_osc, listener=None):
     b = make_bridge({"m": TARGET_MACRO})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     if listener is not None:
         b.osc_client = LiveFakeTotalMix(listener, fake_osc)
@@ -107,26 +131,36 @@ def test_live_resolution_overrides_stale_address(make_bridge, fake_osc):
     assert "/1/volume3" not in fake_osc.addresses()
 
 
-def test_no_listener_refuses_submix_switch(make_bridge, fake_osc):
-    """No listener = no way to verify the submix still exists, and an
-    out-of-range /setSubmix CRASHES TotalMix (hardware root cause) — the
-    old stored-address fallback must NOT switch submixes blind."""
+def test_no_listener_sends_measured_index_and_falls_back(make_bridge, fake_osc):
+    """#24 behavior change: the index comes from the MEASURED table, so it
+    is in-range by construction — a blind bridge may still switch (safe)
+    and use the stored address as the documented no-feedback fallback."""
     b = make_target_bridge(make_bridge, fake_osc, listener=None)
     b.run_macro("m", 0.8)
-    assert "/setSubmix" not in fake_osc.addresses()
-    assert "/1/volume3" not in fake_osc.addresses()
+    assert ("/setSubmix", 14.0) in fake_osc.sent
+    assert ("/1/volume3", 0.8) in fake_osc.sent
 
 
-def test_silent_device_refuses_submix_switch(make_bridge, fake_osc):
-    """Listener up but the device answers nothing: the output row cannot
-    be enumerated, so the switch is refused (was: stored-address
-    fallback — no longer permitted, a blind index might be fatal)."""
+def test_silent_device_falls_back_to_stored_address(make_bridge, fake_osc):
+    """Listener up but the device answers nothing: the measured index is
+    safe to send (#24); with no label confirmation the step takes the
+    stored-address fallback (mis-aim risk only, never crash risk)."""
     listener = OSCListener(0)          # never receives anything
     listener._server = object()
     b = make_bridge({"m": TARGET_MACRO})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.run_macro("m", 0.8)              # osc_client is the plain fake — no feedback
+    assert ("/setSubmix", 14.0) in fake_osc.sent
+    assert ("/1/volume3", 0.8) in fake_osc.sent
+
+
+def test_unmeasured_submix_never_switches(make_bridge, fake_osc):
+    """No physical table entry = no send: membership in the measured table
+    IS the crash guard now."""
+    b = make_target_bridge(make_bridge, fake_osc, listener=None)
+    del b.channel_map["physical_table"]
+    b.run_macro("m", 0.8)
     assert "/setSubmix" not in fake_osc.addresses()
     assert "/1/volume3" not in fake_osc.addresses()
 
@@ -151,20 +185,25 @@ def test_no_submix_feedback_falls_back_to_stored_address(make_bridge, fake_osc):
     assert ("/1/volume3", 0.8) in fake_osc.sent  # stale but best available
 
 
-class RenamedOutputsTotalMix(LiveFakeTotalMix):
-    """The live output row no longer matches the captured map."""
+class WrongLabelTotalMix(LiveFakeTotalMix):
+    """The device answers the switch with a DIFFERENT submix label — the
+    channel at hw 14 was renamed to something no alias knows."""
 
-    OUTPUT_NAMES = ["Something Else Out"]
+    def dump_bank(self, index):
+        self.listener._handle("/1/labelSubmix", "Something Else Out")
 
 
-def test_output_layout_drift_refuses_submix_switch(make_bridge, fake_osc):
-    """Map says index 14 = 'RE-150 In' but the live output row disagrees —
-    the index may be out of range, and out-of-range crashes TotalMix."""
+def test_confirmed_different_label_refuses_write(make_bridge, fake_osc):
+    """#24: the measured index is safe to SEND, but when the device
+    CONFIRMS a label no alias covers, writing anywhere would land on the
+    wrong bus — refuse (distinct from silence, which falls back)."""
     listener = OSCListener(0)
     b = make_target_bridge(make_bridge, fake_osc, listener)
-    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
+    b.osc_client = WrongLabelTotalMix(listener, fake_osc)
     b.run_macro("m", 0.8)
-    assert "/setSubmix" not in fake_osc.addresses()
+    assert ("/setSubmix", 14.0) in fake_osc.sent   # in-range, safe
+    assert "/1/volume3" not in fake_osc.addresses()  # write refused
+    assert "/1/volume2" not in fake_osc.addresses()
     skipped = [e["event"] for e in b.events
                if e["event"] and e["event"]["type"] == "macro_skipped"]
     assert skipped and skipped[0]["reason"] == "target_not_in_bank"
@@ -175,7 +214,7 @@ def test_unknown_submix_skips_step_without_crash(make_bridge, fake_osc):
         "target": {"submix": "Nonexistent", "channel": "AN 3"},
         "value": "{{param}}",
     }]}})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.run_macro("m", 0.8)
     assert fake_osc.sent == []  # nothing sent, no exception
 
@@ -196,7 +235,7 @@ def test_target_with_operation_ramps_resolved_address(make_bridge, fake_osc):
         }],
     }
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
@@ -227,7 +266,7 @@ def test_late_burst_high_strip_still_resolves(make_bridge, fake_osc):
     }]}
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = SlowBurstTotalMix(listener, fake_osc)
     listener._server = object()
@@ -257,7 +296,7 @@ def test_pair_match_when_snapshot_relinked_strips(make_bridge, fake_osc):
     }]}
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = RepairedBankTotalMix(listener, fake_osc)
     listener._server = object()
@@ -276,7 +315,7 @@ def test_refuses_stored_address_when_bank_seen_but_channel_absent(make_bridge, f
     }]}
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = RepairedBankTotalMix(listener, fake_osc)
     listener._server = object()
@@ -306,7 +345,7 @@ def test_playback_row_target_selects_bus_and_restores_input(make_bridge, fake_os
     }]}
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = PlaybackRowTotalMix(listener, fake_osc)
     listener._server = object()
@@ -403,7 +442,7 @@ def test_mute_target_resolves_without_touching_submix(make_bridge, fake_osc):
     listener._handle("/1/labelSubmix", "Phones 1")
     listener._handle("/1/trackname2", "AN 3")
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
@@ -440,7 +479,7 @@ def test_mute_target_cold_listener_self_primes(make_bridge, fake_osc):
     }]}
     listener = OSCListener(0)  # completely cold
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = ToggleDumpTotalMix(listener, fake_osc)
     listener._server = object()
@@ -456,7 +495,7 @@ def test_pan_target_resolves_to_pan_address(make_bridge, fake_osc):
     }]}
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
@@ -513,13 +552,20 @@ class MixedBankTotalMix(LiveFakeTotalMix):
             self.listener._handle("/1/trackname3", "ADAT 5/6")  # pair
 
 
-def _eq_bridge(make_bridge, fake_osc, macro, widths=None):
+# #24: the measured input table for the MixedBank fake — mirrors its
+# PAGE2_BY_OFFSET exactly (the table IS what a sweep of that device yields)
+MIXED_BANK_INPUTS = {
+    "0": ["AN 1/2"], "1": ["AN 1/2"],
+    "2": ["Mavis"], "3": ["Mavis"],
+    "4": ["ADAT 5/6"], "5": ["ADAT 5/6"],
+}
+
+
+def _eq_bridge(make_bridge, fake_osc, macro, inputs=MIXED_BANK_INPUTS):
     from osc_listener import OSCListener
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
-    b.channel_map = dict(CHANNEL_MAP)
-    if widths is not None:
-        b.channel_map["channel_widths"] = widths
+    b.channel_map = cmap(extra_inputs=inputs)
     b.osc_listener = listener
     b.osc_client = MixedBankTotalMix(listener, fake_osc)
     listener._server = object()
@@ -529,20 +575,13 @@ def _eq_bridge(make_bridge, fake_osc, macro, widths=None):
     return b
 
 
-# Hardware truth from the #5 write-test failure: labels DO NOT encode width
-# ('RE-101' is a slash-free stereo pair). Widths must come from the verified
-# channel_widths map — here the fake bank's 'Mavis' (labelled mono-style) is
-# declared width 2, like the real RE-101 incident.
-VERIFIED_WIDTHS = {"AN 1/2": 2, "Mavis": 2, "ADAT 5/6": 2}
-
-
-def test_eq_target_aims_page2_with_verified_widths_and_restores(make_bridge, fake_osc):
-    """'Mavis' sits after the 'AN 1/2' pair (width 2 by the VERIFIED map,
-    not by label): offset 2. Aim, write /2/..., restore bank 0."""
+def test_eq_target_aims_page2_from_table_and_restores(make_bridge, fake_osc):
+    """'Mavis' starts at hw 2 (measured table — labels never enter it).
+    Aim, write /2/..., restore bank 0."""
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "target": {"channel": "Mavis", "param": "eq_gain_1"},
         "value": "0.8",
-    }]}, widths=VERIFIED_WIDTHS)
+    }]})
     b.run_macro("m", 0.0)
     sent = fake_osc.sent
     assert ("/2/eqGain1", 0.8) in sent
@@ -553,29 +592,30 @@ def test_eq_target_aims_page2_with_verified_widths_and_restores(make_bridge, fak
     assert "/setSubmix" not in fake_osc.addresses()
 
 
-def test_eq_offset_uses_map_not_labels(make_bridge, fake_osc):
-    """'ADAT 5/6' is strip 3 behind AN 1/2 (2) and mono-LOOKING Mavis whose
-    VERIFIED width is 2 — offset 4, where the old label heuristic said 3
-    and wrote to the wrong channel on hardware."""
+def test_eq_offset_from_table_not_labels(make_bridge, fake_osc):
+    """'ADAT 5/6' starts at hw 4 (measured). The old label heuristic said
+    3 and wrote the wrong channel on hardware — labels never enter the
+    table, so the class of bug is structurally gone."""
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "target": {"channel": "ADAT 5/6", "param": "eq_freq_2"},
         "value": "0.4",
-    }]}, widths=VERIFIED_WIDTHS)
+    }]})
     b.run_macro("m", 0.0)
     assert ("/setBankStart", 4.0) in fake_osc.sent
     assert ("/2/eqFreq2", 0.4) in fake_osc.sent
 
 
-def test_eq_refuses_when_any_preceding_width_unverified(make_bridge, fake_osc):
-    """One unknown width poisons the whole offset — refuse, never guess."""
-    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
-        "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
-        "value": "0.8",
-    }]}, widths={"AN 1/2": 2})  # Mavis width unknown
+def test_eq_unknown_name_refuses_only_itself(make_bridge, fake_osc):
+    """#24 kills the cumulative-poisoning property: an unmeasured name
+    refuses ITSELF, while every measured strip keeps aiming."""
+    b = _eq_bridge(make_bridge, fake_osc, {"steps": [
+        {"target": {"channel": "Ghost", "param": "eq_gain_1"}, "value": "0.8"},
+        {"target": {"channel": "Mavis", "param": "eq_gain_1"}, "value": "0.7"},
+    ]})
     b.run_macro("m", 0.0)
-    assert not [a for a in fake_osc.addresses() if a.startswith("/2/")]
-    # No aim happened either — bank never left its pinned 0
-    assert set(v for a, v in fake_osc.sent if a == "/setBankStart") <= {0.0}
+    assert ("/setBankStart", 2.0) in fake_osc.sent   # Mavis still aims
+    assert ("/2/eqGain1", 0.7) in fake_osc.sent
+    assert ("/2/eqGain1", 0.8) not in fake_osc.sent  # Ghost refused
 
 
 def test_eq_refuses_without_listener(make_bridge, fake_osc):
@@ -597,44 +637,16 @@ def test_eq_routing_label(make_bridge, fake_osc):
     assert b.get_routing_label("m") == "Mavis (Eq Gain 1)"
 
 
-def test_eq_widths_are_layout_keyed(make_bridge, fake_osc):
-    """#16: the same strip name can have DIFFERENT widths in different
-    layouts (hardware-proven: RE-101 was 2 in the 17-strip layout, 1 in
-    the 23-strip one). The layout-keyed width_maps entry for the LIVE
-    layout must win over a stale flat channel_widths."""
-    b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
-        "osc": "/2/eqGain1", "value": "0.6",
-        "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
-    }]}, widths={"AN 1/2": 2, "Mavis": 1, "ADAT 5/6": 2})  # stale flat map
-    key = b._layout_key_from_names(["AN 1/2", "Mavis", "ADAT 5/6"])
-    b.channel_map["width_maps"] = {key: {"AN 1/2": 2, "Mavis": 2,
-                                         "ADAT 5/6": 2}}
-    b.run_macro("m", 0.5)
-    # Layout entry says Mavis is a pair: offset 2+2=4 (flat map would say 3)
-    assert ("/setBankStart", 4.0) in fake_osc.sent
-    assert ("/2/eqGain1", 0.6) in fake_osc.sent
-
-
-def test_eq_layout_key_ignores_placeholder_strips(make_bridge, fake_osc):
-    """'n.a.' placeholder strips past the hardware channel count must not
-    change the layout key — a 48-wide bank pads with dozens of them."""
-    from bridge import TotalMixOSCBridge
-    key_clean = TotalMixOSCBridge._layout_key_from_names(["AN 1/2", "Mavis"])
-    key_padded = TotalMixOSCBridge._layout_key_from_names(
-        ["AN 1/2", "Mavis", "n.a.", "N.A.", ""])
-    assert key_clean == key_padded
-
-
 def test_raw_setsubmix_known_map_index_still_sends(make_bridge, fake_osc):
-    """A raw /setSubmix that is exactly a known submix index from the map,
-    with the live output row matching that map, passes — the user's
-    legacy macros keep working."""
+    """A raw /setSubmix that is exactly a MEASURED output channel passes —
+    the user's legacy macros keep working (#24: table membership is the
+    guard)."""
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [
         {"osc": "/setSubmix", "value": "14"},
         {"osc": "/1/volume3", "value": "{{param}}"},
     ]}})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
@@ -643,24 +655,22 @@ def test_raw_setsubmix_known_map_index_still_sends(make_bridge, fake_osc):
     assert ("/1/volume3", 0.8) in fake_osc.sent
 
 
-def test_raw_setsubmix_pair_half_index_refused(make_bridge, fake_osc):
-    """Index 15 = map index 14 + 1 could be the pair's second half — but
-    allowing +1 assumes the submix is stereo, and a MONO last submix
-    would make +1 the fatal index (the 2x-strips bound died the same
-    way on hardware: one mono output put the bound ON the fatal index).
-    Exact match or refuse."""
+def test_raw_setsubmix_measured_pair_half_now_allowed(make_bridge, fake_osc):
+    """#24 behavior change: hw 15 is a MEASURED channel (the pair's second
+    half) — measured-safe, so the send is allowed. The old exact-index
+    refusal existed because widths were assumptions; they are measurements
+    now."""
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [
         {"osc": "/setSubmix", "value": "15"},
         {"osc": "/1/volume3", "value": "{{param}}"},
     ]}})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.8)
-    assert "/setSubmix" not in fake_osc.addresses()
-    assert "/1/volume3" not in fake_osc.addresses()
+    assert ("/setSubmix", 15.0) in fake_osc.sent
 
 
 def test_raw_setsubmix_out_of_range_aborts_macro(make_bridge, fake_osc):
@@ -672,7 +682,7 @@ def test_raw_setsubmix_out_of_range_aborts_macro(make_bridge, fake_osc):
         {"osc": "/setSubmix", "value": "99"},
         {"osc": "/1/volume3", "value": "{{param}}"},
     ]}})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
@@ -685,16 +695,22 @@ def test_raw_setsubmix_out_of_range_aborts_macro(make_bridge, fake_osc):
     assert skipped and skipped[0]["reason"] == "setsubmix_unverifiable"
 
 
-def test_raw_setsubmix_blind_listener_aborts_macro(make_bridge, fake_osc):
-    """No way to enumerate outputs = no way to bound a raw index — refuse."""
+def test_raw_setsubmix_no_table_aborts_macro(make_bridge, fake_osc):
+    """No measured outputs table = no bound on the raw index — refuse and
+    abort (the pre-#24 guard needed live enumeration; the new one needs
+    only the measurement, so even a blind listener sends safely when the
+    table exists — covered by the known-index test above)."""
     b = make_bridge({"m": {"steps": [
         {"osc": "/setSubmix", "value": "14"},
         {"osc": "/1/volume3", "value": "{{param}}"},
     ]}})
-    b.channel_map = CHANNEL_MAP
-    b.run_macro("m", 0.8)  # no listener at all
+    b.channel_map = {}  # no physical table
+    b.run_macro("m", 0.8)
     assert "/setSubmix" not in fake_osc.addresses()
     assert "/1/volume3" not in fake_osc.addresses()
+    skipped = [e["event"] for e in b.events
+               if e["event"] and e["event"]["type"] == "macro_skipped"]
+    assert skipped and skipped[0]["reason"] == "setsubmix_unverifiable"
 
 
 def test_eq_refused_on_playback_row(make_bridge, fake_osc):
@@ -706,7 +722,7 @@ def test_eq_refused_on_playback_row(make_bridge, fake_osc):
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": "AN 1/2", "param": "eq_gain_1", "row": 2},
     }]}})
-    b.channel_map = CHANNEL_MAP
+    b.channel_map = cmap()
     b.osc_listener = listener
     b.osc_client = LiveFakeTotalMix(listener, fake_osc)
     listener._server = object()
@@ -715,15 +731,12 @@ def test_eq_refused_on_playback_row(make_bridge, fake_osc):
     assert "/setBankStart" not in fake_osc.addresses()
 
 
-# All-stereo output layout, hardware-measured shape: walked indices are the
-# first hw channel of each output, with the FIRST output clamped to 1 (Main
-# occupies hw 0-1 with index 1) — index deltas [1, 2, 2, ...]
-OUTPUT_MAP = {"submixes": {
-    "Main":      {"index": 1, "name": "Main",      "sends": {}},
-    "AN 3/4":    {"index": 2, "name": "AN 3/4",    "sends": {}},
-    "AES":       {"index": 4, "name": "AES",       "sends": {}},
-    "RE-150 In": {"index": 6, "name": "RE-150 In", "sends": {}},
-}}
+# Measured output table for the StereoOutputs fake — mirrors its page-2
+# self-identification exactly (what a sweep of that device would yield)
+STEREO_OUT_TABLE = {
+    "0": ["Main"], "1": ["Main"], "2": ["AN 3/4"], "3": ["AN 3/4"],
+    "4": ["AES"], "5": ["AES"], "6": ["RE-150 In"], "7": ["RE-150 In"],
+}
 
 
 class StereoOutputsTotalMix(LiveFakeTotalMix):
@@ -732,23 +745,26 @@ class StereoOutputsTotalMix(LiveFakeTotalMix):
                        4: "AES", 5: "AES", 6: "RE-150 In", 7: "RE-150 In"}
 
 
-def _out_eq_bridge(make_bridge, fake_osc, channel, cmap=None):
+def _out_eq_bridge(make_bridge, fake_osc, channel, outputs=None):
     listener = OSCListener(0)
     b = make_bridge({"m": {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": channel, "param": "eq_gain_1", "row": 3},
     }]}})
-    b.channel_map = cmap or OUTPUT_MAP
+    b.channel_map = {"physical_table": {
+        "schema_version": 1, "channels_per_row": 30,
+        "rows": {"outputs": dict(outputs or STEREO_OUT_TABLE), "inputs": {}},
+        "last_sweep": {}, "source": {"outputs": "sweep"},
+    }}
     b.osc_listener = listener
     b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
     listener._server = object()
     return b
 
 
-def test_eq_output_aims_at_walked_index_offset(make_bridge, fake_osc):
-    """Hardware-measured: RE-150 In (index 14) reads at page-2 offsets
-    14-15 with busOutput selected — the offset IS the walked index for
-    every output but the first. Here index 6 -> offset 6."""
+def test_eq_output_aims_at_table_start(make_bridge, fake_osc):
+    """Output page-2 aiming reads the measured start directly: RE-150 In
+    at hw 6 in this fixture (14 on the real device)."""
     b = _out_eq_bridge(make_bridge, fake_osc, "RE-150 In")
     b.run_macro("m", 0.5)
     assert ("/1/busOutput", 1.0) in fake_osc.sent
@@ -757,26 +773,21 @@ def test_eq_output_aims_at_walked_index_offset(make_bridge, fake_osc):
     assert ("/1/busInput", 1.0) in fake_osc.sent[-3:]  # row restored
 
 
-def test_eq_output_first_output_offset_zero(make_bridge, fake_osc):
-    """Main carries index 1 but occupies hw offsets 0-1 (measured: a write
-    at 0 appeared at 0 AND 1) — the first output aims at 0, not its index."""
+def test_eq_output_first_output_starts_at_zero(make_bridge, fake_osc):
+    """Main is measured at hw 0-1 — resolve_start returns the lower
+    member. (The legacy walk's index-1 clamp hack is dead: the table
+    stores reality.)"""
     b = _out_eq_bridge(make_bridge, fake_osc, "Main")
     b.run_macro("m", 0.5)
     assert ("/setBankStart", 0.0) in fake_osc.sent
     assert ("/2/eqGain1", 0.6) in fake_osc.sent
 
 
-def test_eq_output_mono_layout_aims_at_index(make_bridge, fake_osc):
-    """Hardware-verified on the mono-containing layout: RE-150 In (index
-    14) reads at offset 14 ONLY, with mono ADAT 2 owning 15 — mono and
-    stereo alike, offset = walked index. Here the mono-adjacent stereo
-    output at index 4 aims at 4."""
-    mono_map = {"submixes": {
-        "Main":   {"index": 1, "name": "Main",   "sends": {}},
-        "AN 3/4": {"index": 2, "name": "AN 3/4", "sends": {}},
-        "Solo A": {"index": 4, "name": "Solo A", "sends": {}},
-        "Solo B": {"index": 5, "name": "Solo B", "sends": {}},  # delta 1: mono
-    }}
+def test_eq_output_mono_channel_aims_at_own_start(make_bridge, fake_osc):
+    """Mono outputs occupy one measured offset — Solo B at hw 5 aims at
+    5, with stereo neighbors uninvolved (was: walked-index arithmetic)."""
+    mono_table = {"0": ["Main"], "1": ["Main"], "2": ["AN 3/4"],
+                  "3": ["AN 3/4"], "4": ["Solo A"], "5": ["Solo B"]}
 
     class MonoOutputsTotalMix(LiveFakeTotalMix):
         OUTPUT_NAMES = ["Main", "AN 3/4", "Solo A", "Solo B"]
@@ -788,67 +799,28 @@ def test_eq_output_mono_layout_aims_at_index(make_bridge, fake_osc):
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": "Solo B", "param": "eq_gain_1", "row": 3},
     }]}})
-    b.channel_map = mono_map
+    b.channel_map = {"physical_table": {
+        "schema_version": 1, "channels_per_row": 30,
+        "rows": {"outputs": mono_table, "inputs": {}},
+        "last_sweep": {}, "source": {"outputs": "sweep"},
+    }}
     b.osc_listener = listener
     b.osc_client = MonoOutputsTotalMix(listener, fake_osc)
     listener._server = object()
     b.run_macro("m", 0.5)
     assert ("/1/busOutput", 1.0) in fake_osc.sent
-    assert ("/setBankStart", 5.0) in fake_osc.sent  # mono output, index 5
+    assert ("/setBankStart", 5.0) in fake_osc.sent
     assert ("/2/eqGain1", 0.6) in fake_osc.sent
-
-
-def test_eq_output_refuses_malformed_index_spacing(make_bridge, fake_osc):
-    """A delta above 2 cannot be a real output width — the map is
-    malformed or from a different device state. Refuse."""
-    weird_map = {"submixes": {
-        "Main":   {"index": 1, "name": "Main",   "sends": {}},
-        "AN 3/4": {"index": 2, "name": "AN 3/4", "sends": {}},
-        "Ghost":  {"index": 7, "name": "Ghost",  "sends": {}},  # delta 5
-    }}
-
-    class WeirdOutputsTotalMix(LiveFakeTotalMix):
-        OUTPUT_NAMES = ["Main", "AN 3/4", "Ghost"]
-
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": [{
-        "osc": "/2/eqGain1", "value": "0.6",
-        "target": {"channel": "Ghost", "param": "eq_gain_1", "row": 3},
-    }]}})
-    b.channel_map = weird_map
-    b.osc_listener = listener
-    b.osc_client = WeirdOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    b.run_macro("m", 0.5)
-    assert "/2/eqGain1" not in fake_osc.addresses()
-    assert "/setBankStart" not in fake_osc.addresses()
-
-
-def test_eq_output_refuses_on_layout_drift(make_bridge, fake_osc):
-    """Live output row no longer matches the map the indices came from —
-    a stale offset writes a different channel's EQ silently. Refuse."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": [{
-        "osc": "/2/eqGain1", "value": "0.6",
-        "target": {"channel": "RE-150 In", "param": "eq_gain_1", "row": 3},
-    }]}})
-    b.channel_map = OUTPUT_MAP
-    b.osc_listener = listener
-    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    b.run_macro("m", 0.5)
-    assert "/2/eqGain1" not in fake_osc.addresses()
-    assert "/setBankStart" not in fake_osc.addresses()
 
 
 def test_dynamics_params_share_eq_aiming(make_bridge, fake_osc):
     """#20 first tranche: dynamics/auto-level/gain/phase are page-2
-    channel-detail params — same verified-width aiming, refusal and bank
+    channel-detail params — same table aiming, refusal and bank
     restore as EQ, just different addresses."""
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "osc": "/2/compexpGain", "value": "0.7",
         "target": {"channel": "ADAT 5/6", "param": "dyn_gain"},
-    }]}, widths=VERIFIED_WIDTHS)
+    }]})
     b.run_macro("m", 0.5)
     assert ("/setBankStart", 4.0) in fake_osc.sent
     assert ("/2/compexpGain", 0.7) in fake_osc.sent
@@ -880,7 +852,7 @@ def test_page2_aim_confirmed_write_proceeds(make_bridge, fake_osc):
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
-    }]}, widths=VERIFIED_WIDTHS)
+    }]})
     b.osc_client = RightAim(b.osc_listener, fake_osc)
     b.osc_client.send_message("/1/busInput", 1.0)
     fake_osc.clear()
@@ -897,7 +869,7 @@ def test_page2_aim_mismatch_refuses_write(make_bridge, fake_osc):
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
-    }]}, widths=VERIFIED_WIDTHS)
+    }]})
     b.osc_client = WrongAim(b.osc_listener, fake_osc)
     b.osc_client.send_message("/1/busInput", 1.0)
     fake_osc.clear()
@@ -915,7 +887,7 @@ def test_page2_aim_silence_refuses_write(make_bridge, fake_osc):
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "osc": "/2/eqGain1", "value": "0.6",
         "target": {"channel": "ADAT 5/6", "param": "eq_gain_1"},
-    }]}, widths=VERIFIED_WIDTHS)
+    }]})
     b.osc_client = SilentPage2(b.osc_listener, fake_osc)
     b.osc_client.send_message("/1/busInput", 1.0)
     fake_osc.clear()
@@ -1013,81 +985,11 @@ def test_fx_enable_refuses_without_state(make_bridge, fake_osc):
     assert "/3/reverbEnable" not in [a for a, _ in fake_osc.sent]
 
 
-def test_output_refusal_records_map_drift(make_bridge, fake_osc):
-    """The refusal IS the detection point: a live-vs-map mismatch must set
-    map_matches_device=False so /api/status and the UI banner can surface
-    what the log already knew (field report: a stale map looked like a
-    dead server)."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": [{
-        "osc": "/2/eqGain1", "value": "0.6",
-        "target": {"channel": "RE-150 In", "param": "eq_gain_1", "row": 3},
-    }]}})
-    b.channel_map = OUTPUT_MAP
-    b.osc_listener = listener
-    b.osc_client = RenamedOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    assert b.map_matches_device is None
-    b.run_macro("m", 0.5)
-    assert b.map_matches_device is False
-
-
-def test_layout_swap_from_library_instead_of_banner(make_bridge, fake_osc, tmp_path, monkeypatch):
-    """Swapping to an already-walked layout hot-swaps the stored map —
-    map_matches_device stays True and no re-walk is demanded."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": []}})
-    b.osc_listener = listener
-    lib_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
-    b.channel_map = {
-        "submixes": {"Something": {"index": 1}, "Else": {"index": 2}},
-        "layout_library": {lib_key: {
-            "Main": {"index": 1}, "AN 3/4": {"index": 2},
-            "AES": {"index": 4}, "RE-150 In": {"index": 6}}},
-    }
-    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    assert b.check_map_freshness() is True             # swapped, not stale
-    assert set(b.channel_map["submixes"]) == {"Main", "AN 3/4", "AES", "RE-150 In"}
-    assert b.map_matches_device is True
-
-
-def test_unknown_layout_still_flags_drift(make_bridge, fake_osc, monkeypatch):
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": []}})
-    b.osc_listener = listener
-    b.channel_map = {"submixes": {"Something": {"index": 1}},
-                     "layout_library": {}}
-    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    assert b.check_map_freshness() is False
-    assert b.map_matches_device is False
-
-
-def test_unknown_layout_triggers_auto_walk(make_bridge, fake_osc, monkeypatch):
-    """User: 'I don't ever want to have to click that button by default' —
-    an unknown layout must kick the auto-walk callback instead of only
-    raising the banner."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": []}})
-    b.osc_listener = listener
-    b.channel_map = {"submixes": {"Something": {"index": 1}},
-                     "layout_library": {}}
-    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    fired = []
-    b.auto_walk_cb = lambda: fired.append(1)
-    assert b.check_map_freshness() is False
-    assert fired == [1]
-
-
-def test_snapshot_switching_macro_works_in_the_new_layout(make_bridge, fake_osc, monkeypatch):
-    """Bug: a macro that switches snapshot refused its own steps — the map
-    hot-swap ran off-thread behind the device lock THIS macro holds, so
-    the steps resolved against the OLD layout's map. The freshness check
-    must complete synchronously before the step loop."""
+def test_snapshot_switching_macro_is_a_nonevent(make_bridge, fake_osc, monkeypatch):
+    """#24: a macro that switches snapshot needs NO map work — the physical
+    table is layout-invariant, so its steps aim immediately with zero
+    enumeration, zero library traffic, zero walking. (This scenario looped
+    90-second walks in the width-map era.)"""
     listener = OSCListener(0)
     b = make_bridge({"m": {
         "workspace": "Pill_setup", "snapshot": "Live",
@@ -1095,67 +997,22 @@ def test_snapshot_switching_macro_works_in_the_new_layout(make_bridge, fake_osc,
                    "target": {"channel": "RE-150 In", "param": "eq_gain_1",
                               "row": 3}}],
     }})
-    lib_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
-    b.channel_map = {
-        "submixes": {"Old A": {"index": 1}, "Old B": {"index": 2}},
-        "layout_library": {lib_key: {
-            "Main": {"index": 1}, "AN 3/4": {"index": 2},
-            "AES": {"index": 4}, "RE-150 In": {"index": 6}}},
-    }
+    b.channel_map = {"physical_table": {
+        "schema_version": 1, "channels_per_row": 30,
+        "rows": {"outputs": dict(STEREO_OUT_TABLE), "inputs": {}},
+        "last_sweep": {}, "source": {"outputs": "sweep"},
+    }}
     b.osc_listener = listener
     b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
     listener._server = object()
     monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    # Model the device confirming the WS/SS switch — layout memory is only
-    # recorded from confirmed state (c308beb), and the test fake does not
-    # emit snapshot-confirmation feedback
     monkeypatch.setattr(b, "_wait_device", lambda *a, **k: True)
     b.run_macro("m", 0.5)
-    # the hot-swap landed BEFORE the step, so the step aimed and fired
+    # the step aimed and fired straight off the table
     assert ("/setBankStart", 6.0) in fake_osc.sent
     assert ("/2/eqGain1", 0.6) in fake_osc.sent
-    assert b.map_matches_device is True
-    # and the layout is now remembered for this snapshot — the next
-    # switch swaps instantly with zero device traffic
-    assert b.channel_map.get("snapshot_layouts", {}).get(
-        "Pill_setup|live") == b._layout_key_from_names(
-        ["Main", "AN 3/4", "AES", "RE-150 In"])
-
-
-def test_known_snapshot_switch_is_instant(make_bridge, fake_osc, monkeypatch):
-    """User: 'if it's ready to go it should be instant' — a snapshot seen
-    before swaps its map from memory with ZERO device enumeration in the
-    macro's path (the sent list shows no busOutput before the aim)."""
-    listener = OSCListener(0)
-    lib_key = None
-    b = make_bridge({"m": {
-        "workspace": "Pill_setup", "snapshot": "Live",
-        "steps": [{"osc": "/2/eqGain1", "value": "0.6",
-                   "target": {"channel": "RE-150 In", "param": "eq_gain_1",
-                              "row": 3}}],
-    }})
-    lib_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
-    b.channel_map = {
-        "submixes": {"Old A": {"index": 1}, "Old B": {"index": 2}},
-        "layout_library": {lib_key: {
-            "Main": {"index": 1}, "AN 3/4": {"index": 2},
-            "AES": {"index": 4}, "RE-150 In": {"index": 6}}},
-        "snapshot_layouts": {"Pill_setup|live": lib_key},
-    }
-    b.osc_listener = listener
-    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    b.run_macro("m", 0.5)
-    addrs = [a for a, _ in fake_osc.sent]
-    # the aim happened...
-    assert ("/setBankStart", 6.0) in fake_osc.sent
-    assert ("/2/eqGain1", 0.6) in fake_osc.sent
-    # ...and the FIRST busOutput in the stream belongs to the aim/guard,
-    # not a pre-step enumeration: nothing precedes the snapshot switch
-    # sends except the switch itself
-    first_two = addrs[:2]
-    assert first_two == ["/loadQuickWorkspace", "/3/snapshots/7/1"]
+    # and the switch provoked no discovery traffic of any kind
+    assert "/setSubmix" not in fake_osc.addresses()
 
 
 class MomentaryEqMixedBank(MixedBankTotalMix):
@@ -1184,7 +1041,7 @@ def _eq_enable_bridge(make_bridge, fake_osc, value, initial):
     b = _eq_bridge(make_bridge, fake_osc, {"steps": [{
         "osc": "/2/eqEnable", "value": value,
         "target": {"channel": "ADAT 5/6", "param": "eq_enable"},
-    }]}, widths=VERIFIED_WIDTHS)
+    }]})
     b.osc_client = MomentaryEqMixedBank(b.osc_listener, fake_osc, initial)
     b.osc_client.send_message("/1/busInput", 1.0)
     fake_osc.clear()
@@ -1213,106 +1070,3 @@ def test_page2_enable_idempotent_when_already_there(make_bridge, fake_osc):
     assert [v for a, v in fake_osc.sent if a == "/2/eqEnable"] == []
 
 
-def test_input_width_coverage_reported(make_bridge, fake_osc):
-    """Input-side drift was invisible (hardware incident: an un-pairing
-    re-keyed the width map, 0/N coverage, no banner). The freshness path
-    now measures width coverage of the live input row."""
-    b = _eq_bridge(make_bridge, fake_osc, {"steps": []},
-                   widths={"AN 1/2": 2})  # Mavis + ADAT 5/6 uncovered
-    cov = b._input_width_coverage()
-    assert cov == {"covered": 1, "total": 3}
-
-
-def test_remember_refuses_unsettled_reads(make_bridge, fake_osc, monkeypatch):
-    """A single unsettled enumeration once recorded the WRONG layout and
-    the instant swap then trusted it — a new association persists only
-    after a second confirming read."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": []}})
-    b.osc_listener = listener
-
-    class FlappingOutputs(StereoOutputsTotalMix):
-        # the CONFIRMING read (the only enumeration _remember performs)
-        # disagrees with the claimed first read
-        _flip = [["Main", "AN 3/4", "AES"]]
-        def send_message(self, address, value):
-            if address == "/1/busOutput":
-                self.listener._handle(address, 1.0)
-                names = self._flip.pop(0) if self._flip else ["Main"]
-                for n, name in enumerate(names, 1):
-                    self.listener._handle(f"/1/trackname{n}", name)
-                return
-            super().send_message(address, value)
-
-    b.osc_client = FlappingOutputs(listener, fake_osc)
-    listener._server = object()
-    b.channel_map = {"submixes": {}, "layout_library": {}}
-    b.current_workspace, b.current_snapshot = "WS", "snap"
-    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    b._remember_snapshot_layout(["Main", "AN 3/4"])
-    assert b.channel_map.get("snapshot_layouts", {}) == {}  # not recorded
-
-
-def test_freshness_self_heals_wrong_memory(make_bridge, fake_osc, monkeypatch):
-    """A remembered layout that disagrees with the device is dropped
-    loudly so the next switch re-learns instead of repeating the error."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": []}})
-    b.osc_listener = listener
-    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    live_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
-    b.channel_map = {
-        "submixes": {"Main": {"index": 1}, "AN 3/4": {"index": 2},
-                     "AES": {"index": 4}, "RE-150 In": {"index": 6}},
-        "layout_library": {live_key: {}},
-        "snapshot_layouts": {"WS|snap": "totally|wrong|key"},
-    }
-    b.current_workspace, b.current_snapshot = "WS", "snap"
-    # The heal only runs from a device-confirmed belief (c308beb): a stale
-    # retained belief once destroyed a CORRECT entry on hardware
-    b.state_confirmed = True
-    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    b.check_map_freshness()
-    assert b.channel_map["snapshot_layouts"].get("WS|snap") != "totally|wrong|key"
-
-
-def test_freshness_never_heals_or_learns_from_unconfirmed_belief(
-        make_bridge, fake_osc, monkeypatch):
-    """An absorbed retained belief is display-only (c308beb): healing or
-    minting layout memory against it destroyed a correct entry and recorded
-    a wrong one on hardware within 90s. With state_confirmed falsy, the
-    freshness check must leave snapshot_layouts completely untouched."""
-    listener = OSCListener(0)
-    b = make_bridge({"m": {"steps": []}})
-    b.osc_listener = listener
-    b.osc_client = StereoOutputsTotalMix(listener, fake_osc)
-    listener._server = object()
-    live_key = b._layout_key_from_names(["Main", "AN 3/4", "AES", "RE-150 In"])
-    b.channel_map = {
-        "submixes": {"Main": {"index": 1}, "AN 3/4": {"index": 2},
-                     "AES": {"index": 4}, "RE-150 In": {"index": 6}},
-        "layout_library": {live_key: {}},
-        "snapshot_layouts": {"WS|snap": "totally|wrong|key"},
-    }
-    b.current_workspace, b.current_snapshot = "WS", "snap"
-    b.state_confirmed = False  # belief absorbed from retained MQTT only
-    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    b.check_map_freshness()
-    # wrong entry NOT dropped, and no new association minted over it
-    assert b.channel_map["snapshot_layouts"] == {"WS|snap": "totally|wrong|key"}
-
-
-def test_instant_swap_makes_no_hardware_claim(make_bridge, fake_osc, monkeypatch):
-    """The zero-traffic swap must not set map_matches_device — that claim
-    belongs to a path that actually looked at the device."""
-    b = make_bridge({"m": {"steps": []}})
-    key = b._layout_key_from_names(["A", "B"])
-    b.channel_map = {"submixes": {"X": {"index": 1}},
-                     "layout_library": {key: {"A": {"index": 1},
-                                              "B": {"index": 2}}},
-                     "snapshot_layouts": {"WS|snap": key}}
-    monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
-    b.map_matches_device = None
-    assert b._instant_swap_for("WS", "snap") is True
-    assert b.map_matches_device is None  # unchanged — async check will claim

@@ -145,14 +145,10 @@ class TotalMixOSCBridge:
         self.osc_listener = None            # OSCListener — set by start_osc_listener()
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
         self.last_probe = None              # result of the last device liveness probe
-        self.discovery_state = {"status": "idle"}  # channel-map discovery job state
         self.sweep_state = {"status": "idle"}      # physical-table sweep job state (#24)
         # Live-vs-map freshness verdict (None = unknown). A stale map after
         # a snapshot change refused correctly but looked like a dead server
         # to the user (field report) — this drives the UI drift banner.
-        self.map_matches_device = None
-        self.live_submix_count = None
-        self.input_widths_coverage = None
         self._load_channel_map()
 
         # === SAFE THREAD-AWARE BROADCAST (MQTT + FastAPI) ===
@@ -418,7 +414,6 @@ class TotalMixOSCBridge:
             else:
                 logger.warning(f"switch_to: snapshot '{snapshot}' not found in '{workspace}'")
 
-        self.check_map_freshness()
         self.broadcast_state()
         return True
 
@@ -597,28 +592,9 @@ class TotalMixOSCBridge:
             else:
                 logger.info(f"   → Already on target {ws_name}/{snap_name} — skipping ws/ss switch (force_switch=False)")
 
-            if (force_switch or not already_on_target) and (ws_name or snap_name):
-                # The switch may have changed the layout — check the map
-                # NOW instead of waiting for a refusal. When this macro's
-                # OWN steps need the map, the check (and the library
-                # hot-swap) must complete BEFORE the step loop: off-thread
-                # it deadlocks by design — this thread holds the device
-                # lock, so the swap could never land until after the steps
-                # had already refused against the old layout's map (bug:
-                # 'a macro which changes snapshot doesn't work in the new
-                # snapshot'). Step-free switch macros keep the async check.
-                _needs_map = any(("target" in s) or (s.get("osc") == "/setSubmix")
-                                 for s in macro.get("steps", []))
-                if _needs_map and not self._instant_swap_for(ws_name, snap_name):
-                    # First visit to this snapshot: one enumeration
-                    # (~0.2s) resolves the layout — and remembers it, so
-                    # every later switch is instant
-                    self.check_map_freshness()
-                else:
-                    # Map already right (or no steps need it) — verify in
-                    # the background, never in the macro's path
-                    threading.Thread(target=self.check_map_freshness,
-                                     daemon=True).start()
+            # (#24: snapshot switches are non-events for resolution — the
+            # physical table is layout-invariant and per-write confirmations
+            # carry the correctness claim. No map work here, by design.)
 
             # === EMIT macro_start SO BROWSER CAN SYNC PROGRESS BAR ===
             duration_ms = self._get_macro_duration_ms(macro, clock_bpm=clock_bpm)
@@ -654,25 +630,27 @@ class TotalMixOSCBridge:
                 # match or refuse. The whole macro stops on refusal — later
                 # raw steps assume the switch happened.
                 if "target" not in step and osc_addr == "/setSubmix":
-                    outs = self._live_output_names()
-                    map_subs = (self.channel_map or {}).get("submixes", {})
-                    known = {int(s["index"]) for s in map_subs.values()
-                             if isinstance(s.get("index"), (int, float))}
-                    map_names = {str(n).strip() for n in map_subs}
+                    # CRASH GUARD: /setSubmix past the hardware end crashes
+                    # TotalMix (root cause). #24: membership in the MEASURED
+                    # physical outputs table is the guard — every measured
+                    # key is a real hardware start, bounded by the sweep's
+                    # verified boundary. No arithmetic, no live enumeration.
+                    table = self._physical_table()
+                    known = {int(k) for k in
+                             ((table or {}).get("rows", {})
+                              .get("outputs", {}) or {})}
                     try:
                         raw_idx = float(value if step.get("value") == "{{param}}"
                                         else step.get("value"))
                     except (TypeError, ValueError):
                         raw_idx = None
-                    if (outs is None or raw_idx is None
-                            or raw_idx != int(raw_idx)
-                            or int(raw_idx) not in known
-                            or outs != map_names):
-                        why = ("live outputs not enumerable" if outs is None
-                               else "output layout changed since the map"
-                               if outs != map_names
-                               else f"index {raw_idx} is not a known submix "
-                                    f"index (map knows {sorted(known)})")
+                    if (raw_idx is None or raw_idx != int(raw_idx)
+                            or int(raw_idx) not in known):
+                        why = (f"index {raw_idx} is not a measured output "
+                               f"channel (table knows {sorted(known)})"
+                               if known else
+                               "no measured outputs table — run "
+                               "POST /api/device/sweep")
                         logger.error(f"   → raw /setSubmix REFUSED ({why}) — "
                                      f"an out-of-range /setSubmix crashes "
                                      f"TotalMix; use a name-based target. "
@@ -935,58 +913,6 @@ class TotalMixOSCBridge:
     }
 
     @staticmethod
-    def _layout_key_from_names(names) -> str:
-        """Stable key for a strip layout: the sorted real strip names.
-        Snapshots re-pair strips, so the SAME name can carry DIFFERENT
-        widths in different layouts (hardware-proven: RE-101 is width 2
-        in the 17-strip layout, width 1 in the 23-strip one) — widths
-        must be stored and looked up per layout, never in one flat map."""
-        real = {str(n).strip() for n in names}
-        return "|".join(sorted(
-            n for n in real if n and n.lower() not in ("n.a.", "n/a")))
-
-    def _layout_key(self, strips: dict) -> str:
-        return self._layout_key_from_names(
-            d.get("name", "") for d in strips.values())
-
-    def _widths_for_layout(self, strips: dict) -> dict:
-        """The verified width map for THIS layout:
-        channel_map['width_maps'][layout_key] when the layout has been
-        measured, else the legacy flat channel_widths (whose per-strip
-        check still refuses when it does not cover)."""
-        cm = self.channel_map or {}
-        return (cm.get("width_maps", {}).get(self._layout_key(strips))
-                or cm.get("channel_widths", {}))
-
-    def _hw_offset_of_strip(self, strips: dict, strip):
-        """Hardware-channel offset of a strip: the summed widths of the
-        strips before it, from the VERIFIED width map only.
-
-        Label inference is banned here: hardware testing proved a stereo
-        pair can carry a slash-free name ('RE-101'), which silently mis-
-        aimed every subsequent strip and wrote to the wrong channel's EQ
-        (#5 write-test failure). Widths come from the layout-keyed
-        width_maps (or legacy channel_widths), produced by hardware
-        measurement or hand-entry. Returns None (→ refusal) if ANY
-        preceding strip's width is unknown — one unknown poisons the
-        whole offset.
-        """
-        widths = self._widths_for_layout(strips)
-        offset = 0
-        for s in sorted(strips):
-            if s >= strip:
-                break
-            name = str(strips[s].get("name", "")).strip()
-            w = widths.get(name)
-            if isinstance(w, bool) or w not in (1, 2):
-                logger.error(f"   → no verified width for strip '{name}' — "
-                             f"cannot aim page 2 (POST /api/device/widths "
-                             f"with this layout's widths)")
-                return None
-            offset += w
-        return offset
-
-    @staticmethod
     def _param_address(param: str, strip) -> str:
         """OSC address for a parameter on a live-resolved strip. All are
         page-1, row-relative (the bus selection picks the row):
@@ -1017,17 +943,6 @@ class TotalMixOSCBridge:
             return True  # wanted was a pair, strip is one (unlinked) half
         return False
 
-    def _submix_index_by_name(self, submix_name: str):
-        """Look up a submix's /setSubmix index by name (channel map, then
-        live listener state is not consulted — indices are stable per device)."""
-        subs = (self.channel_map or {}).get("submixes", {})
-        entry = subs.get(submix_name)
-        if entry is None:  # case-insensitive fallback
-            wanted = submix_name.strip().lower()
-            entry = next((v for k, v in subs.items()
-                          if k.strip().lower() == wanted), None)
-        return entry.get("index") if entry else None
-
     def _resolve_target(self, target: dict, timeout: float = 1.5):
         """Resolve {"submix": name, "channel": name} to
         (setsubmix_index, live_osc_address, status).
@@ -1050,8 +965,7 @@ class TotalMixOSCBridge:
             addr = self.GLOBAL_FX_PARAMS[param]
             logger.info(f"   → target: global FX '{param}' → {addr}")
             return None, addr, "resolved"
-        channel_scoped = (param == "mute"
-                          or param in self.CHANNEL_DETAIL_PARAMS)
+        channel_scoped = (param == "mute")  # channel-detail handled below
         if param in self.CHANNEL_DETAIL_PARAMS and row == "2":
             # EQ/channel-detail exists on hardware inputs and outputs but
             # NOT on software playback (user-reported, device has no such
@@ -1060,96 +974,62 @@ class TotalMixOSCBridge:
                          f"row — refusing (EQ lives on hardware inputs "
                          f"and outputs only)")
             return None, None, "not_in_bank"
-        if param in self.CHANNEL_DETAIL_PARAMS and row == "3":
-            # OUTPUT EQ (hardware-measured on BOTH layout types): page 2
-            # follows the selected row, and the page-2 offset is the
-            # output's first hw channel — the walked submix index, except
-            # the first output whose index is clamped to 1 (aims 0).
-            # Verified on an all-stereo layout (Main 0-1, RE-150 In 14-15)
-            # AND on a mono-containing one (RE-150 In index 14 at offset
-            # 14 ONLY, mono ADAT 2 owning 15; Main 0-1; stereo Phones 1 at
-            # 8-9). Mono and stereo alike: offset = index. Index sanity
-            # (first == 1, deltas 1 or 2) still gates against a malformed
-            # map; the live-outputs match gates against a stale one.
-            subs = (self.channel_map or {}).get("submixes", {})
-            # names come from the dict KEYS — entries are keyed by submix
-            # name, and library-stored maps must resolve regardless of the
-            # inner 'name' field
-            entries = sorted(
-                ((int(s["index"]), str(name).strip())
-                 for name, s in subs.items()
-                 if isinstance(s.get("index"), (int, float))),
-                key=lambda t: t[0])
-            idx_of = {n: i for i, n in entries}
-            if channel_name not in idx_of:
-                logger.error(f"   → output '{channel_name}' not in the "
-                             f"channel map — cannot aim page 2, refusing")
+        if param in self.CHANNEL_DETAIL_PARAMS:
+            # Page-2 aiming (#24): /setBankStart takes FIXED hardware-mono
+            # offsets (RME-documented, trackname-sweep-proven invariant
+            # across snapshots) — the physical table resolves the name to
+            # its start directly. No widths, no strip resolution, no
+            # live-layout gates: the per-write /2/trackname confirmation is
+            # the correctness claim, made at the only moment it matters.
+            table = self._physical_table()
+            row_key = "outputs" if row == "3" else "inputs"
+            offset = (pt.resolve_start(table, row_key, channel_name)
+                      if table else None)
+            if offset is None:
+                logger.error(f"   → '{channel_name}' is not in the physical "
+                             f"{row_key} table — cannot aim page 2; run "
+                             f"POST /api/device/sweep to (re)measure it")
                 return None, None, "not_in_bank"
-            indices = [i for i, _ in entries]
-            deltas = [b - a for a, b in zip(indices, indices[1:])]
-            sane = (indices[0] == 1
-                    and all(d in (1, 2) for d in deltas))
-            if not sane:
-                logger.error(f"   → output index spacing looks malformed "
-                             f"(first {indices[0]}, deltas {deltas}) — "
-                             f"refusing rather than mis-aim; re-run "
-                             f"discovery")
+            listener = self.osc_listener
+            if listener is None or not listener.running:
+                logger.error(f"   → no OSC listener — cannot confirm the "
+                             f"page-2 aim for '{param}', refusing")
                 return None, None, "not_in_bank"
-            live_outputs = self._live_output_names()
-            map_outputs = {n for _, n in entries}
-            if live_outputs is None or live_outputs != map_outputs:
-                if live_outputs is not None:
-                    self.map_matches_device = False
-                logger.error(f"   → live output row unknown or changed "
-                             f"since the map was captured — refusing "
-                             f"page-2 aim for output '{channel_name}'")
-                return None, None, "not_in_bank"
-            offset = 0 if channel_name == entries[0][1] else idx_of[channel_name]
-            self.osc_client.send_message("/1/busOutput", 1.0)
+            bus_addr = "/1/busOutput" if row == "3" else "/1/busInput"
+            self.osc_client.send_message(bus_addr, 1.0)
             self.osc_client.send_message("/setBankStart", float(offset))
             # compute, CONFIRM, then act — every wrong-channel write this
             # project has produced would have been caught by this check
-            if not self._confirm_page2_aim(channel_name, "3"):
+            if not self._confirm_page2_aim(channel_name, row, offset=offset):
                 # restore what the failed aim changed: the scrolled bank
-                # and the output row both persist on the device
+                # and the row selection both persist on the device
                 self.osc_client.send_message("/setBankStart", 0.0)
                 self.osc_client.send_message("/1/busInput", 1.0)
                 return None, None, "not_in_bank"
             addr = self.CHANNEL_DETAIL_PARAMS[param]
-            logger.info(f"   → resolved OUTPUT '{channel_name}' {param} → "
-                        f"hw offset {offset} (offset = walked index, "
-                        f"first output = 0) → aimed page 2 ({addr})")
-            return idx_of[channel_name], addr, "resolved"
+            logger.info(f"   → resolved '{channel_name}' {param} → hw offset "
+                        f"{offset} (physical table, {row_key}) → aimed "
+                        f"page 2 ({addr})")
+            return offset, addr, "resolved"
         if channel_scoped:
             # Mute is GLOBAL-per-channel (hardware-verified, #4/#10) and
             # channel-detail params (EQ etc.) address the CHANNEL, not a
             # submix — no /setSubmix is sent for either. Row still matters.
             index = None
         else:
-            index = self._submix_index_by_name(submix_name)
+            # /setSubmix takes the output's FIXED hardware start channel,
+            # 0-based mono (RME-documented, sweep-proven). Membership in the
+            # MEASURED table is the crash guard: every key is < the measured
+            # hardware end, so a resolved start can never be the fatal
+            # out-of-range send. The per-switch labelSubmix confirmation
+            # below is the staleness defense — no live-layout equality gate.
+            table = self._physical_table()
+            index = (pt.resolve_start(table, "outputs", submix_name)
+                     if table else None)
             if index is None:
-                logger.warning(f"   → target submix '{submix_name}' not in channel map")
-                return None, None, "not_in_bank"
-            # CRASH GUARD (hardware root cause, 2026-07-31): /setSubmix past
-            # the device's last real output crashes TotalMix outright, and
-            # stale maps are routine — the index is only trusted when the
-            # LIVE output row (one strip per submix, enumerated WITHOUT
-            # /setSubmix) still matches the map the index came from.
-            live_outputs = self._live_output_names()
-            if live_outputs is None:
-                logger.error(f"   → cannot enumerate the live output row — "
-                             f"REFUSING /setSubmix {index} ('{submix_name}'): "
-                             f"an out-of-range index crashes TotalMix")
-                return None, None, "not_in_bank"
-            map_outputs = {str(n).strip() for n in
-                           (self.channel_map or {}).get("submixes", {})}
-            if live_outputs != map_outputs:
-                self.map_matches_device = False
-                logger.error(f"   → output layout changed since the map was "
-                             f"captured (gone: "
-                             f"{sorted(map_outputs - live_outputs)}, new: "
-                             f"{sorted(live_outputs - map_outputs)}) — "
-                             f"REFUSING /setSubmix {index}; re-run discovery")
+                logger.warning(f"   → target submix '{submix_name}' not in "
+                               f"the physical outputs table — run "
+                               f"POST /api/device/sweep")
                 return None, None, "not_in_bank"
 
         # Normalize the bank so strip indices are absolute — a bank left
@@ -1163,6 +1043,7 @@ class TotalMixOSCBridge:
         bus_addr = {"1": "/1/busInput", "2": "/1/busPlayback",
                     "3": "/1/busOutput"}.get(row, "/1/busInput")
         self.osc_client.send_message(bus_addr, 1.0)
+        _t_switch = time.time()
         if index is not None:
             self.osc_client.send_message("/setSubmix", float(index))
             logger.info(f"   → target: /setSubmix {index} ('{submix_name}') row {row}")
@@ -1171,12 +1052,6 @@ class TotalMixOSCBridge:
 
         listener = self.osc_listener
         if listener is None or not listener.running:
-            if param in self.CHANNEL_DETAIL_PARAMS:
-                # An unaimed page-2 write lands on whatever channel the bank
-                # happens to show — refuse outright, never fall back
-                logger.error(f"   → no OSC listener — cannot aim the channel-detail "
-                             f"page for '{param}', refusing")
-                return None, None, "not_in_bank"
             logger.warning("   → no OSC listener — cannot live-resolve strip, using stored address")
             return index, None, "no_feedback"
 
@@ -1187,6 +1062,20 @@ class TotalMixOSCBridge:
         deadline = time.time() + timeout
         wanted = submix_name.lower()
         wanted_ch = channel_name.lower()
+
+        def _submix_label_ok(label: str) -> bool:
+            """Accept the confirmed submix label when it IS the wanted name,
+            default-pair-covers it, or is a known alias of the same hw
+            output (#24: 'ADAT 2' targeted while the label shows 'RE-150 In'
+            covering 14-15)."""
+            label = str(label or "").strip()
+            if not label:
+                return False
+            if label.lower() == wanted or self._names_cover(label, submix_name):
+                return True
+            tbl = self._physical_table()
+            return bool(tbl is not None and index is not None
+                        and pt.covers(tbl, "outputs", index, submix_name, label))
 
         # Freshness watermark: DeviceState accumulates banks across layout
         # changes, and a STALE bank winning name resolution writes another
@@ -1206,6 +1095,21 @@ class TotalMixOSCBridge:
             for strip, data in sorted(fresh.items()):
                 if self._names_cover(str(data.get("name", "")), channel_name):
                     return strip
+            # Learned-alias third priority (#24): the wanted name and the
+            # shown name are aliases of the SAME hw channel — handles
+            # custom-renamed pairs the a/b grammar cannot parse ('Mic 10'
+            # while the strip shows 'Pill Out'). Co-occurrence required,
+            # so unrelated strips can never cross-match.
+            tbl = self._physical_table()
+            in_key = {"1": "inputs", "3": "outputs"}.get(row)
+            if tbl is not None and in_key:
+                start = pt.resolve_start(tbl, in_key, channel_name)
+                if start is not None:
+                    for strip, data in sorted(fresh.items()):
+                        shown = str(data.get("name", "")).strip()
+                        if shown and pt.covers(tbl, in_key, start,
+                                               channel_name, shown):
+                            return strip
             return None
 
         def find_strip(state):
@@ -1220,8 +1124,7 @@ class TotalMixOSCBridge:
                     if strip is not None:
                         return strip
                 return None
-            current = (state.current_submix or "").strip().lower()
-            if current != wanted:
+            if not _submix_label_ok(state.current_submix):
                 return None
             return _match_in(state.submix_snapshot(state.current_submix).get(row, {}))
 
@@ -1238,8 +1141,19 @@ class TotalMixOSCBridge:
                 self.osc_client.send_message(other, 1.0)
                 self.osc_client.send_message(bus_addr, 1.0)
         elif not listener.wait_for(
-                lambda st: (st.current_submix or "").strip().lower() == wanted,
-                timeout):
+                lambda st: _submix_label_ok(st.current_submix), timeout):
+            # Distinguish SILENCE (no label followed the switch — feedback
+            # loss, stored-address fallback stays legitimate) from a
+            # CONFIRMED DIFFERENT label (the device answered and it is not
+            # our submix under any known alias — writing anywhere now would
+            # land on the wrong bus, refuse)
+            lbl = listener.state.raw_entry("/1/labelSubmix") or {}
+            if lbl.get("last_seen", 0) >= _t_switch and not _submix_label_ok(
+                    (lbl.get("args") or [""])[0]):
+                logger.error(f"   → device confirmed submix "
+                             f"'{(lbl.get('args') or [''])[0]}', wanted "
+                             f"'{submix_name}' — REFUSING (wrong bus)")
+                return None, None, "not_in_bank"
             logger.warning(f"   → no labelSubmix confirmation for '{submix_name}' "
                            f"within {timeout}s — using stored address")
             return index, None, "no_feedback"
@@ -1254,34 +1168,6 @@ class TotalMixOSCBridge:
                 if strip_name.strip().lower() != wanted_ch:
                     logger.info(f"   → pair-matched '{channel_name}' to strip "
                                 f"'{strip_name}' (stereo link changed)")
-                if param in self.CHANNEL_DETAIL_PARAMS:
-                    # Aim page 2 at this channel: /setBankStart takes a
-                    # HARDWARE-CHANNEL offset (stereo pairs = two positions),
-                    # computed from the live bank the strip was found in.
-                    # run_macro restores bank 0 after the step executes.
-                    st = listener.state
-                    banks = ([st.current_submix] if st.current_submix else [])
-                    banks += [s for s in list(st.submixes.keys()) if s not in banks]
-                    strips = next((st.submix_snapshot(b).get(row, {})
-                                   for b in banks
-                                   if strip in st.submix_snapshot(b).get(row, {})), {})
-                    offset = self._hw_offset_of_strip(strips, strip)
-                    if offset is None:
-                        # Wrong-channel EQ writes are silent and destructive —
-                        # refuse rather than aim on a guess (#5 write-test
-                        # failure: a slash-free stereo pair broke label math)
-                        return None, None, "not_in_bank"
-                    self.osc_client.send_message("/setBankStart", float(offset))
-                    # compute, CONFIRM, then act (see _confirm_page2_aim)
-                    if not self._confirm_page2_aim(channel_name, row):
-                        # failed aim left the bank scrolled — restore it
-                        self.osc_client.send_message("/setBankStart", 0.0)
-                        return None, None, "not_in_bank"
-                    addr = self.CHANNEL_DETAIL_PARAMS[param]
-                    logger.info(f"   → live-resolved '{channel_name}' {param} → strip "
-                                f"{strip}, hw offset {offset} (verified widths) → "
-                                f"aimed page 2 ({addr})")
-                    return index, addr, "resolved"
                 # Write address is always page 1 — the bus selection above
                 # decides which row the write lands on
                 addr = self._param_address(param, strip)
@@ -1340,199 +1226,6 @@ class TotalMixOSCBridge:
         if names:
             self._outputs_cache = (time.time(), names)
         return names
-
-    def check_map_freshness(self):
-        """Compare the live output row against the channel map and record
-        the verdict. Called proactively after workspace/snapshot switches
-        and after discovery apply — waiting for a refusal made a stale map
-        look like a dead server (field report).
-
-        On a mismatch, the LAYOUT LIBRARY is consulted first: every applied
-        walk is remembered under its output-layout key, so swapping between
-        already-walked layouts hot-swaps the matching map instead of
-        demanding a re-walk (user pain: a walk per snapshot swap). The
-        banner only appears for layouts never walked."""
-        live = self._live_output_names()
-        if live is None:
-            self.map_matches_device = None
-            return None
-        self.live_submix_count = len(live)
-        map_names = {str(n).strip() for n in
-                     (self.channel_map or {}).get("submixes", {})}
-        matches = live == map_names
-        if not matches and self._try_layout_swap(live):
-            matches = True
-        # SELF-HEAL a wrong memory: if the current snapshot remembers a
-        # different layout than the device shows, drop the entry loudly —
-        # the next switch re-learns instead of repeating the error
-        # (hardware: one wrong association was persisted and then trusted).
-        # ONLY from a device-confirmed belief: an absorbed retained belief
-        # can be stale (device moved while the bridge was down), and healing
-        # against it destroyed a CORRECT entry / would mint a wrong one
-        # (hardware: stale Pill_setup|relax belief vs live Blank layout)
-        if self.state_confirmed and self.current_workspace and self.current_snapshot:
-            slot = f"{self.current_workspace}|{self.current_snapshot}"
-            assoc = (self.channel_map or {}).get("snapshot_layouts", {})
-            live_key = self._layout_key_from_names(live)
-            if slot in assoc and assoc[slot] != live_key:
-                logger.warning(f"🩹 snapshot-layout memory for {slot} was "
-                               f"WRONG — dropping it; next switch re-learns")
-                del assoc[slot]
-                try:
-                    self._persist_channel_map_file(self.channel_map)
-                except Exception as e:
-                    logger.warning(f"could not persist memory heal: {e}")
-        if matches and self.state_confirmed:
-            self._remember_snapshot_layout(live)
-        # INPUT-side drift is invisible to the output comparison (hardware
-        # incident: one channel un-pairing re-keyed the width map — 0/24
-        # coverage, every input channel-detail macro disarmed, no banner).
-        # Judge width coverage for the LIVE input layout too.
-        self.input_widths_coverage = self._input_width_coverage()
-        cov = self.input_widths_coverage
-        if cov and cov["covered"] < cov["total"]:
-            logger.warning(f"⚠️ Input layout has no full width map: "
-                           f"{cov['covered']}/{cov['total']} live strips "
-                           f"covered — input EQ/Dynamics macros will refuse "
-                           f"(re-pair the channels or POST widths for this "
-                           f"layout)")
-        if not matches:
-            logger.warning(f"⚠️ Device layout differs from the channel map "
-                           f"({len(live)} live outputs vs {len(map_names)} "
-                           f"mapped) and no walked map is stored for this "
-                           f"layout — output-targeting macros will refuse "
-                           f"until discovery runs")
-            cb = getattr(self, "auto_walk_cb", None)
-            if cb:
-                try:
-                    cb()   # self-guarded: cooldown, no-op when disabled/busy
-                except Exception as e:
-                    logger.error(f"auto-walk trigger failed: {e}")
-        self.map_matches_device = matches
-        self.broadcast_state(macro_event={"type": "map_freshness",
-                                          "matches": matches})
-        return matches
-
-    def _input_width_coverage(self):
-        """Width coverage of the LIVE input row: {covered, total} or None
-        when the live input bank is unknowable. Only entries refreshed in
-        the last few seconds count — raw state is cumulative and lies
-        (server method note)."""
-        listener = self.osc_listener
-        if listener is None or not listener.running:
-            return None
-        st = listener.state
-        cur = st.current_submix
-        if not cur:
-            return None
-        floor = time.time() - 3.0
-        strips = {ch: d for ch, d in st.submix_snapshot(cur).get("1", {}).items()
-                  if d.get("_seen", 0) >= floor
-                  and str(d.get("name", "")).strip().lower()
-                  not in ("", "n.a.", "n/a")}
-        if not strips:
-            return None
-        # ADMIT IGNORANCE on a partial refresh: a fresh SUBSET that happens
-        # to be covered read as 100% and the metric could never report a
-        # shortfall unless the whole row refreshed in the window (hardware:
-        # 17/17 reported when the truth was 0/22). Below the known row
-        # size, the honest answer is 'don't know'.
-        known = st.real_strip_count
-        if known and len(strips) < known:
-            return None
-        widths = self._widths_for_layout(strips)
-        names = [str(d.get("name", "")).strip() for d in strips.values()]
-        covered = sum(1 for n in names
-                      if not isinstance(widths.get(n), bool)
-                      and widths.get(n) in (1, 2))
-        return {"covered": covered, "total": len(names)}
-
-    def _remember_snapshot_layout(self, live_outputs):
-        """Persist which layout this (workspace, snapshot) uses, so the
-        next switch to it can swap maps INSTANTLY with no device traffic
-        (user: a ready macro must fire instantly, never wait on a walk
-        or an enumeration)."""
-        if not self.current_workspace or not self.current_snapshot:
-            return
-        # Never mint a key from an unresolved placeholder belief
-        # (snap_N / slot_N): it duplicates the real entry under a name
-        # nothing looks up and regenerates every restart (hardware:
-        # Pill_setup|snap_7 shadowing Pill_setup|relax)
-        if (re.fullmatch(r"snap_\d+", str(self.current_snapshot))
-                or re.fullmatch(r"slot_\d+", str(self.current_workspace))):
-            logger.info(f"snapshot-layout memory NOT recorded for "
-                        f"{self.current_workspace}|{self.current_snapshot} — "
-                        f"belief name is an unresolved placeholder")
-            return
-        key = self._layout_key_from_names(live_outputs)
-        slot = f"{self.current_workspace}|{self.current_snapshot}"
-        cm = self.channel_map or {}
-        assoc = cm.setdefault("snapshot_layouts", {})
-        if assoc.get(slot) == key:
-            return
-        # A NEW or CHANGED association persists only after a SECOND
-        # confirming enumeration — a single unsettled read once recorded
-        # the wrong layout, and the instant swap then trusted it. The
-        # extra row toggle costs ~0.2s and only on new associations.
-        self._outputs_cache = None
-        second = self._live_output_names()
-        if second is None or self._layout_key_from_names(second) != key:
-            logger.warning(f"snapshot-layout association for {slot} not "
-                           f"settled (two reads disagree) — not recording; "
-                           f"the next visit will retry")
-            return
-        assoc[slot] = key
-        try:
-            self._persist_channel_map_file(cm)
-        except Exception as e:
-            logger.warning(f"could not persist snapshot-layout memory: {e}")
-
-    def _instant_swap_for(self, ws_name, snap_name) -> bool:
-        """Zero-traffic map swap from snapshot-layout memory. Returns True
-        when the map for the target snapshot's remembered layout is now
-        active — the macro's steps can resolve immediately.
-
-        Deliberately does NOT set map_matches_device: that is a claim
-        about hardware, and this path never looks at the hardware (a
-        wrong memory was persisted once and then trusted — the async
-        check that follows makes the claim, and self-heals the memory
-        if it was wrong; the step guards refuse a wrong map meanwhile)."""
-        cm = self.channel_map or {}
-        key = (cm.get("snapshot_layouts") or {}).get(f"{ws_name}|{snap_name}")
-        if not key:
-            return False
-        entry = (cm.get("layout_library") or {}).get(key)
-        if entry is None:
-            return False
-        current_key = self._layout_key_from_names(cm.get("submixes", {}).keys())
-        if current_key != key:
-            cm["submixes"] = entry
-            self.channel_map = cm
-            try:
-                self._persist_channel_map_file(cm)
-            except Exception as e:
-                logger.warning(f"instant-swap persist failed: {e}")
-            logger.info(f"⚡ Instant map swap for {ws_name}/{snap_name} "
-                        f"({len(entry)} submixes, from snapshot-layout "
-                        f"memory — no device traffic)")
-        return True
-
-    def _try_layout_swap(self, live_outputs) -> bool:
-        """Adopt the stored map for the live output layout, if one exists.
-        Non-destructive: the active submixes are ALSO in the library under
-        their own key, so swapping back and forth loses nothing."""
-        cm = self.channel_map or {}
-        key = self._layout_key_from_names(live_outputs)
-        entry = (cm.get("layout_library") or {}).get(key)
-        if not entry:
-            return False
-        cm["submixes"] = entry
-        self._persist_channel_map_file(cm)
-        self.channel_map = cm
-        logger.info(f"🔁 Layout recognized — swapped to the stored map for "
-                    f"this output layout ({len(entry)} submixes, no re-walk "
-                    f"needed)")
-        return True
 
     def _persist_channel_map_file(self, cm):
         """Atomic write of the channel map (temp + replace — a crash mid-
@@ -1852,17 +1545,17 @@ class TotalMixOSCBridge:
         if listener.start():
             self.osc_listener = listener
 
-            def _startup_check():
-                # One-shot: a layout change made while the bridge was down
-                # (or from the TotalMix GUI) is otherwise unnoticed until
-                # a macro refuses. Delayed so the first feedback can land;
-                # a still-blind listener returns None harmlessly.
+            def _startup_summary():
+                # #24: no freshness checking — the physical table is layout-
+                # invariant. Just log what the bridge knows on startup.
                 time.sleep(5.0)
                 try:
-                    self.check_map_freshness()
+                    table = self._physical_table()
+                    logger.info(f"physical_table on startup: "
+                                f"{pt.summarize(table) if table else 'ABSENT — run POST /api/device/sweep'}")
                 except Exception as e:
-                    logger.debug(f"startup freshness check failed: {e}")
-            threading.Thread(target=_startup_check, daemon=True).start()
+                    logger.debug(f"startup summary failed: {e}")
+            threading.Thread(target=_startup_summary, daemon=True).start()
 
     def start_mqtt(self):
         """Connect MQTT and start the client loop (web and standalone modes)."""

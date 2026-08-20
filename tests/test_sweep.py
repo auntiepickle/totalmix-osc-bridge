@@ -120,3 +120,22 @@ def test_sweep_refuses_without_listener(make_bridge):
     b.osc_listener = None
     state = b.run_sweep(settle_s=0)
     assert state["status"] == "error"
+
+
+def test_migration_seeds_outputs_in_memory_only(make_bridge, monkeypatch):
+    """Legacy walked indices ARE hw starts (first output index 1 -> hw 0).
+    Migration is in-memory: nothing persists until the first sweep."""
+    b = make_bridge({})
+    persisted = []
+    monkeypatch.setattr(b, "_persist_channel_map_file",
+                        lambda cm: persisted.append(True))
+    b.channel_map = {"submixes": {"Main": {"index": 1}, "AES": {"index": 4},
+                                  "RE-150 In": {"index": 14}}}
+    b._migrate_physical_table()
+    t = b.channel_map["physical_table"]
+    assert t["rows"]["outputs"]["0"] == ["Main"]
+    assert t["rows"]["outputs"]["4"] == ["AES"]
+    assert t["rows"]["outputs"]["14"] == ["RE-150 In"]
+    assert t["source"]["outputs"] == "legacy_migration"
+    assert "inputs" not in t["rows"] or not t["rows"]["inputs"]
+    assert not persisted
