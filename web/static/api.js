@@ -111,6 +111,9 @@ window.API = (function () {
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },
 
+    /** GET /api/device/global → transport + heartbeat status, light read (#22) */
+    getGlobalStatus() { return _get('/api/device/global'); },
+
     /** GET /api/device/activity?since=ts → { now, channels: […] } (#8 wiggle) */
     getDeviceActivity(since) { return _get(`/api/device/activity?since=${since || 0}`); },
 

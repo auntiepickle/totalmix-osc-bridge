@@ -36,8 +36,14 @@ _connectWS();
 
 function _onWSMessage(event) {
   const data = JSON.parse(event.data);
+  const layoutChanged =
+    (data.current_workspace && data.current_workspace !== currentWorkspace) ||
+    (data.current_snapshot && data.current_snapshot !== currentSnapshot);
   if (data.current_workspace) currentWorkspace = data.current_workspace;
   if (data.current_snapshot) currentSnapshot = data.current_snapshot;
+  // #22: a switch re-pairs/renames channels — refresh the picker inventory
+  // and recompute every card's validity icon against the NEW layout
+  if (layoutChanged) _scheduleValidityRefresh();
 
   if (data.macro_event) {
     const ev = data.macro_event;
@@ -54,6 +60,13 @@ function _onWSMessage(event) {
     } else if (ev.type === 'macro_skipped') {
       flashLEDSkipped(ev.name);
       showSkipReason(ev.name, ev.reason);
+      // #22: persist on the card too — a completion update may follow and
+      // overwrite this with the truer ok/partial verdict
+      if (macros[ev.name]) {
+        macros[ev.name].last_fire = { status: 'skipped', reason: ev.reason,
+                                      skipped_steps: [], at: Date.now() / 1000 };
+        updateHealthLine(ev.name);
+      }
     } else if (ev.type === 'sweep_complete') {
       loadPicker();      // fresh table — refresh the routing inventory
       checkBankWidth();
@@ -170,7 +183,7 @@ function _updateNavDropdowns() {
 
   // Snapshot dropdown — scoped to the confirmed workspace
   const ssValues = wsKnown && snapMap[currentWorkspace]
-    ? Object.values(snapMap[currentWorkspace].snapshots || {})
+    ? _snapshotNames(snapMap[currentWorkspace])   // dual-shape safe (#22)
     : [];
   const ssKnown = ssValues.some(
     s => s.toLowerCase() === (currentSnapshot || '').toLowerCase()
@@ -194,7 +207,7 @@ window.switchToFromNav = async function() {
 
   // Refresh snapshot dropdown to match the workspace the user just picked
   const snapMap  = window._snapshotMap || {};
-  const ssValues = snapMap[ws] ? Object.values(snapMap[ws].snapshots || {}) : [];
+  const ssValues = snapMap[ws] ? _snapshotNames(snapMap[ws]) : [];
   if (ssSel) {
     ssSel.innerHTML =
       `<option value="" disabled selected>—</option>` +
@@ -227,7 +240,18 @@ function updateMacroCard(name) {
   const routingEl = document.querySelector(`#card-${name} .routing-label`);
   if (routingEl && m.routing_label) routingEl.textContent = m.routing_label;
 
+  updateHealthLine(name);   // #22: last-fire outcome rides macro_update
   if (m.last_trigger) pulseLED(name, m.last_trigger);
+}
+
+// Surgical refresh of the card's persistent health line (#22) — never a
+// full card re-render, so open editors and animations are untouched
+function updateHealthLine(name) {
+  const slot = document.querySelector(`#card-${name} .health-line-slot`);
+  const m = macros[name];
+  if (slot && m && typeof _healthLineHTML === 'function') {
+    slot.innerHTML = _healthLineHTML(m.last_fire);
+  }
 }
 
 // ── LED helpers ───────────────────────────────────────────────────────────────
@@ -397,7 +421,51 @@ async function pollHealth() {
     _applyHealthDot('mqtt-health-dot', false, 'MQTT');
     _applyHealthDot('osc-health-dot',  false, 'OSC');
   }
+  pollGlobalTransport();
   checkBankWidth();
+}
+
+// #22: after a layout change, wait for the device to settle, refresh the
+// picker (it provokes fresh row dumps itself), then recompute the warn
+// icons. Debounced — a workspace+snapshot switch arrives as two broadcasts.
+let _validityTimer = null;
+function _scheduleValidityRefresh() {
+  clearTimeout(_validityTimer);
+  _validityTimer = setTimeout(async () => {
+    try {
+      await loadPicker();
+      if (typeof refreshValidity === 'function') refreshValidity();
+    } catch (_) {}
+  }, 1200);
+}
+
+// #22: the OSC dot upgraded to REAL device liveness when Global OSC runs —
+// heartbeat age from the cyclic status stream (light read, no probe
+// traffic) instead of "an IP is configured". Classic-only deployments keep
+// the old dot untouched.
+async function pollGlobalTransport() {
+  try {
+    const g = await API.getGlobalStatus();
+    if (!g.running) return;               // classic-only — leave the dot be
+    // Snapshot switched ON THE DEVICE (TotalMix GUI/hardware — no bridge
+    // command, no WS broadcast): the slot states in the status feed are the
+    // only tell. Refresh validity when they move.
+    const snapKey = JSON.stringify(g.snapshots || {});
+    if (window._lastSnapKey !== undefined && snapKey !== window._lastSnapKey) {
+      _scheduleValidityRefresh();
+    }
+    window._lastSnapKey = snapKey;
+    const dot = document.getElementById('osc-health-dot');
+    if (!dot) return;
+    const age = g.alive ? g.alive.age_s : g.heartbeat_age_s;
+    const fresh = age != null && age < 5;
+    const staleish = age != null && age < 30;
+    dot.classList.remove('bg-green-400', 'bg-amber-400', 'bg-red-500', 'bg-zinc-700');
+    dot.classList.add(fresh ? 'bg-green-400' : staleish ? 'bg-amber-400' : 'bg-red-500');
+    dot.title = `Global OSC (${g.transport} transport) — device heartbeat ` +
+      (age != null ? `${age.toFixed(1)}s ago` : 'never received') +
+      (g.status && g.status.device ? ` · ${g.status.device}` : '');
+  } catch (_) { /* endpoint absent/older bridge — classic dot stands */ }
 }
 
 // ── Bank-width warning ────────────────────────────────────────────────────────

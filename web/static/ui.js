@@ -87,11 +87,19 @@ function macroTargetIssues(m) {
     const wsEntry = snapMap[m.workspace];
     if (!wsEntry) {
       issues.push(`workspace "${m.workspace}" not found in snapshot map`);
-    } else if (!Object.values(wsEntry.snapshots || {})
-        .some(v => String(v).toLowerCase() === String(m.snapshot).toLowerCase())) {
+    } else if (!_snapshotNames(wsEntry)
+        .some(n => n.toLowerCase() === String(m.snapshot).toLowerCase())) {
       issues.push(`snapshot "${m.snapshot}" not found in ${m.workspace}`);
     }
   }
+  // #22: raw steps on strip-positional pages write blind — strip numbers
+  // shift with stereo-link state, so the same step can hit a different
+  // channel per snapshot. Fixed-address pages (/3/ FX) are exempt.
+  (m.steps || []).forEach(step => {
+    if (!step.target && step.osc && /^\/[12]\//.test(step.osc)) {
+      issues.push(`raw step ${step.osc} writes a strip position blind — re-point it via the picker`);
+    }
+  });
   // #24: names checked against the LIVE picker inventory. A name absent
   // right now may still resolve at fire time via the bridge's learned
   // aliases (a pair absorbed it) — so this stays advisory wording.
@@ -133,6 +141,38 @@ function _issueStripHTML(issues, withSnapshotFixButton) {
   </div>`;
 }
 
+// #22: persistent last-fire outcome under the routing label — the truthful
+// counterpart to the transient LED flash. Rendered into a stable slot so
+// WS updates can refresh it surgically without re-rendering the card.
+function _healthLineHTML(lf) {
+  if (!lf || !lf.status) return '';
+  const t = new Date(lf.at * 1000).toLocaleTimeString();
+  if (lf.status === 'ok')
+    return `<p class="text-[10px] text-emerald-500">✓ fired ${t}</p>`;
+  if (lf.status === 'partial') {
+    const sk = lf.skipped_steps || [];
+    return `<p class="text-[10px] text-amber-400" title="${_esc(sk.join(', '))}">◐ fired ${t} — ${sk.length} step${sk.length === 1 ? '' : 's'} skipped (${_esc(sk[0] || '')})</p>`;
+  }
+  return `<p class="text-[10px] text-red-400">⚠ skipped ${t} — ${_esc(lf.reason || 'unknown')}</p>`;
+}
+
+function _warnIconHTML(issues) {
+  return issues.length
+    ? `<i class="fas fa-triangle-exclamation text-amber-400 text-xs" title="${_esc(issues.join('; '))}"></i>`
+    : '';
+}
+
+// #22 fix (field report): validity is checked against the PICKER inventory,
+// which changes when snapshots re-pair/rename channels — so the warn icons
+// must be recomputed after every switch, not just at page load. Surgical:
+// only the per-card warn slots update; open editors and animations survive.
+window.refreshValidity = function () {
+  Object.keys(macros).forEach(name => {
+    const slot = document.querySelector(`#card-${name} .warn-slot`);
+    if (slot) slot.innerHTML = _warnIconHTML(macroTargetIssues(macros[name]));
+  });
+};
+
 function createMacroCardHTML(name, m) {
   const midiLabel   = getMidiTriggerLabel(m);
   const routingLabel = m.routing_label || '—';
@@ -143,13 +183,14 @@ function createMacroCardHTML(name, m) {
     <div class="flex items-center gap-3 mb-1">
         <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
         <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
-        ${issues.length ? `<i class="fas fa-triangle-exclamation text-amber-400 text-xs shrink-0" title="${_esc(issues.join('; '))}"></i>` : ''}
+        <span class="warn-slot shrink-0">${_warnIconHTML(issues)}</span>
         ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
     </div>
     <!-- Description + routing label -->
     <div class="pl-6 mb-3">
         ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${_esc(m.description)}</p>` : ''}
         <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${_esc(routingLabel)}</p>
+        <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     </div>
     <!-- Progress bar -->
     <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3">
@@ -397,8 +438,8 @@ function toggleDetail(name) {
   const wsEntry = snapMap[m.workspace];
   const wsResolved = !m.workspace || !Object.keys(snapMap).length || !!wsEntry;
   const ssResolved = !m.snapshot || !Object.keys(snapMap).length
-    || (!!wsEntry && Object.values(wsEntry.snapshots || {})
-        .some(v => String(v).toLowerCase() === String(m.snapshot).toLowerCase()));
+    || (!!wsEntry && _snapshotNames(wsEntry)
+        .some(n => n.toLowerCase() === String(m.snapshot).toLowerCase()));
   const wsColor  = wsResolved  ? 'text-zinc-400' : 'text-red-400/70';
   const ssColor  = ssResolved  ? 'text-zinc-400' : 'text-red-400/70';
   const wsLabel  = m.workspace || '—';
@@ -453,12 +494,22 @@ function _buildWorkspaceOptions(current) {
   return html;
 }
 
+// Snapshot maps come in two shapes — {"2": "Live"} and
+// {"reset": {"index": 4}} / {"2": {"name": "Live"}} — mirror the bridge's
+// dual-shape handling: dict values fall back to their KEY as the name.
+// (#22 fix: Object.values on the dict shape stringified to
+// "[object Object]", making valid snapshots look missing.)
+function _snapshotNames(wsEntry) {
+  return Object.entries((wsEntry || {}).snapshots || {}).map(([k, v]) =>
+    (v && typeof v === 'object') ? String(v.name || k) : String(v));
+}
+
 // Build <option> list for snapshot select given a workspace.
 // Matching is case-insensitive — the bridge lowercases snapshot names.
 function _buildSnapshotOptions(workspace, current) {
   const snapMap = window._snapshotMap || {};
   const wsEntry = snapMap[workspace];
-  const snapshots = wsEntry ? Object.values(wsEntry.snapshots || {}) : [];
+  const snapshots = wsEntry ? _snapshotNames(wsEntry) : [];
   const matches = (s) => String(s).toLowerCase() === String(current || '').toLowerCase();
   let html = `<option value=""${!current ? ' selected' : ''}>— no switch —</option>`;
   if (current && !snapshots.some(matches)) {
@@ -486,7 +537,7 @@ window._editBuffers = window._editBuffers || {};
 // stripped when duplicating so clones start clean
 const RUNTIME_FIELDS = ['name', 'value', 'progress', 'lfo_active',
                         'last_trigger', 'osc_preview', 'midi_trigger',
-                        'routing_label'];
+                        'routing_label', 'last_fire'];
 
 function _cleanMacro(m) {
   const c = JSON.parse(JSON.stringify(m));
@@ -991,7 +1042,8 @@ window.applyRouting = function (name) {
     g.steps = (g.steps || []).filter(s => s.osc !== '/setSubmix');
     const pStep = _routableStep(g, name);
     const gTarget = { param: paramSel0.value };
-    if (pStep) { pStep.target = gTarget; pStep.osc = def0.addr; }
+    if (pStep) { _noteRetarget(name, JSON.stringify(pStep.target || null), gTarget, g.description);
+                 pStep.target = gTarget; pStep.osc = def0.addr; }
     else g.steps.push({ osc: def0.addr, target: gTarget, value: '{{param}}',
                         operation: { type: 'ramp', bars: 2, bpm: 140,
                                      range: [0, 1] } });
@@ -1011,7 +1063,8 @@ window.applyRouting = function (name) {
     const m0 = _harvestEditor(name);
     m0.steps = (m0.steps || []).filter(s => s.osc !== '/setSubmix');
     const pStep0 = _routableStep(m0, name);
-    if (pStep0) { pStep0.target = target; pStep0.osc = def0.addr; }
+    if (pStep0) { _noteRetarget(name, JSON.stringify(pStep0.target || null), target, m0.description);
+                  pStep0.target = target; pStep0.osc = def0.addr; }
     else m0.steps.push({ osc: def0.addr, target,
                          value: String(def0.default ?? 0.5) });
     editDetail(name);
@@ -1035,6 +1088,8 @@ window.applyRouting = function (name) {
   // state, so new macros carry no fallback — no feedback means the step
   // skips safely instead of writing a maybe-wrong strip
   if (paramStep) {
+    _noteRetarget(name, JSON.stringify(paramStep.target || null), target,
+                  m.description);
     paramStep.target = target;
     paramStep.osc = '';
   } else if (param === 'volume') {
@@ -1219,6 +1274,58 @@ window.pulseRouting = async function (name) {
   setTimeout(() => { const b = document.getElementById(`pulse-btn-${name}`);
                      if (b) b.textContent = 'pulse'; }, 1500);
 };
+
+// ── Description staleness (#22) ─────────────────────────────────────────────
+// Re-pointing a macro's routing leaves the freeform description describing
+// the OLD routing (seen live on an12_lfo_test). Rule: NEVER silently
+// rewrite the user's text — nudge with a hint + one-click rewrite instead.
+window._descStale = window._descStale || {};
+
+function _describeRouting(m) {
+  const step = (m.steps || []).find(s => s.target);
+  if (!step) return '';
+  const t = step.target || {};
+  const p = t.param || 'volume';
+  const def = PARAM_DEFS[p] || {};
+  const mode = step.operation
+    ? (step.operation.type === 'lfo' ? 'LFO' : 'ramp') : 'set';
+  if (def.global) return `${def.label || p} ${mode}`;
+  const rowTag = t.row === 2 ? ' (playback)' : t.row === 3 ? ' (output)' : '';
+  const dest = t.submix ? ` → ${t.submix}` : '';
+  return `${t.channel || '?'}${rowTag}${dest} ${(def.label || p).toLowerCase()} ${mode}`;
+}
+
+// Called by applyRouting after a retarget: hint only when there IS a
+// description and the target genuinely changed
+function _noteRetarget(name, beforeJson, afterTarget, description) {
+  if (description && beforeJson !== JSON.stringify(afterTarget || null)) {
+    window._descStale[name] = true;
+  }
+}
+
+window.rewriteDescription = function (name) {
+  const m = _harvestEditor(name);
+  m.description = _describeRouting(m) || m.description;
+  delete window._descStale[name];
+  editDetail(name);
+};
+
+// Description input row shared by both editors: rewrite button always one
+// click away; amber stale hint appears after a retarget
+function _descriptionRow(name, m, ic) {
+  const hint = window._descStale[name]
+    ? `<div class="text-[10px] text-amber-400 flex items-center gap-2">
+         <i class="fas fa-triangle-exclamation text-[9px]"></i>
+         routing changed — description may be stale
+       </div>` : '';
+  return `<div class="flex gap-2 items-center">
+      <input data-field="description" value="${_esc(m.description)}"
+          class="${ic}" placeholder="Description">
+      <button onclick="rewriteDescription('${name}')"
+          title="Rewrite the description from the current routing (${_esc(_describeRouting(m) || 'no routed step')})"
+          class="shrink-0 text-xs px-2 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white transition-all"><i class="fas fa-rotate"></i></button>
+    </div>${hint}`;
+}
 
 // The two identify buttons, shared by both editors' picker rows
 function _identifyButtons(name) {
@@ -1453,7 +1560,7 @@ function _renderAdvancedEditor(name, m, panel) {
   const hasChannelMap = ((window._picker || {}).outputs || []).length > 0;
   const routing = _currentRouting(m);
   const routingPickerHtml = hasChannelMap ? `<div>
-    <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Routing (from your device)</div>
+    <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">What — Routing (from your device)</div>
     <div class="flex gap-2 items-center flex-wrap">
       <div class="flex-1 min-w-[120px]">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Input channel</div>
@@ -1485,8 +1592,7 @@ function _renderAdvancedEditor(name, m, panel) {
     ${_editorModeToggle(name, 'advanced')}
     ${_issueStripHTML(macroTargetIssues(m), false)}
 
-    <input data-field="description" value="${_esc(m.description)}"
-        class="${ic}" placeholder="Description">
+    ${_descriptionRow(name, m, ic)}
 
     <div class="flex gap-2 items-center flex-wrap">
       <select data-field="fire_mode" class="${sc}">
@@ -1518,7 +1624,7 @@ function _renderAdvancedEditor(name, m, panel) {
     ${routingPickerHtml}
 
     <div>
-      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">Steps</div>
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">How — Steps</div>
       <div class="space-y-2">${stepsHtml || '<div class="text-zinc-600 text-xs italic">no steps yet</div>'}</div>
       <div class="flex gap-2 mt-2 flex-wrap">
         <button onclick="addEditorStep('${name}','value')"
@@ -1540,7 +1646,7 @@ function _renderAdvancedEditor(name, m, panel) {
     </div>
 
     <div>
-      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">MIDI Triggers</div>
+      <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">When — MIDI Triggers</div>
       <div class="space-y-1.5">${midiHtml || '<div class="text-zinc-600 text-xs italic">no triggers — fire from the UI or MQTT only</div>'}</div>
       <button onclick="addEditorTrigger('${name}')"
           class="text-xs text-zinc-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800 mt-2">
@@ -1631,8 +1737,7 @@ function _renderSimpleEditor(name, m, panel) {
     ${_editorModeToggle(name, 'simple')}
     ${_issueStripHTML(macroTargetIssues(m), false)}
 
-    <input data-field="description" value="${_esc(m.description)}"
-        class="${ic}" placeholder="Description">
+    ${_descriptionRow(name, m, ic)}
 
     <div class="flex gap-2">
       <div class="flex-1">
@@ -1731,6 +1836,7 @@ async function saveInlineEdit(name) {
 
 function cancelInlineEdit(name) {
   delete window._editBuffers[name];
+  delete window._descStale[name];   // stale hint is per-edit-session
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
   if (!panel) return;

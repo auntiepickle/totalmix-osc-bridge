@@ -63,7 +63,8 @@ async def get_macros():
     macros = bridge.mappings.get("macros", {})
     logger.info(f"✅ /api/macros → serving {len(macros)} macro cards to web client")
     return {
-        name: {**m, "routing_label": bridge.get_routing_label(name)}
+        name: {**m, "routing_label": bridge.get_routing_label(name),
+               "last_fire": bridge.macro_health.get(name)}
         for name, m in macros.items()
     }
 
@@ -214,6 +215,7 @@ MACRO_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 RUNTIME_FIELDS = (
     "name", "value", "progress", "lfo_active",
     "last_trigger", "osc_preview", "midi_trigger", "routing_label",
+    "last_fire",
 )
 
 
@@ -445,9 +447,12 @@ async def get_physical_table():
 
 
 @app.get("/api/device/global")
-def get_global_osc_status():
+def get_global_osc_status(probe: bool = False):
     # sync endpoint on purpose: alive() may block ~2s on a /sendstate
-    # probe — FastAPI runs sync handlers in the threadpool
+    # probe — FastAPI runs sync handlers in the threadpool.
+    # #22: probe defaults OFF so the header can poll this cheaply — the
+    # light path reports heartbeat age only; pass ?probe=true for the
+    # active /sendstate check (what the deploy verifications used).
     """Global OSC (#25) transport/listener status: which transport writes,
     heartbeat liveness, and what the Global listener has learned."""
     import config as cfg
@@ -468,7 +473,17 @@ def get_global_osc_status():
             "snapshots": {str(k): v for k, v in st.snapshots.items()},
         })
     if bridge.global_transport:
-        out["alive"] = bridge.global_transport.alive()
+        if probe:
+            out["alive"] = bridge.global_transport.alive()
+        else:
+            age = bridge.global_listener.state.heartbeat_age() \
+                if bridge.global_listener else None
+            out["alive"] = {
+                "alive": age is not None
+                    and age < bridge.global_transport.heartbeat_timeout_s,
+                "method": "heartbeat_age",
+                "age_s": round(age, 3) if age is not None else None,
+            }
     return out
 
 

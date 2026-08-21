@@ -135,6 +135,10 @@ class TotalMixOSCBridge:
         self.current_snapshot = None
         self.mqtt_client = None
         self.macro_live_state = {}
+        # #22: persistent per-macro last-fire outcome (survives page loads,
+        # unlike the transient flash/event). name -> {status: ok|partial|
+        # skipped, reason, skipped_steps, at}
+        self.macro_health = {}
         self.channel_map = None
         self.channel_map_is_example = False
         self._running_macros = set()        # names of macros currently executing
@@ -423,6 +427,15 @@ class TotalMixOSCBridge:
         self.broadcast_state()
         return True
 
+    def _record_fire(self, name, status, reason=None, skipped=None):
+        """#22 card health: remember how the last fire of a macro went."""
+        self.macro_health[name] = {
+            "status": status,               # "ok" | "partial" | "skipped"
+            "reason": reason,               # whole-macro skip reason
+            "skipped_steps": skipped or [], # per-step skip reasons (partial)
+            "at": time.time(),
+        }
+
     def run_macro(self, macro_name: str, param: float = 0.5, clock_bpm: float = None):
         if macro_name not in self.mappings.get("macros", {}):
             logger.error(f"Macro '{macro_name}' not found")
@@ -430,6 +443,7 @@ class TotalMixOSCBridge:
 
         if self.osc_client is None:
             logger.warning(f"Macro '{macro_name}' skipped — OSC not configured (set OSC_IP)")
+            self._record_fire(macro_name, "skipped", "osc_not_configured")
             self.broadcast_state(macro_event={
                 "type": "macro_skipped",
                 "name": macro_name,
@@ -545,6 +559,7 @@ class TotalMixOSCBridge:
                     f"   → '{macro_name}' skipped: WS/SS switch needed but "
                     f"{len(self._running_macros)-1} other macro(s) running (force_switch=False)"
                 )
+                self._record_fire(macro_name, "skipped", "ws_ss_blocked")
                 self.broadcast_state(macro_event={
                     "type": "macro_skipped",
                     "name": macro_name,
@@ -634,6 +649,7 @@ class TotalMixOSCBridge:
             # input row selected — both persist on the device and silently
             # mis-target every later macro (review finding).
             _bank_dirty = False
+            skip_reasons = []   # #22 health: per-step skips → "partial"
             # target steps never touch classic row state under the global
             # transport, so they cannot dirty it
             _row_dirty = (not self._global_active() and
@@ -648,8 +664,10 @@ class TotalMixOSCBridge:
                 # no bank/row state to dirty or restore. Raw-OSC steps
                 # (classic namespace) fall through to the classic path.
                 if "target" in step and self._global_active():
-                    self._run_step_global(step, macro_name, value,
-                                          cancel_event, clock_bpm)
+                    _fail = self._run_step_global(step, macro_name, value,
+                                                  cancel_event, clock_bpm)
+                    if _fail:
+                        skip_reasons.append(_fail)
                     continue
 
                 # CRASH GUARD for RAW steps: /setSubmix past the last real
@@ -691,6 +709,7 @@ class TotalMixOSCBridge:
                                      f"an out-of-range /setSubmix crashes "
                                      f"TotalMix; use a name-based target. "
                                      f"Macro aborted.")
+                        skip_reasons.append("setsubmix_unverifiable")
                         self.broadcast_state(macro_event={
                             "type": "macro_skipped",
                             "name": macro_name,
@@ -713,6 +732,7 @@ class TotalMixOSCBridge:
                         logger.error(f"   → step skipped: target "
                                      f"{step['target'].get('channel')}@"
                                      f"{step['target'].get('submix')} unresolved ({status})")
+                        skip_reasons.append(f"target_{status}")
                         self.broadcast_state(macro_event={
                             "type": "macro_skipped",
                             "name": macro_name,
@@ -756,6 +776,7 @@ class TotalMixOSCBridge:
                             logger.error(f"   → step skipped: {osc_addr} state "
                                          f"unknowable, cannot modulate a "
                                          f"momentary button blind")
+                            skip_reasons.append("button_state_unknown")
                             continue
                         op_client = _EdgeToggleClient(self.osc_client,
                                                       osc_addr, initial)
@@ -813,6 +834,9 @@ class TotalMixOSCBridge:
             logger.info(f"Macro '{macro_name}' complete")
 
             # === RICH MACRO UPDATE + macro_complete EVENT ===
+            self._record_fire(macro_name,
+                              "partial" if skip_reasons else "ok",
+                              skipped=skip_reasons)
             macro_data = self.mappings["macros"][macro_name]
             live_data = {
                 "name": macro_name,
@@ -824,6 +848,7 @@ class TotalMixOSCBridge:
                 "osc_preview": f"{(macro_data.get('steps') or [{}])[0].get('osc', '')} = {value:.3f}",
                 "routing_label": self.get_routing_label(macro_name),
                 "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None,
+                "last_fire": self.macro_health.get(macro_name),
             }
             self.macro_live_state[macro_name] = live_data
             self.broadcast_state(
@@ -1725,7 +1750,7 @@ class TotalMixOSCBridge:
                 "name": macro_name,
                 "reason": f"target_{status}",
             })
-            return
+            return f"target_{status}"   # #22 health: caller records it
         if "operation" in step and step.get("value") == "{{param}}":
             op_config = step["operation"]
             if op_config.get("bpm") == "clock":
