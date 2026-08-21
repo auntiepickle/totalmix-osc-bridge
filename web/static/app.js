@@ -447,14 +447,19 @@ async function pollGlobalTransport() {
   try {
     const g = await API.getGlobalStatus();
     if (!g.running) return;               // classic-only — leave the dot be
-    // Snapshot switched ON THE DEVICE (TotalMix GUI/hardware — no bridge
-    // command, no WS broadcast): the slot states in the status feed are the
-    // only tell. Refresh validity when they move.
-    const snapKey = JSON.stringify(g.snapshots || {});
-    if (window._lastSnapKey !== undefined && snapKey !== window._lastSnapKey) {
-      _scheduleValidityRefresh();
-    }
-    window._lastSnapKey = snapKey;
+    // Snapshot switched ON THE DEVICE (any source — TotalMix GUI, another
+    // remote, even a raw OSC recall): the slot-state feed proved unreliable
+    // in 2.1 b5 (live-verified: classic recalls didn't move it), but a
+    // switch always floods the change log with MANY channels at once,
+    // while a human wiggle touches one or two. Burst = refresh.
+    try {
+      const act = await API.getDeviceActivity(window._lastActivityTs || 0);
+      const distinct = (act.channels || []).length;
+      if (window._lastActivityTs !== undefined && distinct >= 6) {
+        _scheduleValidityRefresh();
+      }
+      window._lastActivityTs = act.now;
+    } catch (_) {}
     const dot = document.getElementById('osc-health-dot');
     if (!dot) return;
     const age = g.alive ? g.alive.age_s : g.heartbeat_age_s;
