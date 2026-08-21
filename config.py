@@ -26,6 +26,23 @@ OSC_MONITOR_PORT = int(os.getenv('OSC_MONITOR_PORT', '9001'))
 # the monitor and the listener cannot share the port simultaneously.
 ENABLE_OSC_LISTENER = os.getenv('ENABLE_OSC_LISTENER', 'True').lower() == 'true'
 OSC_LISTEN_PORT = int(os.getenv('OSC_LISTEN_PORT', os.getenv('OSC_MONITOR_PORT', '9001')))
+# === GLOBAL OSC TRANSPORT (#25 — TotalMix FX 2.1+ 'Global OSC' remote) ===
+# OSC_TRANSPORT selects the macro write path: 'classic' (default, the
+# proven aim-and-write path) or 'global' (absolute addressing, no aiming).
+# The Global remote is a SECOND remote in TotalMix (Remote 2) with its own
+# port pair — classic stays configured either way (workspace switching has
+# no Global equivalent).
+OSC_TRANSPORT = os.getenv('OSC_TRANSPORT', 'classic').strip().lower()
+GLOBAL_OSC_IP = os.getenv('GLOBAL_OSC_IP', os.getenv('OSC_IP') or '127.0.0.1')
+GLOBAL_OSC_PORT = int(os.getenv('GLOBAL_OSC_PORT', '7002'))
+GLOBAL_OSC_LISTEN_PORT = int(os.getenv('GLOBAL_OSC_LISTEN_PORT', '9002'))
+# Shadow mode: run the Global listener for observation/name-learning even
+# while the classic transport still does the writing.
+ENABLE_GLOBAL_OSC_LISTENER = (
+    os.getenv('ENABLE_GLOBAL_OSC_LISTENER', 'False').lower() == 'true'
+    or OSC_TRANSPORT == 'global')
+GLOBAL_HEARTBEAT_TIMEOUT_S = float(os.getenv('GLOBAL_HEARTBEAT_TIMEOUT_S', '5'))
+
 # === LOGGING SETTINGS (100 KB limit per file) ===
 BRIDGE_LOG_FILE = os.getenv('BRIDGE_LOG_FILE', 'bridge.log')
 OSC_MONITOR_LOG_FILE = os.getenv('OSC_MONITOR_LOG_FILE', 'osc_monitor.log')
