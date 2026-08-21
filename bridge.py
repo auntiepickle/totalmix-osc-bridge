@@ -404,13 +404,11 @@ class TotalMixOSCBridge:
                     snap_num = (snap_val.get("index") or snap_key)                         if isinstance(snap_val, dict) else snap_key
                     break
             if snap_num is not None:
+                # recall stays classic under every transport (#25 TASK 11:
+                # Global snapshot feedback unreliable; classic confirm isn't)
                 osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
                 with self._device_lock:
-                    if self._global_active():
-                        # #25: 1-based Global recall, feedback-confirmed
-                        self.global_transport.load_snapshot(int(snap_num))
-                    else:
-                        self.osc_client.send_message(osc_addr, 1.0)
+                    self.osc_client.send_message(osc_addr, 1.0)
                 self._outputs_cache = None
                 self._inputs_cache = None
                 self._layout_epoch = time.time()
@@ -585,22 +583,15 @@ class TotalMixOSCBridge:
                     if self.state_confirmed:
                         self._layout_epoch = time.time()
 
-                if snap_name and snap_num is not None and self._global_active():
-                    # #25: Global snapshot recall — 1-BASED address, no 9-N
-                    # button inversion, confirmed by feedback value 2.0
-                    ok = self.global_transport.load_snapshot(int(snap_num))
-                    self._outputs_cache = None
-                    self._inputs_cache = None
-                    self._layout_epoch = time.time()
-                    self.current_snapshot = snap_name
-                    self.state_confirmed = bool(ok)
-                    logger.info(f"   → Switched snapshot to '{snap_name}' via "
-                                f"Global OSC (/snapshot/load/{int(snap_num)}) "
-                                f"confirmed={ok}")
-                    if self.mqtt_client:
-                        self.mqtt_client.publish("totalmix/snapshot", str(snap_num), retain=True)
-                        logger.info(f"   → Published to HA → totalmix/snapshot = {snap_num}")
-                elif snap_name and snap_num is not None:
+                # #25 NOTE: snapshot recall deliberately stays CLASSIC even
+                # under the global transport. TASK 11 (2026-08-21) measured
+                # Global /snapshot/load feedback as unreliable — load/4
+                # never confirmed (2s penalty each) and the snapshots dict
+                # went stale vs reality — while classic button-echo confirm
+                # is 0.02–0.08s and consistent. The classic remote stays
+                # configured regardless (workspace switching has no Global
+                # equivalent), so this costs nothing.
+                if snap_name and snap_num is not None:
                     osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
                     t0 = time.time()
                     self.osc_client.send_message(osc_addr, 1.0)

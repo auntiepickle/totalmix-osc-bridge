@@ -199,7 +199,13 @@ class GlobalTransport:
     # ── switching ───────────────────────────────────────────────────
     def load_snapshot(self, snap_num, timeout=2.0):
         """Global OSC snapshot recall: 1-BASED, no 9-N button inversion.
-        Confirmed by feedback /snapshot/load/{n} == 2.0 ('active')."""
+        Confirmed by feedback /snapshot/load/{n} == 2.0 ('active').
+
+        NOT wired into the bridge (TASK 11, 2026-08-21): the load itself
+        works every time, but the confirmation feedback is unreliable in
+        2.1 b5 (load/4 never confirmed; snapshots dict went stale vs
+        reality). Bridge snapshot recall stays on the classic button-echo
+        path until RME's feedback firms up — then this is ready."""
         n = int(snap_num)
         self._client.send_message(f"/snapshot/load/{n}", 1.0)
         return self.listener.wait_for(

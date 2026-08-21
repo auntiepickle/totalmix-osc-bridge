@@ -110,18 +110,17 @@ def test_ramp_operation_runs_through_global_writer(global_rig, fake_osc):
     assert fake_osc.sent == []
 
 
-def test_snapshot_switch_uses_global_recall(global_rig, fake_osc):
-    b, gclient, listener = global_rig({"go": {
+def test_snapshot_and_workspace_stay_classic_under_global(global_rig,
+                                                          fake_osc):
+    # TASK 11 finding 1: Global /snapshot/load feedback is unreliable in
+    # 2.1 b5, so BOTH switch kinds stay on the classic remote even when
+    # the global transport does the param writing
+    b, gclient, _ = global_rig({"go": {
         "workspace": "Pill_setup", "snapshot": "Reset",
         "steps": []}})
-    # device will confirm slot 1 active
-    listener.state.ingest("/snapshot/load/1", (2.0,))
     b.run_macro("go", 0.5)
-    # workspace switching has no Global equivalent — stays classic
     assert ("/loadQuickWorkspace", 2.0) in fake_osc.sent
-    # snapshot recall is Global: 1-based, no 9-N inversion
-    assert ("/snapshot/load/1", 1.0) in gclient.sent
-    assert not [a for a in fake_osc.addresses()
-                if a.startswith("/3/snapshots")]
-    assert b.state_confirmed is True
+    assert ("/3/snapshots/8/1", 1.0) in fake_osc.sent  # slot 1 → 9-N index 8
+    assert not [a for a in gclient.addresses()
+                if a.startswith("/snapshot/load")]
     assert b.current_snapshot == "reset"
