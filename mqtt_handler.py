@@ -262,14 +262,19 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     snap_num = int(payload)
                     if 1 <= snap_num <= 8:
                         osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
-                        t0 = time.time()
-                        send_osc(osc_addr, 1.0, osc_ip, osc_port)
-                        bridge.state_confirmed = bridge._wait_device(
-                            lambda st, addr=osc_addr: (
-                                st.raw.get(addr, {}).get("args") == [1.0]
-                                and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
-                            timeout=1.0, fallback_sleep=0,
-                            what=f"MQTT snapshot #{snap_num} recall")
+                        if bridge._global_active():
+                            # #25: Global recall is 1-based + feedback-confirmed
+                            bridge.state_confirmed = bool(
+                                bridge.global_transport.load_snapshot(snap_num))
+                        else:
+                            t0 = time.time()
+                            send_osc(osc_addr, 1.0, osc_ip, osc_port)
+                            bridge.state_confirmed = bridge._wait_device(
+                                lambda st, addr=osc_addr: (
+                                    st.raw.get(addr, {}).get("args") == [1.0]
+                                    and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
+                                timeout=1.0, fallback_sleep=0,
+                                what=f"MQTT snapshot #{snap_num} recall")
                         if bridge.state_confirmed:
                             bridge._layout_epoch = time.time()  # TASK-6 race hardening
                         logger.info(f"Snapshot #{snap_num} recalled ({osc_addr})")

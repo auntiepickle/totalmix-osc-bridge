@@ -48,6 +48,9 @@ class FakeBridge:
         self.wait_device_calls.append(what)
         return True
 
+    def _global_active(self):
+        return False  # classic transport (#25 seam)
+
     def run_macro(self, name, param):
         self.run_macro_calls.append((name, param))
 

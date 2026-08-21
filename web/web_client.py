@@ -444,6 +444,34 @@ async def get_physical_table():
     return table
 
 
+@app.get("/api/device/global")
+def get_global_osc_status():
+    # sync endpoint on purpose: alive() may block ~2s on a /sendstate
+    # probe — FastAPI runs sync handlers in the threadpool
+    """Global OSC (#25) transport/listener status: which transport writes,
+    heartbeat liveness, and what the Global listener has learned."""
+    import config as cfg
+    out = {
+        "transport": cfg.OSC_TRANSPORT,
+        "listener_enabled": cfg.ENABLE_GLOBAL_OSC_LISTENER,
+        "running": bridge.global_listener is not None,
+    }
+    if bridge.global_listener:
+        st = bridge.global_listener.state
+        out.update({
+            "listen_port": bridge.global_listener.port,
+            "heartbeat_age_s": st.heartbeat_age(),
+            "status": dict(st.status),
+            "message_count": st.message_count,
+            "names": {row: st.channel_names(row)
+                      for row in ("inputs", "playbacks", "outputs")},
+            "snapshots": {str(k): v for k, v in st.snapshots.items()},
+        })
+    if bridge.global_transport:
+        out["alive"] = bridge.global_transport.alive()
+    return out
+
+
 @app.post("/api/device/probe")
 async def probe_device():
     """Liveness probe (kept through #24 — TASK 6 deviation fix): a state-
@@ -665,5 +693,6 @@ async def startup_event():
     threading.Thread(target=_keepalive, daemon=True).start()
     bridge.start_mqtt()
     bridge.start_osc_listener()
+    bridge.start_global_osc()   # #25: no-op unless enabled via env
     bridge.main_loop = asyncio.get_running_loop()
     print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT}) — MQTT ACTIVE")
