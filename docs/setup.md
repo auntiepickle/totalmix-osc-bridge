@@ -63,6 +63,21 @@ Only `OSC_IP` is required. Everything else has a default or is safe to omit.
 | `ENABLE_OSC_MONITOR` | `false` | Set to `true` to log incoming OSC from TotalMix |
 | `BRIDGE_LOG_FILE` | `bridge.log` | Path for the rotating log |
 | `OSC_MONITOR_PORT` | `9001` | UDP port for the OSC listener |
+| `OSC_TRANSPORT` | `classic` | `global` = write via Global OSC (TotalMix 2.1+, **the standard**) |
+| `GLOBAL_OSC_IP` | `OSC_IP` | TotalMix host for the Global remote |
+| `GLOBAL_OSC_PORT` | `7002` | Global remote's incoming port |
+| `GLOBAL_OSC_LISTEN_PORT` | `9002` | Where the bridge receives Global feedback |
+| `ENABLE_GLOBAL_OSC_LISTENER` | `false`* | Global feedback listener (*implied `true` when `OSC_TRANSPORT=global`) |
+
+**Global OSC is the standard transport** (sub-millisecond fires, absolute
+addressing, structural immunity to strip races). Classic remains the
+default only for compatibility with pre-2.1 TotalMix; it is **legacy** —
+new features target Global, and classic-mode gaps are documented rather
+than fixed (e.g. channel-identify *pulse* requires the Global transport;
+*wiggle* needs only the Global listener, which shadow mode provides).
+Snapshot and workspace switching intentionally use the classic remote
+under BOTH transports (2.1 b5 Global snapshot feedback is unreliable), so
+Remote 1 stays configured either way.
 
 Create a `.env` file next to `docker-compose.yml`:
 

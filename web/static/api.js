@@ -111,6 +111,12 @@ window.API = (function () {
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },
 
+    /** GET /api/device/activity?since=ts → { now, channels: […] } (#8 wiggle) */
+    getDeviceActivity(since) { return _get(`/api/device/activity?since=${since || 0}`); },
+
+    /** POST /api/device/pulse → blip a send audibly and restore (#8) */
+    pulseChannel(body) { return _post('/api/device/pulse', body); },
+
     /** POST /api/trigger/:name  { param, clock_bpm } */
     trigger(name, param = 1.0, clockBpm = null) {
       return _post(`/api/trigger/${encodeURIComponent(name)}`, {

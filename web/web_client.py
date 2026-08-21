@@ -472,6 +472,85 @@ def get_global_osc_status():
     return out
 
 
+@app.get("/api/device/activity")
+def get_device_activity(since: float = 0.0):
+    """Channel identify, world→screen half (#8): per-channel VALUE-CHANGE
+    activity from Global OSC feedback since a timestamp. Own bridge writes
+    never echo and dumps re-reporting unchanged values don't register, so
+    entries are (almost always) a human touching the device — the UI's
+    wiggle-to-learn polls this while armed."""
+    if bridge.global_listener is None:
+        raise HTTPException(status_code=503,
+                            detail="Global OSC listener not running")
+    st = bridge.global_listener.state
+    channels = st.recent_changes(since)
+    for e in channels:
+        names = st.channel_names(e["row_key"])
+        name = names.get(e["hw"])
+        if name is None and st.stereo.get(e["row_key"], {}).get(e["hw"] - 1):
+            # right member of a linked pair — the name lives at the left
+            name = names.get(e["hw"] - 1)
+        e["name"] = name
+    import time as _time
+    return {"now": _time.time(), "channels": channels}
+
+
+@app.post("/api/device/pulse")
+def pulse_channel(body: dict):
+    """Channel identify, screen→world half (#8): briefly blip the selected
+    send so the user can hear/see which physical channel it is. Two short
+    bumps (current+6 dB, floor -30 dB when the send is off), restored to
+    the exact prior level. Global transport only."""
+    import time as _time
+    import global_units as gu
+    if not bridge._global_active():
+        raise HTTPException(status_code=409,
+                            detail="pulse needs the Global OSC transport")
+    target = {"channel": body.get("channel", ""),
+              "submix": body.get("submix", ""),
+              "row": body.get("row", 1),
+              "param": "volume"}
+    writer, label, status = bridge.global_transport.resolve_step(target)
+    if status != "resolved":
+        raise HTTPException(status_code=422, detail=f"{label}: {status}")
+    # Current level in dB from live state; if unknown, provoke a targeted
+    # re-dump and wait. NEVER guess: restoring a guessed level could mute a
+    # live output — refuse instead.
+    st = bridge.global_listener.state
+    tx = bridge.global_transport._client
+
+    def _read_cur():
+        if writer.address.startswith("/mix/"):
+            _, _, src, in_hw, out_hw, _ = writer.address.split("/")
+            e = st.get_mix(src, int(in_hw), int(out_hw), "fader")
+        else:  # /output/{n}/faderlin — row-3 output fader
+            n = writer.address.split("/")[2]
+            e = st.get_param("outputs", int(n), "fader")
+        return e[0] if e else None
+
+    cur_db = _read_cur()
+    if cur_db is None:
+        if writer.address.startswith("/mix/"):
+            tx.send_message("/sendmix", 1.0)
+        else:
+            tx.send_message(f"/sendchan/output/{writer.address.split('/')[2]}", 1.0)
+        bridge.global_listener.wait_for(lambda s: _read_cur() is not None, 8.0)
+        cur_db = _read_cur()
+    if cur_db is None:
+        raise HTTPException(status_code=422,
+                            detail="current level unknown even after a "
+                                   "re-dump — refusing to pulse blind")
+    cur_lin = gu.fader_lin(cur_db)
+    pulse_lin = gu.fader_lin(max(cur_db + 6.0, -30.0))
+    for lin, hold in ((pulse_lin, 0.18), (cur_lin, 0.12),
+                      (pulse_lin, 0.18), (cur_lin, 0.0)):
+        writer.send_message("pulse", lin)
+        if hold:
+            _time.sleep(hold)
+    return {"pulsed": getattr(writer, "address", label),
+            "restored_db": round(cur_db, 2)}
+
+
 @app.post("/api/device/probe")
 async def probe_device():
     """Liveness probe (kept through #24 — TASK 6 deviation fix): a state-

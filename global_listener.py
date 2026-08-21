@@ -16,6 +16,7 @@ names arrive at the LEFT member only (unlike page-2 sweeps).
 import logging
 import threading
 import time
+from collections import deque
 
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
@@ -39,6 +40,12 @@ class GlobalDeviceState:
         self.last_heartbeat = 0.0
         self.message_count = 0
         self.pending_name_changes = set()   # (row_key, hw) — drained by the sync
+        # Human-activity log (#8 wiggle-to-learn): VALUE CHANGES only. Own
+        # bridge writes never echo (re-send OFF) and dumps re-reporting an
+        # unchanged value don't count, so entries here are almost always a
+        # person touching the device. First sight of a param (bootstrap
+        # dump) doesn't count either.
+        self.changes = deque(maxlen=400)    # (ts, row_key, hw, path, value)
 
     def heartbeat_age(self):
         with self._lock:
@@ -98,6 +105,9 @@ class GlobalDeviceState:
                     # a link change re-scopes the pair's alias merge
                     self.pending_name_changes.add((row_key, hw))
                     return
+                prev = self.params.get((row_key, hw, path))
+                if prev is not None and prev["value"] != arg0:
+                    self.changes.append((now, row_key, hw, path, arg0))
                 self.params[(row_key, hw, path)] = {"value": arg0, "ts": now}
                 return
             if head == "mix" and len(parts) >= 5:
@@ -107,6 +117,12 @@ class GlobalDeviceState:
                 except ValueError:
                     return
                 param = "/".join(parts[4:])
+                prev = self.mix.get((src, in_hw, out_hw, param))
+                if prev is not None and prev["value"] != arg0:
+                    # attribute the activity to the INPUT-side channel: a
+                    # mix-send change is someone moving that strip's fader
+                    row_key = "inputs" if src == "in" else "playbacks"
+                    self.changes.append((now, row_key, in_hw, param, arg0))
                 self.mix[(src, in_hw, out_hw, param)] = {"value": arg0, "ts": now}
                 return
             if head == "snapshot" and len(parts) >= 3 and parts[1] == "load":
@@ -117,6 +133,23 @@ class GlobalDeviceState:
                 return
             # everything else (reverb/echo/controlroom/...) → flat store
             self.params[("fx", 0, address.strip("/"))] = {"value": arg0, "ts": now}
+
+    def recent_changes(self, since):
+        """Aggregate the activity log per channel since a timestamp (#8):
+        [{row_key, hw, count, last_ts, last_param, last_value}], most-active
+        first. A deliberate fader wiggle produces many entries on one
+        channel; a stray click produces one — callers should threshold."""
+        agg = {}
+        with self._lock:
+            entries = [c for c in self.changes if c[0] > since]
+        for ts, row_key, hw, path, value in entries:
+            e = agg.setdefault((row_key, hw), {
+                "row_key": row_key, "hw": hw, "count": 0,
+                "last_ts": 0.0, "last_param": None, "last_value": None})
+            e["count"] += 1
+            if ts >= e["last_ts"]:
+                e.update(last_ts=ts, last_param=path, last_value=value)
+        return sorted(agg.values(), key=lambda e: -e["count"])
 
     def drain_name_changes(self):
         with self._lock:

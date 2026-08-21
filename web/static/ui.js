@@ -1126,6 +1126,110 @@ window.learnTrigger = function (name, i) {
   };
 };
 
+// ── Channel identify (#8) ───────────────────────────────────────────────────
+// Wiggle-to-learn (world → screen): arm, then move any fader or click any
+// control in TotalMix — the changed channel fills the routing picker. Same
+// mental model as MIDI learn, but the "controller" is the mixer itself.
+// The activity feed only contains value CHANGES from device-originated
+// messages (own bridge writes never echo), so audio passing through a
+// channel can't trigger it — only deliberate moves do.
+window._wiggleLearn = null;
+
+window.learnChannel = async function (name) {
+  const btn = document.getElementById(`wiggle-btn-${name}`);
+  if (window._wiggleLearn) {              // second click cancels
+    clearInterval(window._wiggleLearn.timer);
+    window._wiggleLearn = null;
+    if (btn) btn.textContent = 'wiggle';
+    return;
+  }
+  let since;
+  try { since = (await API.getDeviceActivity(0)).now; }
+  catch (e) {
+    if (btn) { btn.textContent = 'no feed'; btn.title = String(e.message || e);
+               setTimeout(() => { btn.textContent = 'wiggle'; }, 2000); }
+    return;
+  }
+  if (btn) btn.textContent = 'move a fader…';
+  const state = { name, deadline: Date.now() + 15000 };
+  state.timer = setInterval(async () => {
+    if (Date.now() > state.deadline) {
+      clearInterval(state.timer); window._wiggleLearn = null;
+      const b = document.getElementById(`wiggle-btn-${name}`);
+      if (b) b.textContent = 'wiggle';
+      return;
+    }
+    let data;
+    try { data = await API.getDeviceActivity(since); } catch (e) { return; }
+    // ≥3 changes = a deliberate wiggle; a single stray click doesn't count
+    const hit = (data.channels || []).find(c => c.count >= 3 && c.name);
+    if (!hit) return;
+    clearInterval(state.timer); window._wiggleLearn = null;
+    _applyWiggle(name, hit);
+  }, 500);
+  window._wiggleLearn = state;
+};
+
+function _applyWiggle(name, hit) {
+  const sendSel   = document.getElementById(`routing-send-${name}`);
+  const submixSel = document.getElementById(`routing-submix-${name}`);
+  const paramSel  = document.getElementById(`routing-param-${name}`);
+  if (!sendSel) return;
+  const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
+  if (hit.row_key === 'outputs') {
+    if (def.channelDetail) sendSel.value = `__out3__${hit.name}`;
+    else if (submixSel && !submixSel.disabled) {
+      submixSel.value = hit.name;
+      updateSendPickerOptions(name, sendSel.value);
+    }
+  } else if (hit.row_key === 'playbacks') {
+    sendSel.value = `__pb__${hit.name}`;
+  } else {
+    sendSel.value = hit.name;
+  }
+  // a value that matched no <option> leaves the select empty — applyRouting
+  // no-ops safely in that case and the button just resets
+  applyRouting(name);
+}
+
+// Pulse (screen → world): blip the selected send so you can hear/see which
+// physical channel the picker is pointing at. The bridge restores the exact
+// prior level; it refuses when the current level is unknowable.
+window.pulseRouting = async function (name) {
+  const btn = document.getElementById(`pulse-btn-${name}`);
+  const sendSel   = document.getElementById(`routing-send-${name}`);
+  const submixSel = document.getElementById(`routing-submix-${name}`);
+  const paramSel  = document.getElementById(`routing-param-${name}`);
+  if (!sendSel || !sendSel.value) return;
+  const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
+  if (def.global) return;      // global FX — nothing channel-shaped to blip
+  const raw = sendSel.value;
+  const body = raw.startsWith('__out3__') ? { channel: raw.slice(8), row: 3 }
+    : raw.startsWith('__pb__') ? { channel: raw.slice(6), row: 2,
+                                   submix: submixSel ? submixSel.value : '' }
+    : { channel: raw, row: 1, submix: submixSel ? submixSel.value : '' };
+  if (btn) btn.textContent = '…';
+  try {
+    await API.pulseChannel(body);
+    if (btn) btn.textContent = '♪';
+  } catch (e) {
+    if (btn) { btn.textContent = '!'; btn.title = String(e.message || e); }
+  }
+  setTimeout(() => { const b = document.getElementById(`pulse-btn-${name}`);
+                     if (b) b.textContent = 'pulse'; }, 1500);
+};
+
+// The two identify buttons, shared by both editors' picker rows
+function _identifyButtons(name) {
+  const cls = 'shrink-0 text-xs px-2 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-cyan-400 hover:text-white transition-all';
+  return `<button id="wiggle-btn-${name}" onclick="learnChannel('${name}')"
+      title="Learn from the device: arm, then wiggle a fader (or click any control) in TotalMix — the moved channel fills this picker"
+      class="${cls}">wiggle</button>
+    <button id="pulse-btn-${name}" onclick="pulseRouting('${name}')"
+      title="Blip the selected send briefly so you can hear/see which physical channel it is (level is restored exactly)"
+      class="${cls}">pulse</button>`;
+}
+
 window.addEditorTrigger = function (name) {
   const m = _harvestEditor(name);
   m.midi_triggers = m.midi_triggers || [];
@@ -1371,6 +1475,7 @@ function _renderAdvancedEditor(name, m, panel) {
           class="shrink-0 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs px-3 py-2 rounded-lg transition-all">
         Set routing
       </button>
+      ${_identifyButtons(name)}
     </div>
   </div>` : '';
 
@@ -1489,6 +1594,7 @@ function _renderSimpleEditor(name, m, panel) {
           ${_buildParamOptions(routing.param)}
         </select>
       </div>
+      <div class="shrink-0 flex gap-1">${_identifyButtons(name)}</div>
     </div>`
     : `<div class="text-xs text-zinc-500 italic">no channels discovered yet — run discovery from the gear menu first</div>`;
 
