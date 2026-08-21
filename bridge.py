@@ -143,6 +143,8 @@ class TotalMixOSCBridge:
         self._macro_lock = threading.Lock() # guards the three structures above (web + MQTT + queued threads)
         self.mqtt_connected = False         # set True/False by mqtt_handler callbacks
         self.osc_listener = None            # OSCListener — set by start_osc_listener()
+        self.global_listener = None         # GlobalOSCListener (#25) — start_global_osc()
+        self.global_transport = None        # GlobalTransport (#25) — active or shadow
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
         self.last_probe = None              # result of the last device liveness probe
         self.sweep_state = {"status": "idle"}      # physical-table sweep job state (#24)
@@ -402,6 +404,8 @@ class TotalMixOSCBridge:
                     snap_num = (snap_val.get("index") or snap_key)                         if isinstance(snap_val, dict) else snap_key
                     break
             if snap_num is not None:
+                # recall stays classic under every transport (#25 TASK 11:
+                # Global snapshot feedback unreliable; classic confirm isn't)
                 osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
                 with self._device_lock:
                     self.osc_client.send_message(osc_addr, 1.0)
@@ -579,6 +583,14 @@ class TotalMixOSCBridge:
                     if self.state_confirmed:
                         self._layout_epoch = time.time()
 
+                # #25 NOTE: snapshot recall deliberately stays CLASSIC even
+                # under the global transport. TASK 11 (2026-08-21) measured
+                # Global /snapshot/load feedback as unreliable — load/4
+                # never confirmed (2s penalty each) and the snapshots dict
+                # went stale vs reality — while classic button-echo confirm
+                # is 0.02–0.08s and consistent. The classic remote stays
+                # configured regardless (workspace switching has no Global
+                # equivalent), so this costs nothing.
                 if snap_name and snap_num is not None:
                     osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
                     t0 = time.time()
@@ -622,11 +634,23 @@ class TotalMixOSCBridge:
             # input row selected — both persist on the device and silently
             # mis-target every later macro (review finding).
             _bank_dirty = False
-            _row_dirty = any(str(s.get("target", {}).get("row", 1)) in ("2", "3")
-                             for s in macro.get("steps", []) if "target" in s)
+            # target steps never touch classic row state under the global
+            # transport, so they cannot dirty it
+            _row_dirty = (not self._global_active() and
+                          any(str(s.get("target", {}).get("row", 1)) in ("2", "3")
+                              for s in macro.get("steps", []) if "target" in s))
             try:
              for step in macro.get("steps", []):
                 osc_addr = step.get("osc")
+
+                # #25: name-targeted steps route through the Global
+                # transport when selected — absolute addressing, no aiming,
+                # no bank/row state to dirty or restore. Raw-OSC steps
+                # (classic namespace) fall through to the classic path.
+                if "target" in step and self._global_active():
+                    self._run_step_global(step, macro_name, value,
+                                          cancel_event, clock_bpm)
+                    continue
 
                 # CRASH GUARD for RAW steps: /setSubmix past the last real
                 # output crashes TotalMix (hardware root cause). A raw index
@@ -797,7 +821,7 @@ class TotalMixOSCBridge:
                 "progress": 100,
                 "lfo_active": False,
                 "last_trigger": time.time(),
-                "osc_preview": f"{macro_data.get('steps', [{}])[0].get('osc', '')} = {value:.3f}",
+                "osc_preview": f"{(macro_data.get('steps') or [{}])[0].get('osc', '')} = {value:.3f}",
                 "routing_label": self.get_routing_label(macro_name),
                 "midi_trigger": macro_data.get("midi_triggers", [{}])[0] if macro_data.get("midi_triggers") else None,
             }
@@ -1641,6 +1665,87 @@ class TotalMixOSCBridge:
                     logger.debug(f"startup summary failed: {e}")
             threading.Thread(target=_startup_summary, daemon=True).start()
 
+    # ─────────────────────────────────────────────────────────────
+    # GLOBAL OSC (#25): second remote, absolute addressing
+    # ─────────────────────────────────────────────────────────────
+    def _global_active(self):
+        """True when macro writes route through the Global transport.
+        Workspace switching stays classic regardless (no Global equivalent)."""
+        return OSC_TRANSPORT == "global" and self.global_transport is not None
+
+    def start_global_osc(self):
+        """Start the Global OSC listener (+ transport). In shadow mode
+        (ENABLE_GLOBAL_OSC_LISTENER=true, OSC_TRANSPORT=classic) the
+        listener observes and learns names while classic keeps writing."""
+        if not ENABLE_GLOBAL_OSC_LISTENER:
+            return
+        from global_listener import GlobalOSCListener
+        from global_transport import GlobalTransport
+        listener = GlobalOSCListener(GLOBAL_OSC_LISTEN_PORT)
+        if not listener.start():
+            logger.error("Global OSC listener failed to start — "
+                         "global transport unavailable")
+            return
+        self.global_listener = listener
+        client = get_client(GLOBAL_OSC_IP, GLOBAL_OSC_PORT)
+        self.global_transport = GlobalTransport(
+            client, listener, self._physical_table,
+            persist_cb=self._persist_after_global_names,
+            heartbeat_timeout_s=GLOBAL_HEARTBEAT_TIMEOUT_S)
+        self.global_transport.start()
+        mode = ("TRANSPORT ACTIVE" if OSC_TRANSPORT == "global"
+                else "shadow mode (observing only)")
+        logger.info(f"Global OSC {mode} → {GLOBAL_OSC_IP}:{GLOBAL_OSC_PORT} "
+                    f"(listening on {listener.port})")
+
+    def stop_global_osc(self):
+        if self.global_transport:
+            self.global_transport.stop()
+            self.global_transport = None
+        if self.global_listener:
+            self.global_listener.stop()
+            self.global_listener = None
+
+    def _persist_after_global_names(self):
+        if self.channel_map and not self.channel_map_is_example:
+            self._persist_channel_map_file(self.channel_map)
+
+    def _run_step_global(self, step, macro_name, value, cancel_event,
+                         clock_bpm):
+        """One name-targeted step over the Global transport. Handles its
+        own refusal events; raw-OSC steps never reach here (they stay on
+        the classic client — their addresses are classic-namespace)."""
+        writer, label, status = self.global_transport.resolve_step(
+            step["target"])
+        if status != "resolved":
+            logger.error(f"   → step skipped (global): {label!r} "
+                         f"unresolved ({status})")
+            self.broadcast_state(macro_event={
+                "type": "macro_skipped",
+                "name": macro_name,
+                "reason": f"target_{status}",
+            })
+            return
+        if "operation" in step and step.get("value") == "{{param}}":
+            op_config = step["operation"]
+            if op_config.get("bpm") == "clock":
+                resolved_bpm = clock_bpm if clock_bpm else 140
+                op_config = {**op_config, "bpm": resolved_bpm}
+                logger.info(f"   → BPM clock sync: using {resolved_bpm} BPM")
+            # Global switches are absolute sets (no edge-toggle shim
+            # needed): the writer's to_wire threshold turns the 0..1
+            # stream into clean 0/1 writes.
+            OperationRegistry.execute(
+                op_config["type"], writer, writer.address, value,
+                op_config, cancel_event=cancel_event)
+        else:
+            step_val = value if step.get("value") == "{{param}}" else step.get("value")
+            try:
+                writer.send_message(writer.address, float(step_val))
+                logger.info(f"   → {writer.address} = {step_val} (global)")
+            except Exception as e:
+                logger.error(f"Global OSC send failed: {e}")
+
     def start_mqtt(self):
         """Connect MQTT and start the client loop (web and standalone modes)."""
         logger.info("=== TOTALMIX OSC BRIDGE STARTING MQTT (web or standalone mode) ===")
@@ -1667,6 +1772,7 @@ logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegi
 if __name__ == "__main__":
     bridge.start_mqtt()   # re-uses the same function
     bridge.start_osc_listener()
+    bridge.start_global_osc()   # #25: no-op unless enabled via env
 
     try:
         while True:

@@ -186,19 +186,43 @@ Hardware-in-the-loop scripts (real MQTT broker, real UFX II) live in `tests/manu
 
 ---
 
-## Device capture (channel-map discovery)
+## TotalMix OSC configuration (the canonical client setup)
 
-The bridge listens for TotalMix's OSC feedback and can build `ufx2_channel_map.json` by interrogating the device — no more clicking through submixes with the log monitor.
+The bridge uses up to TWO OSC remotes in TotalMix, configured in
+**Options → Mixer Settings (F3) → OSC tab** (TotalMix FX 2.1; older
+versions call it Settings). Each remote is selected with the
+"Remote Controller Select" radio buttons.
 
-**One-time TotalMix configuration** (Options → Settings → OSC):
+**Remote 1 — classic protocol (required; drives macros today):**
 
 | Setting | Value |
 |---|---|
-| In Use | checked (Remote Controller Select 1) |
+| In Use | checked |
 | Port incoming | `7001` (must match `OSC_PORT`) |
 | Port outgoing | `9001` (must match `OSC_LISTEN_PORT`) |
 | IP or Host Name | IP of the machine running the bridge |
-| Number of Faders per Bank | **high enough to cover every channel** (e.g. 32) |
+| Number of Faders per Bank | **high enough to cover every channel** (e.g. 48) |
+| Compatibility (Mode) | `TotalMix 1.96` (the classic/default mode) |
+
+**Remote 2 — Global OSC (TotalMix FX 2.1+; the next-generation transport,
+issue #25):**
+
+| Setting | Value |
+|---|---|
+| In Use | checked |
+| Port incoming | `7002` (`GLOBAL_OSC_PORT`) |
+| Port outgoing | `9002` (`GLOBAL_OSC_LISTEN_PORT`) |
+| IP or Host Name | IP of the machine running the bridge |
+| Compatibility (Mode) | `Global OSC` |
+| Details… → Send changes | checked |
+| Details… → Send status cyclic | **checked** (the ~1/sec heartbeat the bridge uses for liveness) |
+| Details… → Receive on hidden channels | **checked** (hidden channels are otherwise silently dropped) |
+| Details… → Re-send options | **unchecked** (RME warns of ping-pong loops) |
+| Details… → Bandwidth Limitation | `500kByte/s` (default) |
+
+Also in the **Options menu**: "Enable OSC Control" checked; "Submix linked
+to OSC Controller 1" as required by the classic protocol; do NOT enable
+submix-linking for the Global remote.
 
 The fader-bank size matters: TotalMix only reports the strips inside the
 current bank over OSC. At the default of 8, discovery and live resolution can
@@ -207,19 +231,27 @@ appear. Raise it, then re-run discovery. (The bridge sends `/setBankStart 0`
 before every capture/resolution so a scrolled bank cannot shift indices —
 the address is 0-based.)
 
-**Several OSC settings are workspace-scoped and will NOT survive a workspace
-load unless you re-save the workspace after changing them.** Confirmed the
-hard way, twice:
+**CRITICAL: every OSC remote setting above is WORKSPACE-scoped and will NOT
+survive a workspace load unless you re-save the workspace.** Confirmed the
+hard way, three times now:
 
 | Setting | Observed behavior |
 |---|---|
 | Number of Faders per Bank | reverted 48 → 8 on workspace load |
-| Remote Controller Address | set, then gone after a TotalMix restart |
+| Remote Controller Address | wiped on workspace load (kills feedback = macros stop) |
+| Remote 2 "In Use" + mode | wiped on workspace load (kills Global OSC entirely) |
 
-The non-obvious required step: change the setting **while the workspace you
-perform in is loaded**, then **re-save that workspace** (and every other
-workspace you switch to — each carries its own copy). Loading any workspace
-— including by a macro — restores that workspace's stored values.
+The required procedure, **once per quick-workspace slot you ever load**
+(including by macros):
+
+1. Load the workspace (File → Workspace Quick Select, or fire a macro).
+2. Configure both remotes as above (the load just reverted them).
+3. **File → Workspace Quick Select → "Save current workspace as…"** — the
+   dialog prefills the current slot number and name; click Save.
+
+After that, loads of that workspace carry the settings and nothing breaks.
+A workspace you never load can keep stale settings harmlessly — but the
+moment something loads it, both remotes revert until it too is re-saved.
 
 Separately, stereo-link state and channel names change per **snapshot** —
 the bridge handles that at fire time by resolving channel names against live
@@ -233,20 +265,28 @@ states, not two: **48 = good, 8 = the workspace's bank setting was lost,
 0/null = nothing received yet** (not a narrow bank — run the connection
 check from the gear menu, or fire any macro, to prime it).
 
-**Run a discovery walk:**
+**First run — measure the device (one time per physical interface):**
+
+Click **"Measure channels"** on the setup banner in the web UI, or:
 
 ```bash
-# Start the walk (~16s with defaults: 16 submixes x 1s settle)
-curl -X POST http://YOUR-SERVER:8088/api/device/discover \
-  -H 'Content-Type: application/json' -d '{"submix_count": 16, "settle_s": 1.0}'
+# ~35s, read-only: reads each hardware channel's name at every fixed
+# position, both rows. Never switches submixes or writes parameters.
+curl -X POST http://YOUR-SERVER:8088/api/device/sweep \
+  -H 'Content-Type: application/json' -d '{}'
 
-# Poll for the result
-curl http://YOUR-SERVER:8088/api/device/discovery
-
-# Happy with it? Promote it to the live channel map (auto-backup first)
-curl -X POST http://YOUR-SERVER:8088/api/device/discovery/apply
+# Poll status / inspect the measured table
+curl http://YOUR-SERVER:8088/api/device/sweep
+curl http://YOUR-SERVER:8088/api/device/physical_table
 ```
 
-The walk selects each output submix in TotalMix (you will see the mixer switch submixes — do it while not performing), records the channel names and addresses the device reports, and writes a draft to `discovered_channel_map.json`.
+The sweep builds the *physical table* — hardware channel → observed names —
+which is the only stored mapping the bridge needs. It never goes stale:
+hardware positions are fixed; snapshots only rename/pair strips, and the
+bridge learns those aliases automatically as it runs. Re-run the sweep only
+if you replace the interface or want to reset accumulated aliases
+(`{"reset": true}`).
 
-`GET /api/device/state` shows everything the listener has captured, including a raw dump of every OSC address TotalMix has sent — useful for finding addresses for new mapping types.
+`GET /api/device/state` shows everything the classic listener has captured;
+`GET /api/device/picker` shows the live channel inventory the macro editor
+uses.

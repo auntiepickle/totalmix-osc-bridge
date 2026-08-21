@@ -261,6 +261,9 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                 try:
                     snap_num = int(payload)
                     if 1 <= snap_num <= 8:
+                        # recall stays classic under every transport (#25
+                        # TASK 11: Global snapshot feedback unreliable;
+                        # classic button-echo confirm is 0.02-0.08s solid)
                         osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
                         t0 = time.time()
                         send_osc(osc_addr, 1.0, osc_ip, osc_port)
