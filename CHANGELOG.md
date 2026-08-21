@@ -1,6 +1,39 @@
 # Changelog
 
-## Unreleased
+## v0.2.0-alpha — 2026-08-21 · the fixed-table architecture
+
+Everything below is hardware-verified on the UFX II via a four-round
+validation matrix (TASK 6–9, 8/8 standing) unless noted.
+
+### The physical hardware-channel table (#24 — the architecture pivot)
+- One measured per-device table replaces width maps, the layout library,
+  snapshot layout memory, and the discovery walk (all DELETED, ~-1100
+  lines). `/setSubmix` and `/setBankStart` are hardware-mono indexed
+  (RME-documented, sweep-proven): strip STARTS never move across
+  snapshots — only display names merge and split.
+- `POST /api/device/sweep` (~34s, read-only, never sends /setSubmix) is
+  the learning mechanism and how a fresh install bootstraps. Aliases
+  accumulate per hw channel ("AN 1" and "AN 1/2" both live at 0);
+  aim confirmations keep teaching the table incrementally.
+- Resolution: names resolve to measured hw starts; a vanished name
+  (absorbed into a pair) resolves to its covering channel or refuses
+  only itself; measured-table membership is the /setSubmix crash guard.
+- Snapshot switches are non-events: no walks, no banners, no map work.
+  The one remaining banner is a one-time "Measure channels" setup prompt.
+- Live-fed picker (#6): channel inventory comes from provoked, settled
+  row dumps — never the outgoing snapshot's row; nothing left to go stale.
+- Device facts captured on hardware: TotalMix dumps stream VALUES FIRST
+  and TRACKNAMES LAST (~200ms apart) — settling to quiescence is the
+  load-bearing freshness primitive (two races found and regression-
+  locked); /setSubmix is 0-based (Main = 0); bank sweeps past the
+  hardware end saturate harmlessly.
+
+### Global OSC enabled (groundwork for #25)
+- TotalMix FX 2.1 beta runs on the rig with Global OSC live on OSC
+  Remote 2 (classic untouched on Remote 1): absolute hw-channel
+  addressing, per-channel state dumps in real units, ~1/sec status
+  heartbeat, "Receive on hidden channels" on. Wire-verified; the bridge
+  transport is the next milestone.
 
 ### Simple patch mode (#9)
 - New default editor for simple-representable macros (one routed step, at
