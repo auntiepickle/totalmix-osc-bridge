@@ -190,12 +190,10 @@ GLOBAL_PARAM_MAP = {
     "alev_maxgain":  GlobalParam("channel", "autolevel/maxgain", *_alev_maxgain),
     "alev_headroom": GlobalParam("channel", "autolevel/headroom", *_alev_headroom),
     "alev_risetime": GlobalParam("channel", "autolevel/risetime", *_alev_risetime),
-    # Wire-measured 2026-08-21 on AN 1/2 (LINE input): 0..+12 dB linear,
-    # 3-dB-exact at quarter points, right member tracks identically.
-    # CAVEAT: mic channels (front combo inputs) have a wider preamp range
-    # classic normalization hid — unmeasured. This map UNDER-ranges there
-    # (caps at +12 dB, never overshoots); re-measure on a mic channel at a
-    # quiet-monitor moment before relying on mic-gain macros.
+    # Gain range depends on the input's HARDWARE CLASS (both wire-measured
+    # 2026-08-21): line inputs 0..+12 dB, mic preamps 0..75 dB. The base
+    # map here is the line range; the transport swaps in the mic range by
+    # hardware channel via input_gain_transforms() below.
     "input_gain":    GlobalParam("channel", "gain", *_linear(0.0, 12.0)),
     "input_gain_r":  GlobalParam("channel", "gain", *_linear(0.0, 12.0), lr=True),
     "phase":         GlobalParam("channel", "phase", _to_switch, _from_switch),
@@ -213,6 +211,27 @@ GLOBAL_PARAM_MAP = {
     "echo_volume":     GlobalParam("fx", "/echo/volume", *_fx_volume),
     "echo_width":      GlobalParam("fx", "/echo/width", *_fx_width),
 }
+
+
+# Per-hardware-channel input-gain ranges, wire-measured 2026-08-21 on the
+# UFX II (same fixed-hardware philosophy as the physical table): rear line
+# inputs AN 1-8 = hw 0-7 sweep 0..+12 dB; front mic/combo inputs 9-12 =
+# hw 8-11 sweep 0..75 dB (integer-stepped on the device; linked pairs gang
+# both members). Digital channels (hw 12+) have no gain stage at all —
+# their /sendchan dumps carry no 'gain' entry.
+INPUT_GAIN_RANGES = (
+    (range(0, 8), _linear(0.0, 12.0)),    # line
+    (range(8, 12), _linear(0.0, 75.0)),   # mic preamp
+)
+
+
+def input_gain_transforms(hw):
+    """(to_wire, from_wire) for an input's measured gain range, or None
+    when the channel has no gain stage (digital)."""
+    for chans, transforms in INPUT_GAIN_RANGES:
+        if int(hw) in chans:
+            return transforms
+    return None
 
 
 def calibrate(param: str, to_wire, from_wire):

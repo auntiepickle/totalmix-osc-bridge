@@ -20,7 +20,8 @@ class FakeClient:
 
 def make_table():
     t = pt.empty_table()
-    for hw, name in ((0, "Mic 1"), (2, "AN 1/2"), (3, "AN 1/2"), (6, "SPDIF")):
+    for hw, name in ((0, "Mic 1"), (2, "AN 1/2"), (3, "AN 1/2"), (6, "SPDIF"),
+                     (9, "Mic 10"), (14, "ADAT 1")):
         pt.merge_observation(t, "inputs", hw, name)
     pt.merge_observation(t, "inputs", 2, "AN 1")
     pt.merge_observation(t, "inputs", 3, "AN 2")
@@ -96,6 +97,26 @@ def test_lr_param_addresses_right_member(rig):
     w, _, status = tr.resolve_step({"channel": "AN 1/2", "param": "phase_r"})
     assert status == "resolved"
     assert w.address == "/input/3/phase"  # pair start 2 → right member 3
+
+
+def test_input_gain_range_by_hardware_class(rig):
+    tr, client, *_ = rig
+    # line input (hw 0): 0..12 dB
+    w, _, status = tr.resolve_step({"channel": "Mic 1", "param": "input_gain"})
+    assert status == "resolved"
+    w.send_message("x", 0.5)
+    # mic input (hw 9): 0..75 dB
+    w, _, status = tr.resolve_step({"channel": "Mic 10", "param": "input_gain"})
+    assert status == "resolved"
+    w.send_message("x", 0.5)
+    assert client.sent == [("/input/0/gain", 6.0), ("/input/9/gain", 37.5)]
+
+
+def test_input_gain_refused_on_digital_channel(rig):
+    tr, client, *_ = rig
+    w, _, status = tr.resolve_step({"channel": "ADAT 1", "param": "input_gain"})
+    assert (w, status) == (None, "unsupported_param")  # no gain stage
+    assert client.sent == []
 
 
 def test_fx_param_needs_no_channel(rig):

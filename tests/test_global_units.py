@@ -67,11 +67,16 @@ def test_hw5_measured_calibrations():
     assert m["echo_time"].to_wire(1.0) == pytest.approx(2.0)
     assert m["echo_feedback"].to_wire(0.5) == pytest.approx(50.0)
     assert m["echo_width"].to_wire(0.5) == pytest.approx(0.5)
-    # input gain: measured on AN 1/2 (LINE input) — 0..+12 dB linear;
-    # mic channels are wider (unmeasured) and this map under-ranges there
-    assert m["input_gain"].to_wire(0.25) == pytest.approx(3.0)
-    assert m["input_gain"].to_wire(1.0) == pytest.approx(12.0)
-    assert m["input_gain_r"].to_wire(0.5) == pytest.approx(6.0)
+    # input gain: BOTH hardware classes measured (line on AN 1/2, mic on
+    # the Pill Out pair) — range picked per channel via input_gain_transforms
+    assert m["input_gain"].to_wire(0.25) == pytest.approx(3.0)   # base = line
+    line_to, line_from = gu.input_gain_transforms(0)
+    assert line_to(1.0) == pytest.approx(12.0)
+    mic_to, mic_from = gu.input_gain_transforms(9)
+    assert mic_to(0.25) == pytest.approx(18.75)   # device displays 19
+    assert mic_to(1.0) == pytest.approx(75.0)
+    assert mic_from(38.0) == pytest.approx(38.0 / 75.0)
+    assert gu.input_gain_transforms(14) is None   # digital: no gain stage
 
 
 def test_lr_params_flagged():

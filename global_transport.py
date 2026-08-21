@@ -156,6 +156,14 @@ class GlobalTransport:
             return None, channel, "not_in_table"
 
         if gp.scope == "channel":
+            # input gain's real-unit range depends on the input's hardware
+            # class (line vs mic vs no-gain digital) — swap in the measured
+            # range for the resolved channel
+            if param in ("input_gain", "input_gain_r") and row == "1":
+                transforms = gu.input_gain_transforms(hw)
+                if transforms is None:
+                    return None, param, "unsupported_param"  # digital: no gain stage
+                gp = gu.GlobalParam(gp.scope, gp.path, *transforms, lr=gp.lr)
             return (ChannelParamWriter(self._client, row_word, hw, gp),
                     f"{channel} {param}", "resolved")
 
