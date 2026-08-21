@@ -83,6 +83,21 @@ def _linear(lo, hi):
     return to_wire, from_wire
 
 
+def _log_map(lo, hi):
+    """Log-taper knob (freq params): classic 0.5 lands on sqrt(lo*hi) —
+    wire-measured 2026-08-21 (20..20000 Hz mid = 632, exactly sqrt)."""
+    import math
+    ratio = hi / lo
+
+    def to_wire(v):
+        return lo * (ratio ** _clamp01(v))
+
+    def from_wire(w):
+        return _clamp01(math.log(max(float(w), lo) / lo) / math.log(ratio))
+
+    return to_wire, from_wire
+
+
 def _enum4(v):
     """classic eq-type enum {0.0, 0.3333, 0.6667, 1.0} -> index 0..3"""
     return float(round(_clamp01(v) * 3.0))
@@ -116,6 +131,19 @@ class GlobalParam:
         return self.to_wire is not None
 
 
+# HW-5 wire-measured 2026-08-21 (classic 3-point sweeps, UFX II,
+# TotalMix 2.1 b5): EQ bands homogeneous (band1==band3 measured)
+_eq_gain = _linear(-20.0, 20.0)
+_eq_freq = _log_map(20.0, 20000.0)
+_eq_q = _linear(0.4, 9.9)
+_lowcut_freq = _log_map(20.0, 500.0)
+_fx_volume = _linear(-65.0, 6.0)
+_fx_width = _linear(0.0, 1.0)
+_reverb_time = _linear(0.1, 5.0)
+_reverb_predelay = _linear(0.0, 999.0)
+_echo_delay = _linear(0.1, 2.0)
+_echo_feedback = _linear(0.0, 100.0)
+
 _dyn_gain = _linear(-30.0, 30.0)
 _comp_thresh = _linear(-60.0, 0.0)
 _ratio = _linear(1.0, 10.0)
@@ -136,20 +164,20 @@ GLOBAL_PARAM_MAP = {
 
     # ── channel detail (classic page 2) ─────────────────────────────
     "eq_enable":     GlobalParam("channel", "eq/enable", _to_switch, _from_switch),
-    "eq_gain_1":     GlobalParam("channel", "eq/band1gain", None, None),
-    "eq_gain_2":     GlobalParam("channel", "eq/band2gain", None, None),
-    "eq_gain_3":     GlobalParam("channel", "eq/band3gain", None, None),
-    "eq_freq_1":     GlobalParam("channel", "eq/band1freq", None, None),
-    "eq_freq_2":     GlobalParam("channel", "eq/band2freq", None, None),
-    "eq_freq_3":     GlobalParam("channel", "eq/band3freq", None, None),
-    "eq_q_1":        GlobalParam("channel", "eq/band1q", None, None),
-    "eq_q_2":        GlobalParam("channel", "eq/band2q", None, None),
-    "eq_q_3":        GlobalParam("channel", "eq/band3q", None, None),
+    "eq_gain_1":     GlobalParam("channel", "eq/band1gain", *_eq_gain),
+    "eq_gain_2":     GlobalParam("channel", "eq/band2gain", *_eq_gain),
+    "eq_gain_3":     GlobalParam("channel", "eq/band3gain", *_eq_gain),
+    "eq_freq_1":     GlobalParam("channel", "eq/band1freq", *_eq_freq),
+    "eq_freq_2":     GlobalParam("channel", "eq/band2freq", *_eq_freq),
+    "eq_freq_3":     GlobalParam("channel", "eq/band3freq", *_eq_freq),
+    "eq_q_1":        GlobalParam("channel", "eq/band1q", *_eq_q),
+    "eq_q_2":        GlobalParam("channel", "eq/band2q", *_eq_q),
+    "eq_q_3":        GlobalParam("channel", "eq/band3q", *_eq_q),
     "eq_type_1":     GlobalParam("channel", "eq/band1type", _enum4, _from_enum4),
     "eq_type_3":     GlobalParam("channel", "eq/band3type", _enum4, _from_enum4),
     "lowcut_enable": GlobalParam("channel", "lowcut/enable", _to_switch, _from_switch),
-    "lowcut_freq":   GlobalParam("channel", "lowcut/freq", None, None),
-    "lowcut_grade":  GlobalParam("channel", "lowcut/slope", None, None),
+    "lowcut_freq":   GlobalParam("channel", "lowcut/freq", *_lowcut_freq),
+    "lowcut_grade":  GlobalParam("channel", "lowcut/slope", _enum4, _from_enum4),
     "dyn_enable":    GlobalParam("channel", "dynamics/enable", _to_switch, _from_switch),
     "dyn_gain":      GlobalParam("channel", "dynamics/gain", *_dyn_gain),
     "comp_thresh":   GlobalParam("channel", "dynamics/compthres", *_comp_thresh),
@@ -169,15 +197,15 @@ GLOBAL_PARAM_MAP = {
 
     # ── global FX (classic page 3) ──────────────────────────────────
     "reverb_enable":   GlobalParam("fx", "/reverb/enable", _to_switch, _from_switch),
-    "reverb_time":     GlobalParam("fx", "/reverb/time", None, None),
-    "reverb_volume":   GlobalParam("fx", "/reverb/volume", None, None),
-    "reverb_width":    GlobalParam("fx", "/reverb/width", None, None),
-    "reverb_predelay": GlobalParam("fx", "/reverb/predelay", None, None),
+    "reverb_time":     GlobalParam("fx", "/reverb/time", *_reverb_time),
+    "reverb_volume":   GlobalParam("fx", "/reverb/volume", *_fx_volume),
+    "reverb_width":    GlobalParam("fx", "/reverb/width", *_fx_width),
+    "reverb_predelay": GlobalParam("fx", "/reverb/predelay", *_reverb_predelay),
     "echo_enable":     GlobalParam("fx", "/echo/enable", _to_switch, _from_switch),
-    "echo_time":       GlobalParam("fx", "/echo/delay", None, None),
-    "echo_feedback":   GlobalParam("fx", "/echo/feedback", None, None),
-    "echo_volume":     GlobalParam("fx", "/echo/volume", None, None),
-    "echo_width":      GlobalParam("fx", "/echo/width", None, None),
+    "echo_time":       GlobalParam("fx", "/echo/delay", *_echo_delay),
+    "echo_feedback":   GlobalParam("fx", "/echo/feedback", *_echo_feedback),
+    "echo_volume":     GlobalParam("fx", "/echo/volume", *_fx_volume),
+    "echo_width":      GlobalParam("fx", "/echo/width", *_fx_width),
 }
 
 

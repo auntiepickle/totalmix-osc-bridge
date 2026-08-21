@@ -82,7 +82,7 @@ def test_global_refusal_emits_skip_event(global_rig, fake_osc):
 
 def test_uncalibrated_param_refused_end_to_end(global_rig, fake_osc):
     b, gclient, _ = global_rig({"eq": {"steps": [{
-        "target": {"channel": "Mic 1", "param": "eq_gain_1"},
+        "target": {"channel": "Mic 1", "param": "input_gain"},
         "value": "{{param}}"}]}})
     b.run_macro("eq", 0.5)
     assert _skips(b) == ["target_uncalibrated_param"]

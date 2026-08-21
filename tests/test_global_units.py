@@ -40,11 +40,35 @@ def test_switches_pan_and_enums():
 
 
 def test_uncalibrated_params_are_marked_and_refusable():
+    # only the preamp gain remains unmeasured (audible-risk sweep deferred;
+    # digital channels have no gain param at all)
     m = gu.GLOBAL_PARAM_MAP
-    for p in ("eq_gain_1", "eq_freq_2", "lowcut_freq", "input_gain",
-              "reverb_time", "echo_feedback"):
-        assert not m[p].calibrated
+    assert not m["input_gain"].calibrated
+    assert not m["input_gain_r"].calibrated
     assert m["volume"].calibrated and m["mute"].calibrated
+
+
+def test_hw5_measured_calibrations():
+    """Wire-measured 2026-08-21 (classic 3-point sweeps on the UFX II)."""
+    m = gu.GLOBAL_PARAM_MAP
+    assert m["eq_gain_1"].to_wire(0.0) == -20.0
+    assert m["eq_gain_1"].to_wire(1.0) == 20.0
+    assert m["eq_gain_2"].to_wire(0.5) == pytest.approx(0.0)
+    # freq knobs are LOG taper: classic 0.5 measured at 632 Hz = sqrt(20*20k)
+    assert m["eq_freq_1"].to_wire(0.5) == pytest.approx(632.455, abs=0.01)
+    assert m["eq_freq_1"].to_wire(0.0) == pytest.approx(20.0)
+    assert m["eq_freq_1"].to_wire(1.0) == pytest.approx(20000.0)
+    assert m["eq_freq_1"].from_wire(632.455) == pytest.approx(0.5, abs=1e-4)
+    assert m["eq_q_1"].to_wire(0.0) == pytest.approx(0.4)
+    assert m["eq_q_1"].to_wire(1.0) == pytest.approx(9.9)
+    assert m["lowcut_freq"].to_wire(0.5) == pytest.approx(100.0)  # sqrt(20*500)
+    assert m["lowcut_grade"].to_wire(1.0) == 3.0                  # enum 0..3
+    assert m["reverb_time"].to_wire(0.5) == pytest.approx(2.55)
+    assert m["reverb_volume"].to_wire(0.5) == pytest.approx(-29.5)
+    assert m["reverb_predelay"].to_wire(1.0) == pytest.approx(999.0)
+    assert m["echo_time"].to_wire(1.0) == pytest.approx(2.0)
+    assert m["echo_feedback"].to_wire(0.5) == pytest.approx(50.0)
+    assert m["echo_width"].to_wire(0.5) == pytest.approx(0.5)
 
 
 def test_lr_params_flagged():
@@ -54,10 +78,10 @@ def test_lr_params_flagged():
 
 
 def test_calibrate_installs_transform():
-    gu.calibrate("lowcut_freq", *gu._linear(20.0, 500.0))
+    gu.calibrate("input_gain", *gu._linear(0.0, 75.0))
     try:
-        assert gu.GLOBAL_PARAM_MAP["lowcut_freq"].calibrated
-        assert gu.GLOBAL_PARAM_MAP["lowcut_freq"].to_wire(0.0) == 20.0
+        assert gu.GLOBAL_PARAM_MAP["input_gain"].calibrated
+        assert gu.GLOBAL_PARAM_MAP["input_gain"].to_wire(0.0) == 0.0
     finally:
-        gu.GLOBAL_PARAM_MAP["lowcut_freq"].to_wire = None
-        gu.GLOBAL_PARAM_MAP["lowcut_freq"].from_wire = None
+        gu.GLOBAL_PARAM_MAP["input_gain"].to_wire = None
+        gu.GLOBAL_PARAM_MAP["input_gain"].from_wire = None

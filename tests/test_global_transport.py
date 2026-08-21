@@ -176,7 +176,8 @@ def test_unknown_param_refused(rig):
 
 def test_uncalibrated_param_refused(rig):
     tr, client, *_ = rig
-    w, _, status = tr.resolve_step({"channel": "Mic 1", "param": "eq_gain_1"})
+    # input_gain is the one param still awaiting a wire calibration
+    w, _, status = tr.resolve_step({"channel": "Mic 1", "param": "input_gain"})
     assert (w, status) == (None, "uncalibrated_param")
     assert client.sent == []  # refusal means nothing hits the wire
 
