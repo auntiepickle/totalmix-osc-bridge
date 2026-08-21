@@ -13,6 +13,15 @@ Honest edges of the pre-alpha, kept current so nobody re-discovers them.
 - **Review batch fixes** (device lock, ordered ingestion, freshness
   floors): unit-tested; a hardware regression round is queued with the
   server agent.
+- **Hidden channels (Channel Layout presets)**: the physical table was
+  measured with all channels visible. Classic OSC skips hidden channels
+  in STRIP numbering (community-documented); whether hiding also shifts
+  the hardware-offset commands we aim with (`/setBankStart`,
+  `/setSubmix`) has never been measured. Accepted unmeasured by user
+  decision (2026-08-21): this rig hides nothing, and the Global OSC
+  migration (#25) resolves it properly via its "Receive to hidden
+  channels" option. If you start hiding channels before #25 lands,
+  re-run the sweep experiment first.
 
 ## By design / device constraints
 - The **discovery walk cannot be replaced** — submix name→index is not
