@@ -174,9 +174,12 @@ def test_unknown_param_refused(rig):
     assert (w, status) == (None, "unsupported_param")
 
 
-def test_uncalibrated_param_refused(rig):
+def test_uncalibrated_param_refused(rig, monkeypatch):
     tr, client, *_ = rig
-    # input_gain is the one param still awaiting a wire calibration
+    # the map is fully measured now — synthesize an uncalibrated param to
+    # prove the refusal path stays wired
+    import global_units as gu
+    monkeypatch.setattr(gu.GLOBAL_PARAM_MAP["input_gain"], "to_wire", None)
     w, _, status = tr.resolve_step({"channel": "Mic 1", "param": "input_gain"})
     assert (w, status) == (None, "uncalibrated_param")
     assert client.sent == []  # refusal means nothing hits the wire

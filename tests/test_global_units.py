@@ -39,13 +39,11 @@ def test_switches_pan_and_enums():
     assert m["eq_type_1"].from_wire(3.0) == pytest.approx(1.0)
 
 
-def test_uncalibrated_params_are_marked_and_refusable():
-    # only the preamp gain remains unmeasured (audible-risk sweep deferred;
-    # digital channels have no gain param at all)
-    m = gu.GLOBAL_PARAM_MAP
-    assert not m["input_gain"].calibrated
-    assert not m["input_gain_r"].calibrated
-    assert m["volume"].calibrated and m["mute"].calibrated
+def test_every_param_is_calibrated():
+    # as of 2026-08-21 the whole map is wire-measured (input_gain was the
+    # last, swept on AN 1/2) — an uncalibrated entry would be a regression
+    bad = [k for k, p in gu.GLOBAL_PARAM_MAP.items() if not p.calibrated]
+    assert bad == []
 
 
 def test_hw5_measured_calibrations():
@@ -69,6 +67,11 @@ def test_hw5_measured_calibrations():
     assert m["echo_time"].to_wire(1.0) == pytest.approx(2.0)
     assert m["echo_feedback"].to_wire(0.5) == pytest.approx(50.0)
     assert m["echo_width"].to_wire(0.5) == pytest.approx(0.5)
+    # input gain: measured on AN 1/2 (LINE input) — 0..+12 dB linear;
+    # mic channels are wider (unmeasured) and this map under-ranges there
+    assert m["input_gain"].to_wire(0.25) == pytest.approx(3.0)
+    assert m["input_gain"].to_wire(1.0) == pytest.approx(12.0)
+    assert m["input_gain_r"].to_wire(0.5) == pytest.approx(6.0)
 
 
 def test_lr_params_flagged():
@@ -78,10 +81,11 @@ def test_lr_params_flagged():
 
 
 def test_calibrate_installs_transform():
+    p = gu.GLOBAL_PARAM_MAP["input_gain"]
+    orig = (p.to_wire, p.from_wire)
     gu.calibrate("input_gain", *gu._linear(0.0, 75.0))
     try:
-        assert gu.GLOBAL_PARAM_MAP["input_gain"].calibrated
-        assert gu.GLOBAL_PARAM_MAP["input_gain"].to_wire(0.0) == 0.0
+        assert p.calibrated
+        assert p.to_wire(1.0) == 75.0
     finally:
-        gu.GLOBAL_PARAM_MAP["input_gain"].to_wire = None
-        gu.GLOBAL_PARAM_MAP["input_gain"].from_wire = None
+        p.to_wire, p.from_wire = orig

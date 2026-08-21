@@ -190,8 +190,14 @@ GLOBAL_PARAM_MAP = {
     "alev_maxgain":  GlobalParam("channel", "autolevel/maxgain", *_alev_maxgain),
     "alev_headroom": GlobalParam("channel", "autolevel/headroom", *_alev_headroom),
     "alev_risetime": GlobalParam("channel", "autolevel/risetime", *_alev_risetime),
-    "input_gain":    GlobalParam("channel", "gain", None, None),
-    "input_gain_r":  GlobalParam("channel", "gain", None, None, lr=True),
+    # Wire-measured 2026-08-21 on AN 1/2 (LINE input): 0..+12 dB linear,
+    # 3-dB-exact at quarter points, right member tracks identically.
+    # CAVEAT: mic channels (front combo inputs) have a wider preamp range
+    # classic normalization hid — unmeasured. This map UNDER-ranges there
+    # (caps at +12 dB, never overshoots); re-measure on a mic channel at a
+    # quiet-monitor moment before relying on mic-gain macros.
+    "input_gain":    GlobalParam("channel", "gain", *_linear(0.0, 12.0)),
+    "input_gain_r":  GlobalParam("channel", "gain", *_linear(0.0, 12.0), lr=True),
     "phase":         GlobalParam("channel", "phase", _to_switch, _from_switch),
     "phase_r":       GlobalParam("channel", "phase", _to_switch, _from_switch, lr=True),
 

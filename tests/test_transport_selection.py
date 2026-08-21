@@ -80,7 +80,10 @@ def test_global_refusal_emits_skip_event(global_rig, fake_osc):
     assert gclient.sent == [] and fake_osc.sent == []
 
 
-def test_uncalibrated_param_refused_end_to_end(global_rig, fake_osc):
+def test_uncalibrated_param_refused_end_to_end(global_rig, fake_osc,
+                                               monkeypatch):
+    import global_units as gu
+    monkeypatch.setattr(gu.GLOBAL_PARAM_MAP["input_gain"], "to_wire", None)
     b, gclient, _ = global_rig({"eq": {"steps": [{
         "target": {"channel": "Mic 1", "param": "input_gain"},
         "value": "{{param}}"}]}})
