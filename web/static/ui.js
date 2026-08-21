@@ -1151,7 +1151,8 @@ window.learnChannel = async function (name) {
     return;
   }
   if (btn) btn.textContent = 'move a fader…';
-  const state = { name, deadline: Date.now() + 15000 };
+  // 30s: enough to arm here and walk to the rack before wiggling
+  const state = { name, deadline: Date.now() + 30000 };
   state.timer = setInterval(async () => {
     if (Date.now() > state.deadline) {
       clearInterval(state.timer); window._wiggleLearn = null;
