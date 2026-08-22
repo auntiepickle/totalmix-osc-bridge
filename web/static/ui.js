@@ -271,7 +271,7 @@ function _knobStripHTML(name, m, step) {
   return `
 <div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-4 rounded-2xl transition-colors duration-200">
     <div class="flex items-center gap-2 mb-1">
-        <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
+        ${_nameHTML(name)}
         <span class="warn-slot shrink-0">${_warnIconHTML(issues)}</span>
         ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
     </div>
@@ -306,6 +306,58 @@ function _renderKnobSection(names) {
     : `<div class="col-span-full text-xs text-zinc-600 italic">no knobs yet — <b>New Knob</b> binds a channel parameter to a MIDI control</div>`;
 }
 
+// Double-click a card's name to rename it inline, like a normal text field.
+// Enter commits, Esc cancels, blur commits. The name is the mappings key, so
+// the bridge renames the key in place and re-syncs every tab.
+function _nameHTML(name) {
+  return `<h3 id="name-${name}" ondblclick="startRename('${name}')" title="Double-click to rename"
+      class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight cursor-text">${name}</h3>`;
+}
+
+window.startRename = function (name) {
+  const h = document.getElementById(`name-${name}`);
+  if (!h || h.dataset.editing) return;
+  h.dataset.editing = '1';
+  const input = document.createElement('input');
+  input.value = name;
+  input.className = 'text-sm font-bold text-white font-mono tracking-tight bg-zinc-950 border border-orange-400 rounded-lg px-2 py-0.5 flex-1 min-w-0 focus:outline-none';
+  input.setAttribute('maxlength', '64');
+  input.title = 'letters, digits, _ or - · Enter to save · Esc to cancel';
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return;
+    done = true;
+    const newName = input.value.trim();
+    if (!commit || newName === name) { input.replaceWith(h); delete h.dataset.editing; return; }
+    if (!MACRO_NAME_RE.test(newName)) {
+      input.classList.add('border-red-500'); done = false;
+      input.title = 'Name must be 1–64 chars: letters, digits, _ or -'; return;
+    }
+    if (macros[newName]) {
+      input.classList.add('border-red-500'); done = false;
+      input.title = `"${newName}" already exists`; return;
+    }
+    try {
+      await API.renameMacro(name, newName);
+      macros[newName] = macros[name];
+      delete macros[name];
+      window._lastLocalSave = { name: newName, ts: Date.now() };
+      renderCards();
+    } catch (e) {
+      input.classList.add('border-red-500'); done = false;
+      input.title = `Rename failed: ${e.message}`;
+    }
+  };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+  h.replaceWith(input);
+  input.focus();
+  input.select();
+};
+
 function createMacroCardHTML(name, m) {
   const knobStep    = _knobStepOf(m);
   const midiLabel   = getMidiTriggerLabel(m);
@@ -316,7 +368,7 @@ function createMacroCardHTML(name, m) {
     <!-- Header: LED · name/desc · warn badge · MIDI badge -->
     <div class="flex items-center gap-3 mb-1">
         <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
-        <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
+        ${_nameHTML(name)}
         <span class="warn-slot shrink-0">${_warnIconHTML(issues)}</span>
         ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
     </div>

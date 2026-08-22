@@ -237,3 +237,25 @@ def test_map_strip_count_counts_input_row_only(monkeypatch):
     assert body["channel_map_strip_count"] == 2  # input rows only
 
 
+
+
+def test_rename_macro_moves_key_and_state(monkeypatch):
+    """Rename keeps dict order, carries runtime state, rejects collisions."""
+    import web.web_client as wc
+    monkeypatch.setattr(wc, "_persist_mappings", lambda: None)   # no disk writes
+    b = bridge_module.bridge
+    macros = b.mappings.setdefault("macros", {})
+    macros["zz_old"] = {"steps": []}
+    b.macro_health["zz_old"] = {"status": "ok"}
+    try:
+        r = client.post("/api/config/macros/zz_old/rename", json={"new_name": "zz_new"})
+        assert r.status_code == 200 and r.json()["macro"] == "zz_new"
+        assert "zz_new" in macros and "zz_old" not in macros
+        assert b.macro_health["zz_new"]["status"] == "ok"
+        assert client.post("/api/config/macros/zz_new/rename", json={"new_name": "bad name!"}).status_code == 400
+        existing = next(n for n in macros if n != "zz_new")
+        assert client.post("/api/config/macros/zz_new/rename", json={"new_name": existing}).status_code == 409
+        assert client.post("/api/config/macros/nope/rename", json={"new_name": "x"}).status_code == 404
+    finally:
+        macros.pop("zz_new", None); macros.pop("zz_old", None)
+        b.macro_health.pop("zz_new", None); b.macro_health.pop("zz_old", None)

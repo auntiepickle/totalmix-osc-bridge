@@ -299,6 +299,40 @@ async def delete_macro(macro_name: str):
     return {"status": "success", "macro": macro_name}
 
 
+@app.post("/api/config/macros/{macro_name}/rename")
+async def rename_macro(macro_name: str, body: dict):
+    """Rename a macro in place (the name is the mappings key). Keeps its
+    position in the dict, carries runtime state (health, knob value) over,
+    persists, and broadcasts deleted+created so every tab re-syncs."""
+    new_name = str(body.get("new_name", "")).strip()
+    macros = bridge.mappings.get("macros", {})
+    if macro_name not in macros:
+        raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
+    if not MACRO_NAME_RE.match(new_name):
+        raise HTTPException(status_code=400,
+                            detail="Name must be 1-64 chars: letters, digits, _ or -")
+    if new_name == macro_name:
+        return {"status": "unchanged", "macro": macro_name}
+    if new_name in macros:
+        raise HTTPException(status_code=409, detail=f"'{new_name}' already exists")
+    # reorder IN PLACE (same dict object): bridge.MAPPINGS and any held
+    # references keep working, and the macro keeps its position
+    items = list(macros.items())
+    macros.clear()
+    for k, v in items:
+        macros[new_name if k == macro_name else k] = v
+    for store in (bridge.macro_live_state, bridge.macro_health,
+                  bridge.knob_values, bridge._knob_last_status,
+                  bridge._knob_last_broadcast, bridge._knob_enable_sent):
+        if macro_name in store:
+            store[new_name] = store.pop(macro_name)
+    _persist_mappings()
+    logger.info(f"Macro '{macro_name}' renamed to '{new_name}'")
+    bridge.broadcast_state(macro_event={"type": "macro_deleted", "name": macro_name})
+    bridge.broadcast_state(macro_event={"type": "macro_created", "name": new_name})
+    return {"status": "success", "macro": new_name, "was": macro_name}
+
+
 @app.get("/api/config/mappings")
 async def get_config_mappings():
     """Return full mappings.json content for the live editor."""

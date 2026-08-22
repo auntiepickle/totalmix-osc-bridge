@@ -111,6 +111,9 @@ window.API = (function () {
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },
 
+    /** POST /api/config/macros/{name}/rename → rename a macro/knob in place */
+    renameMacro(name, newName) { return _post(`/api/config/macros/${encodeURIComponent(name)}/rename`, { new_name: newName }); },
+
     /** POST /api/knob/{name}/param → write a companion param (low-cut slope, EQ type) */
     setKnobParam(name, param, value) { return _post(`/api/knob/${encodeURIComponent(name)}/param`, { param, value }); },
 
