@@ -70,6 +70,7 @@ async def get_macros():
         if step is not None:
             entry["knob_value"] = bridge.knob_values.get(name)
             entry["device_value"] = bridge.knob_device_value(step)
+            entry["enable_value"] = bridge.knob_enable_state(step)
         out[name] = entry
     return out
 
@@ -220,7 +221,7 @@ MACRO_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 RUNTIME_FIELDS = (
     "name", "value", "progress", "lfo_active",
     "last_trigger", "osc_preview", "midi_trigger", "routing_label",
-    "last_fire", "knob_value", "device_value",
+    "last_fire", "knob_value", "device_value", "enable_value",
 )
 
 
@@ -497,6 +498,17 @@ def set_knob(name: str, body: dict):
     """HTTP fallback for the WebSocket knob stream (and for scripts/HA):
     set a KNOB macro to a 0..1 value. Mapped through the knob's range."""
     r = bridge.knob_set(name, body.get("value", 0.0), source="api")
+    if r["status"] == "not_a_knob":
+        raise HTTPException(status_code=404, detail=f"'{name}' is not a knob macro")
+    if r["status"] != "resolved":
+        raise HTTPException(status_code=409, detail=r["status"])
+    return r
+
+
+@app.post("/api/knob/{name}/enable")
+def set_knob_enable(name: str, body: dict):
+    """Flip a KNOB macro's section switch (EQ / low cut / dynamics / FX)."""
+    r = bridge.knob_enable(name, bool(body.get("on", True)), source="ui")
     if r["status"] == "not_a_knob":
         raise HTTPException(status_code=404, detail=f"'{name}' is not a knob macro")
     if r["status"] != "resolved":

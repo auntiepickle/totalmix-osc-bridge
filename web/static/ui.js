@@ -205,6 +205,77 @@ function _knobCardHTML(name, m, step) {
     <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>`;
 }
 
+// Section switch behind a continuous param (mirrors global_units.ENABLE_FOR):
+// a low-cut knob is inaudible while low cut is off, so the strip shows the
+// switch and the knob can flip it on with the first move.
+const ENABLE_FOR = {};
+['eq_gain_1','eq_gain_2','eq_gain_3','eq_freq_1','eq_freq_2','eq_freq_3',
+ 'eq_q_1','eq_q_2','eq_q_3','eq_type_1','eq_type_3'].forEach(p => ENABLE_FOR[p] = 'eq_enable');
+ENABLE_FOR.lowcut_freq = 'lowcut_enable'; ENABLE_FOR.lowcut_grade = 'lowcut_enable';
+['dyn_gain','comp_thresh','comp_ratio','exp_thresh','exp_ratio','dyn_attack','dyn_release']
+  .forEach(p => ENABLE_FOR[p] = 'dyn_enable');
+['alev_maxgain','alev_headroom','alev_risetime'].forEach(p => ENABLE_FOR[p] = 'alev_enable');
+['reverb_time','reverb_volume','reverb_width','reverb_predelay'].forEach(p => ENABLE_FOR[p] = 'reverb_enable');
+['echo_time','echo_feedback','echo_volume','echo_width'].forEach(p => ENABLE_FOR[p] = 'echo_enable');
+
+function _enableChipHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  const en = ENABLE_FOR[param];
+  if (!en) return '';
+  const label = ((PARAM_DEFS[en] || {}).label || en).replace(/ On\/Off$/i, '');
+  const st = m.enable_value;
+  const cls = st === true  ? 'bg-green-900/40 border-green-700 text-green-400'
+            : st === false ? 'bg-zinc-800 border-zinc-700 text-zinc-500'
+            :                'bg-zinc-900 border-zinc-800 text-zinc-600';
+  const word = st === true ? 'ON' : st === false ? 'OFF' : '?';
+  return `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')"
+      title="${_esc(label)} section switch on the device — click to toggle"
+      class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border transition-all ${cls}">${_esc(label)} ${word}</button>`;
+}
+
+// A fader-strip card for a KNOB macro (the CONTROLS section)
+function _knobStripHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  const midiLabel = getMidiTriggerLabel(m);
+  const issues = macroTargetIssues(m);
+  const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value)
+          : Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : 0;
+  const dev = Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : null;
+  return `
+<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-4 rounded-2xl transition-colors duration-200">
+    <div class="flex items-center gap-2 mb-1">
+        <h3 class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight">${name}</h3>
+        <span class="warn-slot shrink-0">${_warnIconHTML(issues)}</span>
+        ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
+    </div>
+    ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${_esc(m.description)}</p>` : ''}
+    <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${_esc(m.routing_label || '—')}</p>
+    <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
+    <div class="flex gap-2 items-center mt-3 mb-1">
+        ${_enableChipHTML(name, m, step)}
+        <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
+            class="flex-1 accent-orange-500" title="Drag to set — MIDI moves it too"
+            oninput="knobInput('${name}', this.value)"
+            onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null">
+        <span id="knob-val-${name}" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+    </div>
+    <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>
+    <button onclick="toggleDetail('${name}')"
+        class="w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
+        DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
+    </button>
+    <div id="detail-${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+</div>`;
+}
+
+function _renderKnobSection(names) {
+  const row = document.getElementById('knob-row');
+  if (!row) return;
+  row.innerHTML = names.length
+    ? names.map(n => _knobStripHTML(n, macros[n], _knobStepOf(macros[n]))).join('')
+    : `<div class="col-span-full text-xs text-zinc-600 italic">no knobs yet — <b>New Knob</b> binds a channel parameter to a MIDI control</div>`;
+}
+
 function createMacroCardHTML(name, m) {
   const knobStep    = _knobStepOf(m);
   const midiLabel   = getMidiTriggerLabel(m);
@@ -256,7 +327,11 @@ function renderCards() {
   if (!grid) return;
 
   const groups = {};
+  // KNOB macros live in the CONTROLS section, not the macro grid
+  const knobNames = Object.keys(macros).filter(n => _knobStepOf(macros[n]));
+  _renderKnobSection(knobNames);
   Object.entries(macros).forEach(([name, m]) => {
+    if (_knobStepOf(m)) return;
     const ws = m.workspace || '—';
     const ss = m.snapshot || '—';
     if (!groups[ws]) groups[ws] = {};
@@ -571,7 +646,7 @@ window._editBuffers = window._editBuffers || {};
 // stripped when duplicating so clones start clean
 const RUNTIME_FIELDS = ['name', 'value', 'progress', 'lfo_active',
                         'last_trigger', 'osc_preview', 'midi_trigger',
-                        'routing_label', 'last_fire', 'knob_value', 'device_value'];
+                        'routing_label', 'last_fire', 'knob_value', 'device_value', 'enable_value'];
 
 function _cleanMacro(m) {
   const c = JSON.parse(JSON.stringify(m));
@@ -882,6 +957,11 @@ function _knobControls(name, i, step, sc) {
       <input type="checkbox" data-field="steps.${i}.operation.hold" class="w-3 h-3 accent-orange-500"${op.hold !== false ? ' checked' : ''}>
       hold across snapshots
     </label>
+    ${ENABLE_FOR[(step.target && step.target.param) || ''] ? `<label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none"
+        title="If the section (EQ / low cut / dynamics / FX) is off when the knob moves, switch it on first">
+      <input type="checkbox" data-field="steps.${i}.operation.auto_enable" class="w-3 h-3 accent-orange-500"${op.auto_enable !== false ? ' checked' : ''}>
+      turn on with knob move
+    </label>` : ''}
     <div class="text-[10px] text-zinc-500">Pair with a CC, 14-bit CC, bend or aftertouch trigger with <b>use value</b> on — every move writes straight to the device. Drag the card's slider to control it from here.</div>`;
 }
 
@@ -1982,6 +2062,27 @@ async function deleteMacroUI(name) {
 // ── New Macro flow ────────────────────────────────────────────────────────────
 const MACRO_NAME_RE = /^[A-Za-z0-9_\-]{1,64}$/;
 
+// A fresh KNOB: first input's send to the first output, following a CC
+// (learn replaces the placeholder), hold + auto-enable on
+function _blankKnobTemplate() {
+  const picker = window._picker || {};
+  const firstOut = (picker.outputs || [])[0];
+  const firstIn  = (picker.inputs || [])[0];
+  const step = { osc: '', value: '{{param}}',
+                 operation: { type: 'knob', hold: true, range: [0, 1] } };
+  if (firstOut && firstIn) step.target = { submix: firstOut.name, channel: firstIn.name };
+  return { description: '', steps: [step],
+           midi_triggers: [{ type: 'control_change', number: 20, channel: 1,
+                             use_value_as_param: true }] };
+}
+
+window.openNewKnob = function () {
+  openNewMacro();                      // resets kind + title...
+  window._newMacroKind = 'knob';       // ...then claim it for a knob
+  const title = document.querySelector('#new-macro-modal h2');
+  if (title) title.innerHTML = '<i class="fas fa-sliders text-orange-400 text-sm"></i> New Knob';
+};
+
 function _blankMacroTemplate() {
   const picker = window._picker || {};
   const firstOut = (picker.outputs || [])[0];
@@ -2007,6 +2108,9 @@ function _blankMacroTemplate() {
 
 function openNewMacro() {
   const modal = document.getElementById('new-macro-modal');
+  window._newMacroKind = null;
+  const title = document.querySelector('#new-macro-modal h2');
+  if (title) title.innerHTML = '<i class="fas fa-plus text-orange-400 text-sm"></i> New Macro';
   const tmpl  = document.getElementById('new-macro-template');
   const nameEl = document.getElementById('new-macro-name');
   const errEl  = document.getElementById('new-macro-error');
@@ -2045,7 +2149,10 @@ async function createNewMacro() {
   }
 
   const source = tmpl && tmpl.value ? macros[tmpl.value] : null;
-  const body = source ? _cleanMacro(source) : _blankMacroTemplate();
+  const body = source ? _cleanMacro(source)
+             : window._newMacroKind === 'knob' ? _blankKnobTemplate()
+             : _blankMacroTemplate();
+  window._newMacroKind = null;
 
   try {
     await API.saveMacro(name, body);

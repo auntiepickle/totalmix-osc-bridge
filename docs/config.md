@@ -124,13 +124,17 @@ trigger carries (CC, 14-bit CC, pitch bend, aftertouch — with
 "fired": no timing, no device lock, no per-tick events — the browser
 coalesces the stream (last value wins, ~40/s) over its WebSocket and the
 bridge resolves the name and writes through the Global transport, sub-ms.
-The macro's card shows a live slider (draggable — the mouse is a knob too)
-and the value the device actually reports.
+Knobs live in their own **Controls** section above the macros (they are a
+different kind of object: nothing fires, the control IS the parameter), as
+fader strips with a live slider (draggable — the mouse is a knob too), the
+value the device actually reports, and the section switch. **New Knob** in
+that header creates one.
 
 | Field | Default | Description |
 |---|---|---|
 | `range` | param full range | `[lo, hi]` — maps the knob's full travel onto a window of the parameter (a lo-cut knob that only spans 20–200 Hz) |
 | `threshold` | — | Gate point for toggle params (mute): knob past it = on |
+| `auto_enable` | `true` | **Turn on with knob move:** if the parameter lives behind a section switch (low cut, EQ, dynamics, auto-level, reverb, echo) and that switch is off, flip it on before the first write — a lo-cut knob is inaudible otherwise. The strip also shows the switch as an ON/OFF chip you can click (`POST /api/knob/<name>/enable {"on": true}`). |
 | `hold` | `true` | **Snapshot-agnostic:** after every confirmed snapshot or workspace switch, re-assert this knob's last value so a recall can't yank it back to what the snapshot stored |
 
 Why knobs are snapshot-agnostic: under Global OSC a target resolves by

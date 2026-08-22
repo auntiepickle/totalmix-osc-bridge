@@ -148,6 +148,7 @@ class TotalMixOSCBridge:
         self._knob_last_status = {}     # name -> last resolve status (log on change)
         self._knob_last_broadcast = {}  # name -> ts (UI updates throttled ~10Hz)
         self._knob_readback_timers = {} # name -> Timer (settle readback)
+        self._knob_enable_sent = {}     # name -> ts of last auto-enable write
         self.channel_map = None
         self.channel_map_is_example = False
         self._running_macros = set()        # names of macros currently executing
@@ -1839,6 +1840,77 @@ class TotalMixOSCBridge:
         except Exception:
             return None
 
+    @staticmethod
+    def _enable_target(step):
+        """Target dict for the knob param's section switch, or None."""
+        en = gu.enable_param_for(step["target"].get("param", "volume"))
+        return {**step["target"], "param": en} if en else None
+
+    def knob_enable_state(self, step):
+        """Device state of the knob's section switch from Global feedback:
+        True/False, or None when unknown / no companion."""
+        tgt = self._enable_target(step)
+        if tgt is None or not self._global_active():
+            return None
+        writer, _, status = self.global_transport.resolve_step(tgt)
+        if status != "resolved":
+            return None
+        st = self.global_listener.state
+        addr = getattr(writer, "address", "")
+        parts = addr.strip("/").split("/")
+        try:
+            if parts[0] in ROW_KEYS_BY_WORD:
+                e = st.get_param(ROW_KEYS_BY_WORD[parts[0]], int(parts[1]),
+                                 "/".join(parts[2:]))
+            else:
+                e = st.get_param("fx", 0, addr.strip("/"))
+        except (ValueError, IndexError):
+            return None
+        return None if e is None else bool(float(e[0]) >= 0.5)
+
+    def knob_enable(self, macro_name, on, source="ui"):
+        """Flip the knob's section switch (EQ / low cut / dynamics / FX on)."""
+        macro = self.mappings.get("macros", {}).get(macro_name)
+        step = self._knob_step(macro) if macro else None
+        if step is None:
+            return {"status": "not_a_knob"}
+        tgt = self._enable_target(step)
+        if tgt is None:
+            return {"status": "no_enable_param"}
+        if not self._global_active():
+            return {"status": "knob_needs_global"}
+        writer, label, status = self.global_transport.resolve_step(tgt)
+        if status != "resolved":
+            return {"status": status}
+        writer.send_message("enable", 1.0 if on else 0.0)
+        self._knob_enable_sent[macro_name] = time.time()
+        self._schedule_knob_readback(macro_name, step, writer.address)
+        self.broadcast_state(macro_event={
+            "type": "knob_update", "name": macro_name, "status": "resolved",
+            "value": self.knob_values.get(macro_name),
+            "device_value": self.knob_device_value(step),
+            "enable_value": bool(on), "source": source})
+        return {"status": "resolved", "enable": bool(on)}
+
+    def _auto_enable(self, macro_name, step):
+        """'Turn on with knob move': if the section switch is not known ON,
+        set it (absolute set, idempotent) - at most once per 2s until the
+        readback confirms, so a streaming knob never spams it."""
+        if step["operation"].get("auto_enable") is False:
+            return
+        tgt = self._enable_target(step)
+        if tgt is None:
+            return
+        if self.knob_enable_state(step) is True:
+            return
+        if time.time() - self._knob_enable_sent.get(macro_name, 0) < 2.0:
+            return
+        writer, _, status = self.global_transport.resolve_step(tgt)
+        if status == "resolved":
+            writer.send_message("enable", 1.0)
+            self._knob_enable_sent[macro_name] = time.time()
+            logger.info(f"knob '{macro_name}' switched its section on ({tgt['param']})")
+
     def knob_set(self, macro_name, value, source="midi"):
         """Write a knob's value (0..1, mapped through its range/threshold).
         Returns {"status": ..., "value": ...}; statuses mirror resolve_step
@@ -1857,6 +1929,7 @@ class TotalMixOSCBridge:
         else:
             writer, label, status = self.global_transport.resolve_step(step["target"])
         if status == "resolved":
+            self._auto_enable(macro_name, step)
             writer.send_message("knob", shape_value(value, step["operation"]))
             self.knob_values[macro_name] = value
             self._schedule_knob_readback(macro_name, step, writer.address)
@@ -1876,6 +1949,7 @@ class TotalMixOSCBridge:
                 "type": "knob_update", "name": macro_name, "status": status,
                 "value": self.knob_values.get(macro_name),
                 "device_value": self.knob_device_value(step) if status == "resolved" else None,
+                "enable_value": self.knob_enable_state(step) if status == "resolved" else None,
                 "source": source,
             })
         return {"status": status, "value": self.knob_values.get(macro_name)}
@@ -1905,6 +1979,7 @@ class TotalMixOSCBridge:
                     "type": "knob_update", "name": name, "status": "resolved",
                     "value": self.knob_values.get(name),
                     "device_value": self.knob_device_value(step),
+                    "enable_value": self.knob_enable_state(step),
                     "source": "readback"})
             except Exception as e:
                 logger.debug(f"knob readback for {name} failed: {e}")

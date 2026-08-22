@@ -65,8 +65,10 @@ def test_knob_set_writes_through_global(rig):
     b, g, _ = rig({"locut": KNOB})
     r = b.knob_set("locut", 0.5)
     assert r["status"] == "resolved"
-    # lowcut freq is a log taper 20..500 Hz: 0.5 -> 100 Hz
-    assert g.sent == [("/output/0/lowcut/freq", pytest.approx(100.0))]
+    # section state unknown -> auto-enable switches low cut ON first, then
+    # the value: lowcut freq is a log taper 20..500 Hz: 0.5 -> 100 Hz
+    assert g.sent == [("/output/0/lowcut/enable", 1.0),
+                      ("/output/0/lowcut/freq", pytest.approx(100.0))]
     assert b.knob_values["locut"] == 0.5
     assert b.macro_health["locut"]["status"] == "ok"
 
@@ -198,3 +200,46 @@ def test_settle_readback_redumps_channel(rig):
     time.sleep(0.5)
     # exactly ONE readback for the burst, after the last tick
     assert g.writes_to("/sendchan/output/0") == [1.0]
+
+
+def test_auto_enable_switches_section_on_first_move(rig):
+    b, g, listener = rig({"locut": KNOB})
+    listener.state.ingest("/output/0/lowcut/enable", (0.0,))   # section OFF
+    b.knob_set("locut", 0.5)
+    assert ("/output/0/lowcut/enable", 1.0) in g.sent          # switched on
+    assert g.sent.index(("/output/0/lowcut/enable", 1.0)) < len(g.sent) - 1  # before the value
+    b.knob_set("locut", 0.6)                                    # streaming: not re-sent
+    assert g.writes_to("/output/0/lowcut/enable") == [1.0]
+
+
+def test_auto_enable_skips_when_already_on_or_disabled(rig):
+    b, g, listener = rig({"locut": KNOB})
+    listener.state.ingest("/output/0/lowcut/enable", (1.0,))   # already ON
+    b.knob_set("locut", 0.5)
+    assert g.writes_to("/output/0/lowcut/enable") == []
+    off = {**KNOB, "steps": [{**KNOB["steps"][0], "operation": {
+        "type": "knob", "hold": True, "auto_enable": False}}]}
+    b2, g2, l2 = rig({"locut": off})
+    l2.state.ingest("/output/0/lowcut/enable", (0.0,))
+    b2.knob_set("locut", 0.5)
+    assert g2.writes_to("/output/0/lowcut/enable") == []
+
+
+def test_knob_enable_toggle_and_state(rig):
+    b, g, listener = rig({"locut": KNOB})
+    assert b.knob_enable("locut", False)["status"] == "resolved"
+    assert g.sent[-1] == ("/output/0/lowcut/enable", 0.0)
+    listener.state.ingest("/output/0/lowcut/enable", (0.0,))
+    assert b.knob_enable_state(b._knob_step(KNOB)) is False
+    vol = {"steps": [{"target": {"channel": "Mic 1", "submix": "Phones"},
+                      "value": "{{param}}", "operation": {"type": "knob"}}]}
+    b.mappings["macros"]["vol"] = vol
+    assert b.knob_enable("vol", True)["status"] == "no_enable_param"
+
+
+def test_enable_http_endpoint(module_knob):
+    b, g = module_knob
+    r = client.post("/api/knob/zz_knob/enable", json={"on": True})
+    assert r.status_code == 200 and r.json()["enable"] is True
+    assert g.sent[-1] == ("/output/0/lowcut/enable", 1.0)
+    assert "enable_value" in client.get("/api/macros").json()["zz_knob"]

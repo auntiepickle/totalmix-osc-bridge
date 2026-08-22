@@ -111,6 +111,9 @@ window.API = (function () {
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },
 
+    /** POST /api/knob/{name}/enable → flip the knob's section switch (EQ/low cut/...) */
+    setKnobEnable(name, on) { return _post(`/api/knob/${encodeURIComponent(name)}/enable`, { on }); },
+
     /** POST /api/knob/{name} → set a KNOB macro 0..1 (WebSocket fallback) */
     setKnob(name, value) { return _post(`/api/knob/${encodeURIComponent(name)}`, { value }); },
 

@@ -91,6 +91,7 @@ function _onWSMessage(event) {
     if (macros[ev.name]) {
       if (ev.value != null) macros[ev.name].knob_value = ev.value;
       macros[ev.name].device_value = ev.device_value;
+      if ('enable_value' in ev) macros[ev.name].enable_value = ev.enable_value;
       updateKnobCard(ev.name);   // slider follows MIDI/API/hold alike; drag guard inside
     }
   }
@@ -293,7 +294,18 @@ function updateKnobCard(name, moveSlider = true) {
   if (lbl && v != null) lbl.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
   if (dev) dev.textContent = Number.isFinite(parseFloat(m.device_value))
     ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : '';
+  const chip = document.getElementById(`knob-en-${name}`);
+  if (chip) chip.outerHTML = _enableChipHTML(name, m, step);
 }
+
+// Enable chip click: flip the knob's section switch on the device
+window.toggleKnobEnable = async function (name) {
+  const m = macros[name];
+  if (!m) return;
+  const on = m.enable_value !== true;     // unknown/off -> on
+  try { await API.setKnobEnable(name, on); }
+  catch (e) { console.warn('[knob] enable toggle failed:', e.message); }
+};
 
 // ── Live card update from WebSocket macro_update payload ─────────────────────
 function updateMacroCard(name) {

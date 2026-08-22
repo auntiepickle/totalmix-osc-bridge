@@ -234,6 +234,30 @@ def input_gain_transforms(hw):
     return None
 
 
+# The section switch a continuous param lives behind: a low-cut knob is
+# inaudible while lowcut/enable is off, so knobs can flip it on with the
+# first move ("turn on with knob move") and the UI shows the switch.
+ENABLE_FOR = {}
+for _p in ("eq_gain_1", "eq_gain_2", "eq_gain_3", "eq_freq_1", "eq_freq_2",
+           "eq_freq_3", "eq_q_1", "eq_q_2", "eq_q_3", "eq_type_1", "eq_type_3"):
+    ENABLE_FOR[_p] = "eq_enable"
+ENABLE_FOR["lowcut_freq"] = "lowcut_enable"
+ENABLE_FOR["lowcut_grade"] = "lowcut_enable"
+for _p in ("dyn_gain", "comp_thresh", "comp_ratio", "exp_thresh", "exp_ratio",
+           "dyn_attack", "dyn_release"):
+    ENABLE_FOR[_p] = "dyn_enable"
+for _p in ("alev_maxgain", "alev_headroom", "alev_risetime"):
+    ENABLE_FOR[_p] = "alev_enable"
+for _p in ("reverb_time", "reverb_volume", "reverb_width", "reverb_predelay"):
+    ENABLE_FOR[_p] = "reverb_enable"
+for _p in ("echo_time", "echo_feedback", "echo_volume", "echo_width"):
+    ENABLE_FOR[_p] = "echo_enable"
+
+
+def enable_param_for(param: str):
+    return ENABLE_FOR.get(str(param).lower())
+
+
 def calibrate(param: str, to_wire, from_wire):
     """Install a measured transform (used by the calibration harness and
     by hardware-round results as they land)."""
