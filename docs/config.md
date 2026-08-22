@@ -118,23 +118,38 @@ The string `"{{param}}"` tells the bridge to use the incoming trigger value (0.0
 
 ```json
 "midi_triggers": [
-  { "type": "control_change", "number": 44, "channel": 1, "use_value_as_param": true },
-  { "type": "note_on",        "note": 60,   "channel": 1 },
-  { "type": "note_off",       "note": 60,   "channel": 1 }
+  { "type": "control_change",    "number": 44, "channel": 1, "use_value_as_param": true },
+  { "type": "control_change_14", "number": 1,  "channel": 1, "use_value_as_param": true },
+  { "type": "note_on",           "note": 60,   "channel": 1, "use_value_as_param": true },
+  { "type": "note_off",          "note": 60,   "channel": 1 },
+  { "type": "program_change",    "number": 5,  "channel": 1 },
+  { "type": "pitch_bend",        "channel": 1, "use_value_as_param": true },
+  { "type": "aftertouch",        "channel": 1, "use_value_as_param": true }
 ]
 ```
 
-A macro can have multiple triggers. Any one fires it.
+A macro can have multiple triggers. Any one fires it. All types are
+learn-capable (the learn button captures whatever you send — a 14-bit CC
+pair is auto-detected when its fine CC follows the coarse one within 80 ms).
 
 | Field | Description |
 |---|---|
-| `type` | `"control_change"`, `"note_on"`, or `"note_off"` |
-| `number` | CC number (0-127). Used with `control_change`. |
+| `type` | `control_change` · `control_change_14` · `note_on` · `note_off` · `program_change` · `pitch_bend` · `aftertouch` |
+| `number` | `control_change`: CC 0-127 · `control_change_14`: the COARSE (MSB) CC 0-31 — the fine CC is `number+32` per the MIDI spec · `program_change`: program 0-127 |
 | `note` | MIDI note number (0-127). Used with `note_on` and `note_off`. |
 | `channel` | MIDI channel (1-16) |
-| `use_value_as_param` | CC only. When `true`, CC value (0-127) is scaled to 0.0-1.0 and passed as `param`. |
+| `use_value_as_param` | When `true` the message's value feeds `param` scaled to 0.0-1.0: CC value /127, 14-bit pair /16383, note velocity /127, bend /16383 (8192 = center = 0.5), aftertouch pressure /127. Ignored for `program_change` (a discrete event — always fires with `param = 1.0`). |
 
-Note On and Note Off triggers fire with `param = 1.0` unless overridden via the web UI or MQTT.
+Notes: a `control_change_14` trigger claims BOTH of its CC numbers — plain
+`control_change` triggers on the same coarse/fine numbers will not fire.
+`pitch_bend` and `aftertouch` have no number: they match on channel alone.
+Program Change is the scene-selection type: point the macro at a
+workspace/snapshot and a PC from your sequencer or foot controller switches
+the whole mixer scene.
+
+The bridge listens to **all connected MIDI inputs at once** by default
+(clock from a sequencer and knobs from a controller can coexist); pick a
+single device in the header dropdown to filter to it.
 
 ---
 

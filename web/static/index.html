@@ -234,6 +234,21 @@
                     class="flex-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-500 hover:text-white text-xs py-1 rounded-lg transition-all">Off</button>
             </div>
             <div class="flex gap-2 items-center">
+                <span class="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">PC</span>
+                <input id="emu-pc" type="number" min="0" max="127" value="0"
+                    class="bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1 text-sm text-white w-20 text-center focus:outline-none focus:border-orange-400">
+                <button onclick="emuSendPC()" title="Program Change on the channel above"
+                    class="flex-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs py-1 rounded-lg transition-all">Send PC</button>
+            </div>
+            <div class="flex gap-2 items-center">
+                <button onclick="emuSendBend()" title="Pitch bend scaled from the value slider (64 = center)"
+                    class="flex-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs py-1 rounded-lg transition-all">Bend</button>
+                <button onclick="emuSendAftertouch()" title="Channel aftertouch from the value slider"
+                    class="flex-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs py-1 rounded-lg transition-all">Aftertouch</button>
+                <button onclick="emuSendCC14()" title="14-bit CC pair: coarse = the CC number field (0-31), value scaled from the slider"
+                    class="flex-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white text-xs py-1 rounded-lg transition-all">CC 14-bit</button>
+            </div>
+            <div class="flex gap-2 items-center">
                 <span class="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">Clock</span>
                 <input id="emu-bpm" type="number" min="20" max="400" value="140"
                     class="bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1 text-sm text-white w-20 text-center focus:outline-none focus:border-orange-400">

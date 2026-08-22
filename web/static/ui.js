@@ -72,6 +72,10 @@ function getMidiTriggerLabel(m) {
   const type = t.type || 'control_change';
   if (type === 'note_on')  return `NOTE ON ${t.note ?? '?'} · ch${t.channel}`;
   if (type === 'note_off') return `NOTE OFF ${t.note ?? '?'} · ch${t.channel}`;
+  if (type === 'program_change')    return `PC${t.number ?? '?'} · ch${t.channel}`;
+  if (type === 'control_change_14') return `CC14:${t.number ?? '?'} · ch${t.channel}`;
+  if (type === 'pitch_bend')        return `BEND · ch${t.channel}`;
+  if (type === 'aftertouch')        return `AT · ch${t.channel}`;
   return `CC${t.number} · ch${t.channel}`;
 }
 
@@ -1170,12 +1174,14 @@ window.learnTrigger = function (name, i) {
     const m = _harvestEditor(name);
     const trig = (m.midi_triggers || [])[i];
     if (trig) {
+      // #23: generic capture — CC/CC14/PC carry number, notes carry note,
+      // bend/aftertouch carry neither
       trig.type = captured.type;
       trig.channel = captured.channel;
       delete trig.number;
       delete trig.note;
-      if (captured.type === 'control_change') trig.number = captured.number;
-      else trig.note = captured.note;
+      if ('number' in captured) trig.number = captured.number;
+      if ('note' in captured) trig.note = captured.note;
     }
     editDetail(name);
   };
@@ -1346,6 +1352,24 @@ window.addEditorTrigger = function (name) {
   editDetail(name);
 };
 
+// #23: switching trigger type moves the identifier to the right field and
+// re-renders the row (bend/aftertouch have no number at all)
+window.changeTriggerType = function (name, i, newType) {
+  const m = _harvestEditor(name);
+  const trig = (m.midi_triggers || [])[i];
+  if (!trig) return;
+  trig.type = newType;
+  const num = trig.number ?? trig.note ?? 0;
+  delete trig.number;
+  delete trig.note;
+  if (newType === 'note_on' || newType === 'note_off') {
+    trig.note = num;
+  } else if (newType !== 'pitch_bend' && newType !== 'aftertouch') {
+    trig.number = Math.min(num, newType === 'control_change_14' ? 31 : 127);
+  }
+  editDetail(name);
+};
+
 window.removeEditorTrigger = function (name, i) {
   const m = _harvestEditor(name);
   (m.midi_triggers || []).splice(i, 1);
@@ -1412,16 +1436,27 @@ function _triggerRow(name, t, i) {
   const sc = EDIT_SC, nc = EDIT_NC;
   const type    = t.type || 'control_change';
   const isNote  = type === 'note_on' || type === 'note_off';
+  const hasNum  = type !== 'pitch_bend' && type !== 'aftertouch';
   const numField = isNote ? `midi_triggers.${i}.note`   : `midi_triggers.${i}.number`;
   const numValue = isNote ? (t.note ?? 0)               : (t.number ?? 0);
+  const numMax   = type === 'control_change_14' ? 31 : 127;  // MSB CCs only
+  const numHtml = hasNum
+    ? `<span class="text-zinc-500 text-xs shrink-0">#</span>
+       <input data-field="${numField}" type="number" min="0" max="${numMax}" value="${_esc(numValue)}" class="${nc}"
+           title="${type === 'control_change_14' ? 'Coarse (MSB) CC number 0-31 — the fine CC is +32 automatically' : type === 'program_change' ? 'Program number 0-127' : ''}">`
+    : '';
   return `<div class="flex gap-2 items-center flex-wrap bg-zinc-900/80 border border-zinc-800 px-2.5 py-2 rounded-xl">
-    <select data-field="midi_triggers.${i}.type" class="${sc} shrink-0">
+    <select data-field="midi_triggers.${i}.type" class="${sc} shrink-0"
+        onchange="changeTriggerType('${name}', ${i}, this.value)">
       <option value="control_change"${type==='control_change'?' selected':''}>CC</option>
+      <option value="control_change_14"${type==='control_change_14'?' selected':''}>CC 14-bit</option>
       <option value="note_on"${type==='note_on'?' selected':''}>Note On</option>
       <option value="note_off"${type==='note_off'?' selected':''}>Note Off</option>
+      <option value="program_change"${type==='program_change'?' selected':''}>Prog Change</option>
+      <option value="pitch_bend"${type==='pitch_bend'?' selected':''}>Pitch Bend</option>
+      <option value="aftertouch"${type==='aftertouch'?' selected':''}>Aftertouch</option>
     </select>
-    <span class="text-zinc-500 text-xs shrink-0">#</span>
-    <input data-field="${numField}" type="number" min="0" max="127" value="${_esc(numValue)}" class="${nc}">
+    ${numHtml}
     <span class="text-zinc-500 text-xs shrink-0">ch</span>
     <input data-field="midi_triggers.${i}.channel" type="number" min="1" max="16" value="${_esc(t.channel)}" class="${nc}">
     <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
