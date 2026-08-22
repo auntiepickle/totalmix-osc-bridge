@@ -226,10 +226,10 @@ const COMPANION_FOR = {
   eq_gain_1: ['eq_type_1'], eq_freq_1: ['eq_type_1'], eq_q_1: ['eq_type_1'],
   eq_gain_3: ['eq_type_3'], eq_freq_3: ['eq_type_3'], eq_q_3: ['eq_type_3'],
 };
-const ENUM_LABELS = {
+const ENUM_LABELS = {   // orders wire-verified 2026-08-21 (RME's own labels)
   lowcut_grade: ['6 dB/oct', '12 dB/oct', '18 dB/oct', '24 dB/oct'],
-  eq_type_1: ['Peak', 'Low Shelf', 'High Pass', 'Low Pass'],
-  eq_type_3: ['Peak', 'High Shelf', 'Low Pass', 'High Pass'],
+  eq_type_1: ['Bell', 'Shelf', 'High Pass', 'Low Pass'],
+  eq_type_3: ['Bell', 'Shelf', 'Low Pass', 'High Pass'],
 };
 
 function _companionChipsHTML(name, m, step) {
@@ -1075,6 +1075,18 @@ function _knobControls(name, i, step, sc) {
       <input type="checkbox" data-field="steps.${i}.operation.auto_enable" class="w-3 h-3 accent-orange-500"${op.auto_enable !== false ? ' checked' : ''}>
       turn on with knob move
     </label>` : ''}
+    ${(COMPANION_FOR[(step.target && step.target.param) || ''] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
+      const labels = ENUM_LABELS[cp];
+      const pinned = (op.companions || {})[cp];
+      const pinIdx = Number.isFinite(parseFloat(pinned)) ? Math.round(parseFloat(pinned) * (labels.length - 1)) : -1;
+      return `<div class="flex gap-2 items-center">
+        <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-24 shrink-0" title="Pin this setting: re-asserted on every move and after snapshot recalls">${_esc(cp.replace(/_/g, ' '))}</span>
+        <select data-field="steps.${i}.operation.companions.${cp}" data-numeric class="${sc}">
+          <option value=""${pinIdx < 0 ? ' selected' : ''}>— not pinned —</option>
+          ${labels.map((l, k) => `<option value="${(k / (labels.length - 1)).toFixed(4)}"${k === pinIdx ? ' selected' : ''}>${_esc(l)}</option>`).join('')}
+        </select>
+      </div>`;
+    }).join('')}
     <div class="text-[10px] text-zinc-500">Pair with a CC, 14-bit CC, bend or aftertouch trigger with <b>use value</b> on — every move writes straight to the device. Drag the card's slider to control it from here.</div>`;
 }
 

@@ -1973,6 +1973,32 @@ class TotalMixOSCBridge:
             self._knob_enable_sent[macro_name] = time.time()
             logger.info(f"knob '{macro_name}' switched its section on ({tgt['param']})")
 
+    def _assert_pins(self, macro_name, step):
+        """Pinned companion values (operation.companions): if the device
+        state differs (or is unknown), write them - throttled with the same
+        2s guard as auto-enable so a streaming knob never spams."""
+        pins = step["operation"].get("companions") or {}
+        if not pins:
+            return
+        if time.time() - self._knob_enable_sent.get(f"{macro_name}:pins", 0) < 2.0:
+            return
+        for p, v in pins.items():
+            if p not in gu.GLOBAL_PARAM_MAP:
+                continue
+            try:
+                v = max(0.0, min(1.0, float(v)))
+            except (TypeError, ValueError):
+                continue
+            tgt = {**step["target"], "param": p}
+            cur = self._param_state(tgt)
+            if cur is not None and abs(cur - v) < 0.02:
+                continue
+            writer, _, status = self.global_transport.resolve_step(tgt)
+            if status == "resolved":
+                writer.send_message("pin", v)
+                self._knob_enable_sent[f"{macro_name}:pins"] = time.time()
+                logger.info(f"knob '{macro_name}' pinned {p} -> {v:.3f}")
+
     def knob_set(self, macro_name, value, source="midi"):
         """Write a knob's value (0..1, mapped through its range/threshold).
         Returns {"status": ..., "value": ...}; statuses mirror resolve_step
@@ -1992,6 +2018,7 @@ class TotalMixOSCBridge:
             writer, label, status = self.global_transport.resolve_step(step["target"])
         if status == "resolved":
             self._auto_enable(macro_name, step)
+            self._assert_pins(macro_name, step)
             writer.send_message("knob", shape_value(value, step["operation"]))
             self.knob_values[macro_name] = value
             self._schedule_knob_readback(macro_name, step, writer.address)

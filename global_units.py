@@ -257,19 +257,20 @@ for _p in ("echo_time", "echo_feedback", "echo_volume", "echo_width"):
 # Companion params a knob strip should surface next to its main control:
 # a low-cut knob is half the story without its slope. Values are enums
 # (index/3 normalized via _enum4). Labels live here so the UI and the OSC
-# strip feedback agree. lowcut_grade ORDER WIRE-VERIFIED 2026-08-21 via the
-# classic page-2 value strings on Main: 0/1/2/3 = 6/12/18/24 dB/oct. The EQ
-# band type orders are the TotalMix UI order and NOT yet wire-verified -
-# check /2/eqType1Val the same way before trusting them.
+# strip feedback agree. A knob may also PIN companion values (operation.companions =
+# {"eq_type_3": 0.667}) - re-asserted on every move and hold, so a 'high
+# cut' knob on EQ band 3 keeps the band a Low Pass across snapshot recalls.
 COMPANION_FOR = {
     "lowcut_freq": ["lowcut_grade"],
     "eq_gain_1": ["eq_type_1"], "eq_freq_1": ["eq_type_1"], "eq_q_1": ["eq_type_1"],
     "eq_gain_3": ["eq_type_3"], "eq_freq_3": ["eq_type_3"], "eq_q_3": ["eq_type_3"],
 }
+# ALL THREE ORDERS WIRE-VERIFIED 2026-08-21 via the classic page-2 value
+# strings on Main (/2/lowcutGradeVal, /2/eqType1Val, /2/eqType3Val).
 ENUM_LABELS = {
     "lowcut_grade": ["6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct"],
-    "eq_type_1": ["Peak", "Low Shelf", "High Pass", "Low Pass"],
-    "eq_type_3": ["Peak", "High Shelf", "Low Pass", "High Pass"],
+    "eq_type_1": ["Bell", "Shelf", "High Pass", "Low Pass"],
+    "eq_type_3": ["Bell", "Shelf", "Low Pass", "High Pass"],
 }
 
 

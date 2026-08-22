@@ -262,3 +262,22 @@ def test_companion_http_endpoint(module_knob):
     r = client.post("/api/knob/zz_knob/param", json={"param": "lowcut_grade", "value": 1.0})
     assert r.status_code == 200 and g.sent[-1] == ("/output/0/lowcut/slope", 3.0)
     assert "companions" in client.get("/api/macros").json()["zz_knob"]
+
+
+def test_pinned_companion_asserted_on_move(rig):
+    hicut = {"steps": [{"target": {"channel": "Main", "row": 3, "param": "eq_freq_3"},
+                        "value": "{{param}}",
+                        "operation": {"type": "knob", "hold": True,
+                                      "companions": {"eq_type_3": 2 / 3}}}]}
+    b, g, listener = rig({"hicut": hicut})
+    listener.state.ingest("/output/0/eq/band3type", (0.0,))      # Bell on the device
+    listener.state.ingest("/output/0/eq/enable", (1.0,))         # EQ already on
+    b.knob_set("hicut", 0.8)
+    assert ("/output/0/eq/band3type", 2.0) in g.sent              # pinned to Low Pass (idx 2)
+    assert g.sent.index(("/output/0/eq/band3type", 2.0)) < len(g.sent) - 1
+    b.knob_set("hicut", 0.81)                                     # throttled: not re-sent
+    assert g.writes_to("/output/0/eq/band3type") == [2.0]
+    listener.state.ingest("/output/0/eq/band3type", (2.0,))      # device confirms
+    b._knob_enable_sent.clear()
+    b.knob_set("hicut", 0.82)
+    assert g.writes_to("/output/0/eq/band3type") == [2.0]         # matches: nothing to assert
