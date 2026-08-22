@@ -1097,11 +1097,14 @@ function _knobControls(name, i, step, sc) {
       <input type="checkbox" data-field="steps.${i}.operation.auto_enable" class="w-3 h-3 accent-orange-500"${op.auto_enable !== false ? ' checked' : ''}>
       turn on with knob move
     </label>
-    <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none"
-        title="Like a console filter knob: fully down = section off; moving up switches it back on">
-      <input type="checkbox" data-field="steps.${i}.operation.off_at_min" class="w-3 h-3 accent-orange-500"${op.off_at_min ? ' checked' : ''}>
-      lowest position switches it off
-    </label>` : ''}
+    <div class="flex gap-2 items-center">
+      <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-24 shrink-0" title="Like a console filter knob: one end of travel switches the section off; leaving it switches it back on">switch off at</span>
+      <select data-field="steps.${i}.operation.off_at" class="${sc}">
+        <option value=""${!(op.off_at || op.off_at_min) ? ' selected' : ''}>never (chip only)</option>
+        <option value="min"${(op.off_at === 'min' || (!op.off_at && op.off_at_min)) ? ' selected' : ''}>lowest position (low cut)</option>
+        <option value="max"${op.off_at === 'max' ? ' selected' : ''}>highest position (high cut)</option>
+      </select>
+    </div>` : ''}
     ${(COMPANION_FOR[(step.target && step.target.param) || ''] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
       const labels = ENUM_LABELS[cp];
       const pinned = (op.companions || {})[cp];

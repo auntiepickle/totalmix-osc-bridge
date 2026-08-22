@@ -296,3 +296,15 @@ def test_off_at_min_toggles_section(rig):
     assert g.writes_to("/output/0/lowcut/enable") == [0.0, 1.0]
     b.knob_set("locut", 0.4)                                    # moving: no repeat
     assert g.writes_to("/output/0/lowcut/enable") == [0.0, 1.0]
+
+
+def test_off_at_max_for_high_cut(rig):
+    hicut = {"steps": [{"target": {"channel": "Main", "row": 3, "param": "eq_freq_3"},
+                        "value": "{{param}}",
+                        "operation": {"type": "knob", "hold": True, "off_at": "max"}}]}
+    b, g, listener = rig({"hicut": hicut})
+    listener.state.ingest("/output/0/eq/enable", (1.0,))
+    b.knob_set("hicut", 1.0)                                     # top of travel = no cut
+    assert g.writes_to("/output/0/eq/enable") == [0.0]
+    b.knob_set("hicut", 0.7)                                     # back down -> ON
+    assert g.writes_to("/output/0/eq/enable") == [0.0, 1.0]

@@ -1976,16 +1976,20 @@ class TotalMixOSCBridge:
     KNOB_OFF_AT_MIN_EPS = 0.01
 
     def _off_at_min(self, macro_name, step, value):
-        """operation.off_at_min: the knob's bottom of travel switches its
-        section OFF; moving back up switches it ON again immediately (the
-        crossing bypasses the auto-enable throttle). Returns True when the
-        value is at minimum (caller still writes the value, then stops)."""
-        if not step["operation"].get("off_at_min"):
+        """operation.off_at = 'min' | 'max' (legacy bool off_at_min): one
+        end of the knob's travel switches its section OFF - bottom for a low
+        cut, TOP for a high cut (20 kHz = no cut); leaving that end switches
+        it ON again immediately (the crossing bypasses the auto-enable
+        throttle). Returns True while parked at the off end."""
+        op = step["operation"]
+        end = op.get("off_at") or ("min" if op.get("off_at_min") else None)
+        if end not in ("min", "max"):
             return False
         tgt = self._enable_target(step)
         if tgt is None:
             return False
-        at_min = value <= self.KNOB_OFF_AT_MIN_EPS
+        at_min = (value <= self.KNOB_OFF_AT_MIN_EPS) if end == "min" \
+                 else (value >= 1.0 - self.KNOB_OFF_AT_MIN_EPS)
         key = f"{macro_name}:offmin"
         prev = self._knob_enable_sent.get(key)      # last crossing state
         if prev == at_min:
@@ -1994,7 +1998,7 @@ class TotalMixOSCBridge:
         if status == "resolved":
             writer.send_message("enable", 0.0 if at_min else 1.0)
             self._knob_enable_sent[macro_name] = time.time()   # counts as an enable write
-            logger.info(f"knob '{macro_name}' {'OFF at minimum' if at_min else 'back ON'} ({tgt['param']})")
+            logger.info(f"knob '{macro_name}' {'OFF at end of travel' if at_min else 'back ON'} ({tgt['param']})")
         self._knob_enable_sent[key] = at_min
         return at_min
 
