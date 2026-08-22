@@ -62,11 +62,16 @@ async def get_macros():
     renames outputs (an3_to_adat1_send kept saying "ADAT 1" after the rename)."""
     macros = bridge.mappings.get("macros", {})
     logger.info(f"✅ /api/macros → serving {len(macros)} macro cards to web client")
-    return {
-        name: {**m, "routing_label": bridge.get_routing_label(name),
-               "last_fire": bridge.macro_health.get(name)}
-        for name, m in macros.items()
-    }
+    out = {}
+    for name, m in macros.items():
+        entry = {**m, "routing_label": bridge.get_routing_label(name),
+                 "last_fire": bridge.macro_health.get(name)}
+        step = bridge._knob_step(m)
+        if step is not None:
+            entry["knob_value"] = bridge.knob_values.get(name)
+            entry["device_value"] = bridge.knob_device_value(step)
+        out[name] = entry
+    return out
 
 
 class TriggerBody(BaseModel):
@@ -215,7 +220,7 @@ MACRO_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 RUNTIME_FIELDS = (
     "name", "value", "progress", "lfo_active",
     "last_trigger", "osc_preview", "midi_trigger", "routing_label",
-    "last_fire",
+    "last_fire", "knob_value", "device_value",
 )
 
 
@@ -487,6 +492,18 @@ def get_global_osc_status(probe: bool = False):
     return out
 
 
+@app.post("/api/knob/{name}")
+def set_knob(name: str, body: dict):
+    """HTTP fallback for the WebSocket knob stream (and for scripts/HA):
+    set a KNOB macro to a 0..1 value. Mapped through the knob's range."""
+    r = bridge.knob_set(name, body.get("value", 0.0), source="api")
+    if r["status"] == "not_a_knob":
+        raise HTTPException(status_code=404, detail=f"'{name}' is not a knob macro")
+    if r["status"] != "resolved":
+        raise HTTPException(status_code=409, detail=r["status"])
+    return r
+
+
 @app.get("/api/device/activity")
 def get_device_activity(since: float = 0.0):
     """Channel identify, world→screen half (#8): per-channel VALUE-CHANGE
@@ -632,7 +649,19 @@ async def websocket_endpoint(websocket: WebSocket):
     ws_clients.append(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            # KNOB stream (continuous MIDI control): {"type":"knob","name","value"}
+            # rides the existing socket - no HTTP round-trip per tick. Off the
+            # event loop: knob_set does a UDP write + a feedback read.
+            try:
+                msg = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(msg, dict) and msg.get("type") == "knob":
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None, bridge.knob_set, str(msg.get("name", "")),
+                    msg.get("value", 0.0), "midi")
     except WebSocketDisconnect:
         if websocket in ws_clients:
             ws_clients.remove(websocket)

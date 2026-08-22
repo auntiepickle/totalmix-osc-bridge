@@ -111,6 +111,9 @@ window.API = (function () {
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },
 
+    /** POST /api/knob/{name} → set a KNOB macro 0..1 (WebSocket fallback) */
+    setKnob(name, value) { return _post(`/api/knob/${encodeURIComponent(name)}`, { value }); },
+
     /** GET /api/device/global → transport + heartbeat status, light read (#22) */
     getGlobalStatus() { return _get('/api/device/global'); },
 

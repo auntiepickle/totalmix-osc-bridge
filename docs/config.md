@@ -108,6 +108,44 @@ runs, `rate` how fast it cycles.
 
 ---
 
+### Steps: KNOB — continuous MIDI control
+
+```json
+{
+  "target": { "channel": "Main", "row": 3, "param": "lowcut_freq" },
+  "value": "{{param}}",
+  "operation": { "type": "knob", "hold": true, "range": [0.0, 0.6] }
+}
+```
+
+A KNOB step makes the macro **follow a MIDI control live**: every value the
+trigger carries (CC, 14-bit CC, pitch bend, aftertouch — with
+`use_value_as_param` on) is written straight to the device. Nothing is
+"fired": no timing, no device lock, no per-tick events — the browser
+coalesces the stream (last value wins, ~40/s) over its WebSocket and the
+bridge resolves the name and writes through the Global transport, sub-ms.
+The macro's card shows a live slider (draggable — the mouse is a knob too)
+and the value the device actually reports.
+
+| Field | Default | Description |
+|---|---|---|
+| `range` | param full range | `[lo, hi]` — maps the knob's full travel onto a window of the parameter (a lo-cut knob that only spans 20–200 Hz) |
+| `threshold` | — | Gate point for toggle params (mute): knob past it = on |
+| `hold` | `true` | **Snapshot-agnostic:** after every confirmed snapshot or workspace switch, re-assert this knob's last value so a recall can't yank it back to what the snapshot stored |
+
+Why knobs are snapshot-agnostic: under Global OSC a target resolves by
+name to a fixed hardware channel in every snapshot, so the same knob works
+in all of them with no switch on the macro (leave workspace/snapshot empty);
+`hold` then keeps the knob's value authoritative across recalls.
+
+Other ways in: the FIRE button, `POST /api/trigger/<name>` and
+`totalmix/macro/<name>` (MQTT, payload 0–1 — a Home Assistant slider) all
+set the knob to the given value; `POST /api/knob/<name> {"value": 0.4}` is
+the direct HTTP form. KNOB requires the Global transport (classic refuses
+with `knob_needs_global`).
+
+---
+
 ### `"{{param}}"` — dynamic value
 
 The string `"{{param}}"` tells the bridge to use the incoming trigger value (0.0-1.0) as the operation target. Use it as the `value` on any step that has an operation.

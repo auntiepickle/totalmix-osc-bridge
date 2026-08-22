@@ -177,7 +177,36 @@ window.refreshValidity = function () {
   });
 };
 
+// KNOB step of a macro (continuous MIDI control), or null
+function _knobStepOf(m) {
+  return ((m && m.steps) || []).find(s => s.target && s.operation && s.operation.type === 'knob') || null;
+}
+
+// Client-side mirror of operations.shape_value's range map — for readouts
+function _shapeKnob(v, op) {
+  const rng = op && Array.isArray(op.range) ? op.range : null;
+  return rng ? parseFloat(rng[0]) + v * (parseFloat(rng[1]) - parseFloat(rng[0])) : v;
+}
+
+// Live knob on the card: drag it here, or let MIDI drive it — the slider
+// follows either way; the small line shows what the DEVICE reports
+function _knobCardHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value)
+          : Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : 0;
+  const dev = Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : null;
+  return `<div class="flex gap-2 items-center mb-1">
+      <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
+          class="flex-1 accent-orange-500" title="Drag to set — MIDI moves it too"
+          oninput="knobInput('${name}', this.value)"
+          onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null">
+      <span id="knob-val-${name}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+    </div>
+    <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>`;
+}
+
 function createMacroCardHTML(name, m) {
+  const knobStep    = _knobStepOf(m);
   const midiLabel   = getMidiTriggerLabel(m);
   const routingLabel = m.routing_label || '—';
   const issues = macroTargetIssues(m);
@@ -197,11 +226,12 @@ function createMacroCardHTML(name, m) {
         <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     </div>
     <!-- Progress bar -->
-    <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3">
+    <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3${knobStep ? ' hidden' : ''}">
       <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
     </div>
+    ${knobStep ? _knobCardHTML(name, m, knobStep) : ''}
     <!-- Action buttons -->
-    <div class="grid grid-cols-3 gap-2">
+    <div class="grid grid-cols-3 gap-2${knobStep ? ' hidden' : ''}">
         <button onclick="fireMacro('${name}',1.0,false)"
             class="fire-btn col-span-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 active:scale-95 active:bg-zinc-600 text-zinc-400 hover:text-white font-medium py-2.5 rounded-xl text-xs tracking-widest transition-all">
             FIRE
@@ -541,7 +571,7 @@ window._editBuffers = window._editBuffers || {};
 // stripped when duplicating so clones start clean
 const RUNTIME_FIELDS = ['name', 'value', 'progress', 'lfo_active',
                         'last_trigger', 'osc_preview', 'midi_trigger',
-                        'routing_label', 'last_fire'];
+                        'routing_label', 'last_fire', 'knob_value', 'device_value'];
 
 function _cleanMacro(m) {
   const c = JSON.parse(JSON.stringify(m));
@@ -816,7 +846,32 @@ const OP_DEFS = {
             [2, '2 per beat'], [4, '4 per beat']],
     defaultRate: 1,
   },
+  knob: {
+    label: 'KNOB',
+    desc: 'Follow a MIDI control live — the knob IS the fader',
+    glyph: _glyphSvg('<circle cx="20" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="20" y1="7" x2="23.5" y2="3.5" stroke="currentColor" stroke-width="1.5"/>'),
+  },
 };
+
+// Which behavior a step is in — the one place the op-type→mode mapping lives
+function _opMode(op) {
+  if (!op) return 'set';
+  return op.type === 'lfo' ? 'lfo' : op.type === 'knob' ? 'knob' : 'ramp';
+}
+
+// KNOB behavior controls (shared by both editors): the sweep range maps the
+// physical knob's travel onto a window of the parameter; 'hold' re-asserts
+// the last value after every snapshot/workspace switch (snapshot-agnostic).
+function _knobControls(name, i, step, sc) {
+  const op = step.operation || {};
+  return `${_modControls(name, i, step)}
+    <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none"
+        title="After a snapshot or workspace switch, re-assert this knob's last value so the recall can't yank it back">
+      <input type="checkbox" data-field="steps.${i}.operation.hold" class="w-3 h-3 accent-orange-500"${op.hold !== false ? ' checked' : ''}>
+      hold across snapshots
+    </label>
+    <div class="text-[10px] text-zinc-500">Pair with a CC, 14-bit CC, bend or aftertouch trigger with <b>use value</b> on — every move writes straight to the device. Drag the card's slider to control it from here.</div>`;
+}
 
 // Curve / rate select for an operation step, from the OP_DEFS descriptor.
 // A stored value outside the preset list gets its own option — otherwise the
@@ -935,6 +990,14 @@ window.changeStepMode = function (name, i, mode) {
     if (step.value === '{{param}}') {
       step.value = String(def.default ?? 1.0);
     }
+  } else if (mode === 'knob') {
+    // canonical knob op: no timing, no curve/rate — just range + hold
+    const prev = step.operation || {};
+    step.operation = { type: 'knob', hold: prev.hold !== false };
+    if (Array.isArray(prev.range)) step.operation.range = prev.range;
+    else if (def.mod?.range) step.operation.range = [def.min ?? 0, def.max ?? 1];
+    if (def.mod?.threshold) step.operation.threshold = prev.threshold ?? 0.5;
+    step.value = '{{param}}';
   } else {
     step.operation = { ...(step.operation || { bars: 2, bpm: 140 }), type: mode };
     step.value = '{{param}}';
@@ -1294,7 +1357,7 @@ function _describeRouting(m) {
   const p = t.param || 'volume';
   const def = PARAM_DEFS[p] || {};
   const mode = step.operation
-    ? (step.operation.type === 'lfo' ? 'LFO' : 'ramp') : 'set';
+    ? (step.operation.type === 'lfo' ? 'LFO' : step.operation.type === 'knob' ? 'knob' : 'ramp') : 'set';
   if (def.global) return `${def.label || p} ${mode}`;
   const rowTag = t.row === 2 ? ' (playback)' : t.row === 3 ? ' (output)' : '';
   const dest = t.submix ? ` → ${t.submix}` : '';
@@ -1552,6 +1615,7 @@ function _renderAdvancedEditor(name, m, panel) {
         <option value="set"${mode==='set'?' selected':''}>SET</option>
         <option value="ramp"${mode==='ramp'?' selected':''}>RAMP</option>
         <option value="lfo"${mode==='lfo'?' selected':''}>LFO</option>
+        <option value="knob"${mode==='knob'?' selected':''}>KNOB</option>
       </select>`;
     if (step.operation) {
       const op = step.operation;
@@ -1559,13 +1623,13 @@ function _renderAdvancedEditor(name, m, panel) {
         ${targetHtml}
         <div class="flex gap-2 items-center">
           ${addrField}
-          ${modeSel(op.type === 'lfo' ? 'lfo' : 'ramp')}
+          ${modeSel(_opMode(op))}
           ${_removeBtn(i)}
         </div>
-        ${_timingControls(name, i, op)}
+        ${op.type === 'knob' ? '' : _timingControls(name, i, op)}
         ${_opExtraControls(name, i, op, sc)}
-        ${_opModeDesc(op.type === 'lfo' ? 'lfo' : 'ramp')}
-        ${step.target ? _modControls(name, i, step) : ''}
+        ${_opModeDesc(_opMode(op))}
+        ${op.type === 'knob' ? _knobControls(name, i, step, sc) : (step.target ? _modControls(name, i, step) : '')}
       </div>`;
     } else {
       const val = _esc(step.value ?? '');
@@ -1741,8 +1805,8 @@ function _renderSimpleEditor(name, m, panel) {
     : `<div class="text-xs text-zinc-500 italic">no channels discovered yet — run discovery from the gear menu first</div>`;
 
   // HOW — mode cards from OP_DEFS, then the active mode's controls
-  const mode = step.operation ? (step.operation.type === 'lfo' ? 'lfo' : 'ramp') : 'set';
-  const cards = ['set', 'ramp', 'lfo'].map(k => {
+  const mode = _opMode(step.operation);
+  const cards = ['set', 'ramp', 'lfo', 'knob'].map(k => {
     const d = OP_DEFS[k];
     const on = k === mode;
     return `<button onclick="changeStepMode('${name}',${i},'${k}')" title="${d.desc}"
@@ -1755,6 +1819,8 @@ function _renderSimpleEditor(name, m, panel) {
   }).join('');
   const behaviorControls = mode === 'set'
     ? `<div class="flex gap-2 items-center">${_valueControl(name, i, step, nc, sc)}</div>`
+    : mode === 'knob'
+    ? _knobControls(name, i, step, sc)
     : `${_timingControls(name, i, step.operation)}
        ${_opExtraControls(name, i, step.operation, sc)}
        ${_modControls(name, i, step)}`;

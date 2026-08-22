@@ -76,6 +76,11 @@ function _fireTriggers(match, value, logLabel) {
   Object.keys(macros).forEach(name => {
     for (const trigger of macros[name].midi_triggers || []) {
       if (match(trigger)) {
+        // KNOB macro + value-carrying trigger: stream the value, don't fire
+        if (_knobStepOf(macros[name]) && trigger.use_value_as_param) {
+          sendKnob(name, value);
+          return;
+        }
         console.log(`[MIDI] ${logLabel} → ${name}`);
         fireMacro(name, trigger.use_value_as_param ? value : 1.0);
         pulseLED(name, Date.now() / 1000);

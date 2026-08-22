@@ -86,6 +86,15 @@ function _onWSMessage(event) {
     }
   }
 
+  if (data.macro_event && data.macro_event.type === 'knob_update') {
+    const ev = data.macro_event;
+    if (macros[ev.name]) {
+      if (ev.value != null) macros[ev.name].knob_value = ev.value;
+      macros[ev.name].device_value = ev.device_value;
+      updateKnobCard(ev.name);   // slider follows MIDI/API/hold alike; drag guard inside
+    }
+  }
+
   if (data.macro_update) {
     const mu = data.macro_update;
     macros[mu.name] = { ...(macros[mu.name] || {}), ...mu };
@@ -230,6 +239,60 @@ function updateLastFired() {
   });
   el.textContent = `⚡ ${lastFiredMacro.name} · ${ts}`;
   el.classList.remove('hidden');
+}
+
+// ── KNOB macros: coalesced value stream over the WebSocket ───────────────────
+// A knob streams dozens of ticks a second; last-value-wins every 25ms keeps
+// one in-flight write per knob and zero HTTP round-trips (WS when open,
+// POST fallback otherwise).
+window._knobPending = {};
+let _knobFlushTimer = null;
+
+window.sendKnob = function (name, value) {
+  window._knobPending[name] = Math.max(0, Math.min(1, parseFloat(value) || 0));
+  if (_knobFlushTimer) return;
+  _knobFlushTimer = setTimeout(() => {
+    _knobFlushTimer = null;
+    const pending = window._knobPending;
+    window._knobPending = {};
+    Object.entries(pending).forEach(([n, v]) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'knob', name: n, value: v }));
+      } else {
+        API.setKnob(n, v).catch(() => {});
+      }
+    });
+  }, 25);
+};
+
+// Card slider dragged by hand: readout immediately, device via the stream
+window.knobInput = function (name, value) {
+  const m = macros[name];
+  const step = m ? _knobStepOf(m) : null;
+  if (m) m.knob_value = parseFloat(value);
+  const lbl = document.getElementById(`knob-val-${name}`);
+  if (lbl && step) {
+    const param = (step.target && step.target.param) || 'volume';
+    lbl.textContent = fmtParamValue(param, _shapeKnob(parseFloat(value), step.operation));
+  }
+  sendKnob(name, value);
+};
+
+// Reflect a knob_update on the card; skip moving the slider while the user
+// is dragging it (their pointer owns it until release)
+function updateKnobCard(name, moveSlider = true) {
+  const m = macros[name];
+  const step = m ? _knobStepOf(m) : null;
+  if (!step) return;
+  const param = (step.target && step.target.param) || 'volume';
+  const slider = document.getElementById(`knob-${name}`);
+  const lbl = document.getElementById(`knob-val-${name}`);
+  const dev = document.getElementById(`knob-dev-${name}`);
+  const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value) : null;
+  if (slider && v != null && window._knobDrag !== name) slider.value = v;
+  if (lbl && v != null) lbl.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
+  if (dev) dev.textContent = Number.isFinite(parseFloat(m.device_value))
+    ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : '';
 }
 
 // ── Live card update from WebSocket macro_update payload ─────────────────────

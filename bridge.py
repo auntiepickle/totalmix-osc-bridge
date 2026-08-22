@@ -11,8 +11,11 @@ from config import *
 from osc import get_client
 from mqtt_handler import setup_mqtt
 from osc_monitor import osc_monitor
-from operations import OperationRegistry
+from operations import OperationRegistry, shape_value
 import physical_table as pt
+import global_units as gu
+
+ROW_KEYS_BY_WORD = {"input": "inputs", "playback": "playbacks", "output": "outputs"}
 
 # === CENTRAL LOGGING ===
 logging.basicConfig(
@@ -139,6 +142,12 @@ class TotalMixOSCBridge:
         # unlike the transient flash/event). name -> {status: ok|partial|
         # skipped, reason, skipped_steps, at}
         self.macro_health = {}
+        # KNOB macros (continuous MIDI control): last value per knob, for the
+        # live card and for 'hold' re-assertion after snapshot switches
+        self.knob_values = {}
+        self._knob_last_status = {}     # name -> last resolve status (log on change)
+        self._knob_last_broadcast = {}  # name -> ts (UI updates throttled ~10Hz)
+        self._knob_readback_timers = {} # name -> Timer (settle readback)
         self.channel_map = None
         self.channel_map_is_example = False
         self._running_macros = set()        # names of macros currently executing
@@ -424,6 +433,7 @@ class TotalMixOSCBridge:
             else:
                 logger.warning(f"switch_to: snapshot '{snapshot}' not found in '{workspace}'")
 
+        self.reapply_held_knobs()   # snapshot-agnostic knobs
         self.broadcast_state()
         return True
 
@@ -634,6 +644,8 @@ class TotalMixOSCBridge:
             # (#24: snapshot switches are non-events for resolution — the
             # physical table is layout-invariant and per-write confirmations
             # carry the correctness claim. No map work here, by design.)
+            if (force_switch or not already_on_target) and (ws_slot is not None or snap_num is not None):
+                self.reapply_held_knobs()   # snapshot-agnostic knobs
 
             # === EMIT macro_start SO BROWSER CAN SYNC PROGRESS BAR ===
             duration_ms = self._get_macro_duration_ms(macro, clock_bpm=clock_bpm)
@@ -663,6 +675,16 @@ class TotalMixOSCBridge:
                 # transport when selected — absolute addressing, no aiming,
                 # no bank/row state to dirty or restore. Raw-OSC steps
                 # (classic namespace) fall through to the classic path.
+                if (step.get("operation") or {}).get("type") == "knob":
+                    # a KNOB step fired as a macro (FIRE button, MQTT, PC
+                    # trigger) is just a set to the param value
+                    r = self.knob_set(macro_name, value, source="fire")
+                    if r["status"] != "resolved":
+                        skip_reasons.append(r["status"])
+                        self.broadcast_state(macro_event={
+                            "type": "macro_skipped", "name": macro_name,
+                            "reason": r["status"]})
+                    continue
                 if "target" in step and self._global_active():
                     _fail = self._run_step_global(step, macro_name, value,
                                                   cancel_event, clock_bpm)
@@ -1770,6 +1792,144 @@ class TotalMixOSCBridge:
                 logger.info(f"   → {writer.address} = {step_val} (global)")
             except Exception as e:
                 logger.error(f"Global OSC send failed: {e}")
+
+    # ─────────────────────────────────────────────────────────────
+    # KNOB macros — continuous MIDI control (operation type "knob")
+    # ─────────────────────────────────────────────────────────────
+    # A knob tick is NOT a macro fire: no device lock, no start/complete
+    # events, no LED/health churn per message. Resolve by name (sub-ms
+    # under Global, always right for the current layout) and write. Global-
+    # first: refuses cleanly under the classic transport.
+    KNOB_BROADCAST_INTERVAL_S = 0.1
+
+    @staticmethod
+    def _knob_step(macro):
+        for st in macro.get("steps", []):
+            if (st.get("operation") or {}).get("type") == "knob" and "target" in st:
+                return st
+        return None
+
+    def knob_device_value(self, step):
+        """The device's CURRENT value for the knob's target, normalized
+        0..1 from Global feedback — None when unknown. Lets the card show
+        where the mixer actually is before the physical knob is touched."""
+        if not self._global_active():
+            return None
+        writer, _, status = self.global_transport.resolve_step(step["target"])
+        if status != "resolved":
+            return None
+        st = self.global_listener.state
+        addr = getattr(writer, "address", "")
+        try:
+            if addr.startswith("/mix/"):
+                _, _, src, in_hw, out_hw, _ = addr.split("/")
+                e = st.get_mix(src, int(in_hw), int(out_hw), "fader")
+                return gu.fader_lin(e[0]) if e else None
+            parts = addr.strip("/").split("/")
+            row_word, hw, path = parts[0], int(parts[1]), "/".join(parts[2:])
+            if path == "faderlin":
+                e = st.get_param(ROW_KEYS_BY_WORD[row_word], hw, "fader")
+                return gu.fader_lin(e[0]) if e else None
+            e = st.get_param(ROW_KEYS_BY_WORD[row_word], hw, path)
+            if e is None:
+                return None
+            param = str(step["target"].get("param", "volume")).lower()
+            gp = gu.GLOBAL_PARAM_MAP.get(param)
+            return float(gp.from_wire(e[0])) if gp and gp.from_wire else None
+        except Exception:
+            return None
+
+    def knob_set(self, macro_name, value, source="midi"):
+        """Write a knob's value (0..1, mapped through its range/threshold).
+        Returns {"status": ..., "value": ...}; statuses mirror resolve_step
+        plus 'not_a_knob' and 'knob_needs_global'."""
+        macro = self.mappings.get("macros", {}).get(macro_name)
+        step = self._knob_step(macro) if macro else None
+        if step is None:
+            return {"status": "not_a_knob"}
+        try:
+            value = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return {"status": "bad_value"}
+        writer = None
+        if not self._global_active():
+            status = "knob_needs_global"
+        else:
+            writer, label, status = self.global_transport.resolve_step(step["target"])
+        if status == "resolved":
+            writer.send_message("knob", shape_value(value, step["operation"]))
+            self.knob_values[macro_name] = value
+            self._schedule_knob_readback(macro_name, step, writer.address)
+        if self._knob_last_status.get(macro_name) != status:
+            # log on CHANGE only — a knob streams dozens of ticks a second
+            self._knob_last_status[macro_name] = status
+            if status == "resolved":
+                logger.info(f"knob '{macro_name}' live -> {getattr(writer, 'address', '?')}")
+                self._record_fire(macro_name, "ok")
+            else:
+                logger.error(f"knob '{macro_name}' refused: {status}")
+                self._record_fire(macro_name, "skipped", status)
+        now = time.time()
+        if now - self._knob_last_broadcast.get(macro_name, 0) >= self.KNOB_BROADCAST_INTERVAL_S:
+            self._knob_last_broadcast[macro_name] = now
+            self.broadcast_state(macro_event={
+                "type": "knob_update", "name": macro_name, "status": status,
+                "value": self.knob_values.get(macro_name),
+                "device_value": self.knob_device_value(step) if status == "resolved" else None,
+                "source": source,
+            })
+        return {"status": status, "value": self.knob_values.get(macro_name)}
+
+    KNOB_READBACK_DELAY_S = 0.4
+
+    def _schedule_knob_readback(self, name, step, address):
+        """Own Global writes never echo (re-send OFF), so after a knob
+        settles, re-dump its channel once and push the DEVICE's value to
+        the card — the 'device' line stays honest instead of freezing at
+        whatever the last dump said. Mix-scope knobs skip it (/sendchan
+        carries no mix rows; a full /sendmix per settle is too heavy)."""
+        prev = self._knob_readback_timers.get(name)
+        if prev:
+            prev.cancel()
+        parts = address.strip("/").split("/")
+        if parts[0] == "mix" or len(parts) < 3:
+            return
+        row_word, hw = parts[0], parts[1]
+
+        def _go():
+            try:
+                self.global_transport._client.send_message(
+                    f"/sendchan/{row_word}/{hw}", 1.0)
+                time.sleep(0.35)
+                self.broadcast_state(macro_event={
+                    "type": "knob_update", "name": name, "status": "resolved",
+                    "value": self.knob_values.get(name),
+                    "device_value": self.knob_device_value(step),
+                    "source": "readback"})
+            except Exception as e:
+                logger.debug(f"knob readback for {name} failed: {e}")
+
+        t = threading.Timer(self.KNOB_READBACK_DELAY_S, _go)
+        t.daemon = True
+        self._knob_readback_timers[name] = t
+        t.start()
+
+    def reapply_held_knobs(self):
+        """Snapshot-agnostic knobs: after a confirmed snapshot/workspace
+        switch the device holds the SNAPSHOT's stored values — re-assert
+        every knob marked hold so a recall never yanks a knob back."""
+        if not self._global_active():
+            return 0
+        n = 0
+        for name, value in list(self.knob_values.items()):
+            macro = self.mappings.get("macros", {}).get(name)
+            step = self._knob_step(macro) if macro else None
+            if step and step["operation"].get("hold"):
+                if self.knob_set(name, value, source="hold")["status"] == "resolved":
+                    n += 1
+        if n:
+            logger.info(f"   -> re-asserted {n} held knob(s) after switch")
+        return n
 
     def start_mqtt(self):
         """Connect MQTT and start the client loop (web and standalone modes)."""

@@ -246,6 +246,7 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     if bridge.state_confirmed:
                         bridge._layout_epoch = time.time()  # TASK-6 race hardening
                     bridge.update_workspace(name=ws_name or f"slot_{ws_slot}")
+                    getattr(bridge, "reapply_held_knobs", lambda: 0)()  # snapshot-agnostic knobs
                     if bridge.state_confirmed:
                         # Refresh the retained belief — MQTT-driven switches
                         # left the topic at the last MACRO switch, so every
@@ -283,6 +284,7 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                         if ws and ws in SNAPSHOT_MAP:
                             snap_name = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(snap_num))
                         bridge.update_snapshot(name=snap_name or f"snap_{snap_num}")
+                        getattr(bridge, "reapply_held_knobs", lambda: 0)()  # snapshot-agnostic knobs
                         if bridge.state_confirmed:
                             _mark_own_republish(bridge, "totalmix/snapshot", payload)
                             client.publish("totalmix/snapshot", payload, retain=True)
