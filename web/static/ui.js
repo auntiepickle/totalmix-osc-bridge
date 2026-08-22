@@ -740,8 +740,20 @@ Object.assign(PARAM_DEFS, {
 // live layout has no width entry (#16) — a refused step logs why. Keys and
 // addresses mirror bridge.CHANNEL_DETAIL_PARAMS exactly. Values are the
 // device's normalized 0..1 floats; shown as % until unit maps are captured.
-const _eqSlider = (label, addr, dflt = 0.5) => ({
-  widget: 'slider', min: 0, max: 1, step: 0.01, default: dflt, fmt: _pct,
+// Readouts in the device's REAL units - wire-measured 2026-08-21 (#25
+// HW-5): EQ gain +/-20 dB linear, EQ freq 20..20k Hz LOG taper, Q 0.4..9.9
+// linear, low cut 20..500 Hz log. Mirrors global_units.py exactly.
+const _fmtHz = (lo, hi) => v => {
+  const hz = lo * Math.pow(hi / lo, Math.max(0, Math.min(1, v)));
+  return hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k` : `${Math.round(hz)}Hz`;
+};
+const _fmtDb = (lo, hi) => v => {
+  const db = lo + Math.max(0, Math.min(1, v)) * (hi - lo);
+  return `${db > 0 ? '+' : ''}${db.toFixed(1)}dB`;
+};
+const _fmtQ = v => `Q${(0.4 + Math.max(0, Math.min(1, v)) * 9.5).toFixed(1)}`;
+const _eqSlider = (label, addr, fmt, dflt = 0.5) => ({
+  widget: 'slider', min: 0, max: 1, step: 0.01, default: dflt, fmt,
   mod: { range: true }, channelDetail: true, label, addr,
 });
 Object.assign(PARAM_DEFS, {
@@ -749,16 +761,16 @@ Object.assign(PARAM_DEFS, {
                label: 'EQ On/Off', addr: '/2/eqEnable',
                options: [['1.0', 'On'], ['0.0', 'Off']],
                mod: { threshold: true } },
-  eq_gain_1:   _eqSlider('EQ Band 1 Gain', '/2/eqGain1'),
-  eq_freq_1:   _eqSlider('EQ Band 1 Freq', '/2/eqFreq1'),
-  eq_q_1:      _eqSlider('EQ Band 1 Q',    '/2/eqQ1'),
-  eq_gain_2:   _eqSlider('EQ Band 2 Gain', '/2/eqGain2'),
-  eq_freq_2:   _eqSlider('EQ Band 2 Freq', '/2/eqFreq2'),
-  eq_q_2:      _eqSlider('EQ Band 2 Q',    '/2/eqQ2'),
-  eq_gain_3:   _eqSlider('EQ Band 3 Gain', '/2/eqGain3'),
-  eq_freq_3:   _eqSlider('EQ Band 3 Freq', '/2/eqFreq3'),
-  eq_q_3:      _eqSlider('EQ Band 3 Q',    '/2/eqQ3'),
-  lowcut_freq: _eqSlider('Low Cut Freq',   '/2/lowcutFreq', 0.0),
+  eq_gain_1:   _eqSlider('EQ Band 1 Gain', '/2/eqGain1', _fmtDb(-20, 20)),
+  eq_freq_1:   _eqSlider('EQ Band 1 Freq', '/2/eqFreq1', _fmtHz(20, 20000)),
+  eq_q_1:      _eqSlider('EQ Band 1 Q',    '/2/eqQ1',    _fmtQ),
+  eq_gain_2:   _eqSlider('EQ Band 2 Gain', '/2/eqGain2', _fmtDb(-20, 20)),
+  eq_freq_2:   _eqSlider('EQ Band 2 Freq', '/2/eqFreq2', _fmtHz(20, 20000)),
+  eq_q_2:      _eqSlider('EQ Band 2 Q',    '/2/eqQ2',    _fmtQ),
+  eq_gain_3:   _eqSlider('EQ Band 3 Gain', '/2/eqGain3', _fmtDb(-20, 20)),
+  eq_freq_3:   _eqSlider('EQ Band 3 Freq', '/2/eqFreq3', _fmtHz(20, 20000)),
+  eq_q_3:      _eqSlider('EQ Band 3 Q',    '/2/eqQ3',    _fmtQ),
+  lowcut_freq: _eqSlider('Low Cut Freq',   '/2/lowcutFreq', _fmtHz(20, 500), 0.0),
 });
 
 // Dynamics / Auto-Level / input stage (#20) — same page-2 machinery as EQ.
