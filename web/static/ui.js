@@ -278,11 +278,13 @@ function _knobStripHTML(name, m, step) {
     ${m.description ? `<p class="text-zinc-500 text-xs leading-snug mb-1">${_esc(m.description)}</p>` : ''}
     <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${_esc(m.routing_label || '—')}</p>
     <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
-    <div class="flex gap-2 items-center mt-3 mb-1">
+    <div class="flex gap-1 items-center flex-wrap mt-3 mb-2">
         ${_enableChipHTML(name, m, step)}
         ${_companionChipsHTML(name, m, step)}
+    </div>
+    <div class="flex gap-2 items-center mb-1 min-w-0">
         <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
-            class="flex-1 accent-orange-500" title="Drag to set — MIDI moves it too"
+            class="flex-1 min-w-0 accent-orange-500" title="Drag to set — MIDI moves it too"
             oninput="knobInput('${name}', this.value)"
             onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null">
         <span id="knob-val-${name}" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
@@ -505,10 +507,15 @@ function toggleDetail(name) {
   // Pre-flight issues: stored names vs the loaded snapshot + channel maps
   html += _issueStripHTML(macroTargetIssues(m), true);
 
-  // Top row: fire mode badge + duration + Edit button
+  // Top row: fire mode badge + duration + Edit button (knobs: neither
+  // applies — a knob follows its control continuously)
+  const isKnob = !!_knobStepOf(m);
   html += `<div class="flex items-center justify-between gap-2">
-    <span class="text-xs font-bold px-2.5 py-1 rounded-lg tracking-widest ${fireModeClass}">${fireMode}</span>
-    <span class="text-zinc-500 text-xs font-mono">⏱ ${durationSec}s</span>
+    ${isKnob
+      ? `<span class="text-xs font-bold px-2.5 py-1 rounded-lg tracking-widest text-cyan-400 bg-cyan-900/30 border border-cyan-800/50">KNOB</span>
+         <span class="text-zinc-500 text-xs font-mono">follows its control live</span>`
+      : `<span class="text-xs font-bold px-2.5 py-1 rounded-lg tracking-widest ${fireModeClass}">${fireMode}</span>
+         <span class="text-zinc-500 text-xs font-mono">⏱ ${durationSec}s</span>`}
     <button onclick="editDetail('${name}')"
         class="ml-auto text-xs text-zinc-500 hover:text-orange-400 flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
       <i class="fas fa-pen text-[10px]"></i> Edit
@@ -522,10 +529,25 @@ function toggleDetail(name) {
       <div class="space-y-1.5">`;
     m.steps.forEach(step => {
       // Name-based targets display as names — the strip index is live-resolved
-      const addr = step.target
-        ? `${_esc(step.target.channel)} → ${_esc(step.target.submix)} ⚡live`
+      const t = step.target;
+      const pLabel = t && t.param && t.param !== 'volume'
+        ? ` · ${(PARAM_DEFS[t.param] || {}).label || t.param}` : '';
+      const addr = t
+        ? `${_esc(t.channel)}${t.submix ? ' → ' + _esc(t.submix) : (t.row === 3 ? ' (output)' : '')}${_esc(pLabel)} ⚡live`
         : _esc(step.osc || '?');
-      if (step.operation) {
+      if (step.operation && step.operation.type === 'knob') {
+        const op = step.operation;
+        const def = PARAM_DEFS[(t && t.param) || 'volume'] || {};
+        const rng = Array.isArray(op.range) ? op.range : null;
+        const rngText = rng && def.fmt ? `${def.fmt(parseFloat(rng[0]))}–${def.fmt(parseFloat(rng[1]))}` : 'full range';
+        const flags = [op.hold !== false ? 'hold' : null, op.auto_enable !== false && ENABLE_FOR[(t && t.param) || ''] ? 'auto-on' : null].filter(Boolean).join(' · ');
+        html += `<div class="flex items-center gap-2 font-mono bg-zinc-900/60 px-2.5 py-1.5 rounded-lg">
+          <span class="text-zinc-500 text-xs">◎</span>
+          <span class="text-orange-300 text-xs flex-1 truncate">${addr}</span>
+          <span class="text-cyan-400 text-xs font-bold">KNOB</span>
+          <span class="text-zinc-600 text-xs">${rngText}${flags ? ' · ' + flags : ''}</span>
+        </div>`;
+      } else if (step.operation) {
         const op = step.operation;
         const opType = (op.type || '').toUpperCase();
         const bars  = op.bars || 2;
