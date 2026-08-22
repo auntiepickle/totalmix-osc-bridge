@@ -1973,6 +1973,31 @@ class TotalMixOSCBridge:
             self._knob_enable_sent[macro_name] = time.time()
             logger.info(f"knob '{macro_name}' switched its section on ({tgt['param']})")
 
+    KNOB_OFF_AT_MIN_EPS = 0.01
+
+    def _off_at_min(self, macro_name, step, value):
+        """operation.off_at_min: the knob's bottom of travel switches its
+        section OFF; moving back up switches it ON again immediately (the
+        crossing bypasses the auto-enable throttle). Returns True when the
+        value is at minimum (caller still writes the value, then stops)."""
+        if not step["operation"].get("off_at_min"):
+            return False
+        tgt = self._enable_target(step)
+        if tgt is None:
+            return False
+        at_min = value <= self.KNOB_OFF_AT_MIN_EPS
+        key = f"{macro_name}:offmin"
+        prev = self._knob_enable_sent.get(key)      # last crossing state
+        if prev == at_min:
+            return at_min
+        writer, _, status = self.global_transport.resolve_step(tgt)
+        if status == "resolved":
+            writer.send_message("enable", 0.0 if at_min else 1.0)
+            self._knob_enable_sent[macro_name] = time.time()   # counts as an enable write
+            logger.info(f"knob '{macro_name}' {'OFF at minimum' if at_min else 'back ON'} ({tgt['param']})")
+        self._knob_enable_sent[key] = at_min
+        return at_min
+
     def _assert_pins(self, macro_name, step):
         """Pinned companion values (operation.companions): if the device
         state differs (or is unknown), write them - throttled with the same
@@ -2017,7 +2042,8 @@ class TotalMixOSCBridge:
         else:
             writer, label, status = self.global_transport.resolve_step(step["target"])
         if status == "resolved":
-            self._auto_enable(macro_name, step)
+            if not self._off_at_min(macro_name, step, value):
+                self._auto_enable(macro_name, step)
             self._assert_pins(macro_name, step)
             writer.send_message("knob", shape_value(value, step["operation"]))
             self.knob_values[macro_name] = value

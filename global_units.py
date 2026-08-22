@@ -260,11 +260,18 @@ for _p in ("echo_time", "echo_feedback", "echo_volume", "echo_width"):
 # strip feedback agree. A knob may also PIN companion values (operation.companions =
 # {"eq_type_3": 0.667}) - re-asserted on every move and hold, so a 'high
 # cut' knob on EQ band 3 keeps the band a Low Pass across snapshot recalls.
+# An EQ-band knob surfaces its WHOLE band: the type (enum chip) plus the
+# band's other continuous params (mini-sliders) - a knob on band-3 freq
+# still lets you set the band's Q and gain. Band 2 has no type in TotalMix.
 COMPANION_FOR = {
     "lowcut_freq": ["lowcut_grade"],
-    "eq_gain_1": ["eq_type_1"], "eq_freq_1": ["eq_type_1"], "eq_q_1": ["eq_type_1"],
-    "eq_gain_3": ["eq_type_3"], "eq_freq_3": ["eq_type_3"], "eq_q_3": ["eq_type_3"],
+    "lowcut_grade": ["lowcut_freq"],
 }
+for _b, _type in (("1", "eq_type_1"), ("2", None), ("3", "eq_type_3")):
+    _members = [f"eq_freq_{_b}", f"eq_gain_{_b}", f"eq_q_{_b}"]
+    for _m in _members:
+        COMPANION_FOR[_m] = ([_type] if _type else []) + [x for x in _members if x != _m]
+
 # ALL THREE ORDERS WIRE-VERIFIED 2026-08-21 via the classic page-2 value
 # strings on Main (/2/lowcutGradeVal, /2/eqType1Val, /2/eqType3Val).
 ENUM_LABELS = {

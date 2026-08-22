@@ -281,3 +281,18 @@ def test_pinned_companion_asserted_on_move(rig):
     b._knob_enable_sent.clear()
     b.knob_set("hicut", 0.82)
     assert g.writes_to("/output/0/eq/band3type") == [2.0]         # matches: nothing to assert
+
+
+def test_off_at_min_toggles_section(rig):
+    knob = {**KNOB, "steps": [{**KNOB["steps"][0], "operation": {
+        "type": "knob", "hold": True, "off_at_min": True}}]}
+    b, g, listener = rig({"locut": knob})
+    listener.state.ingest("/output/0/lowcut/enable", (1.0,))   # section ON
+    b.knob_set("locut", 0.0)                                    # bottom of travel
+    assert ("/output/0/lowcut/enable", 0.0) in g.sent           # -> OFF
+    b.knob_set("locut", 0.0)                                    # still at min: no repeat
+    assert g.writes_to("/output/0/lowcut/enable") == [0.0]
+    b.knob_set("locut", 0.3)                                    # back up -> ON immediately
+    assert g.writes_to("/output/0/lowcut/enable") == [0.0, 1.0]
+    b.knob_set("locut", 0.4)                                    # moving: no repeat
+    assert g.writes_to("/output/0/lowcut/enable") == [0.0, 1.0]

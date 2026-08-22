@@ -221,26 +221,47 @@ ENABLE_FOR.lowcut_freq = 'lowcut_enable'; ENABLE_FOR.lowcut_grade = 'lowcut_enab
 // Companion params shown beside the knob (mirror of global_units.COMPANION_FOR
 // / ENUM_LABELS): the low-cut slope next to a low-cut knob, EQ band type
 // next to an EQ knob. Click cycles to the next option on the device.
-const COMPANION_FOR = {
-  lowcut_freq: ['lowcut_grade'],
-  eq_gain_1: ['eq_type_1'], eq_freq_1: ['eq_type_1'], eq_q_1: ['eq_type_1'],
-  eq_gain_3: ['eq_type_3'], eq_freq_3: ['eq_type_3'], eq_q_3: ['eq_type_3'],
-};
+const COMPANION_FOR = { lowcut_freq: ['lowcut_grade'], lowcut_grade: ['lowcut_freq'] };
+[['1', 'eq_type_1'], ['2', null], ['3', 'eq_type_3']].forEach(([b, type]) => {
+  const members = [`eq_freq_${b}`, `eq_gain_${b}`, `eq_q_${b}`];
+  members.forEach(m => { COMPANION_FOR[m] = (type ? [type] : []).concat(members.filter(x => x !== m)); });
+});
 const ENUM_LABELS = {   // orders wire-verified 2026-08-21 (RME's own labels)
   lowcut_grade: ['6 dB/oct', '12 dB/oct', '18 dB/oct', '24 dB/oct'],
   eq_type_1: ['Bell', 'Shelf', 'High Pass', 'Low Pass'],
   eq_type_3: ['Bell', 'Shelf', 'Low Pass', 'High Pass'],
 };
 
+// Continuous companions (a band's gain / Q / freq beside the main knob):
+// compact live sliders writing through the companion endpoint
+function _companionSlidersHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  return (COMPANION_FOR[param] || []).filter(cp => !ENUM_LABELS[cp]).map(cp => {
+    const def = PARAM_DEFS[cp] || {};
+    const v = (m.companions || {})[cp];
+    const val = Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
+    const short = (def.label || cp).replace(/^EQ Band \d /, '').replace(/^Low Cut /, '');
+    return `<div class="flex gap-2 items-center">
+      <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${_esc(short)}</span>
+      <input id="knob-cps-${name}-${cp}" type="range" min="0" max="1" step="0.002" value="${val ?? 0.5}"
+          class="flex-1 min-w-0 accent-zinc-400" title="${_esc(def.label || cp)} on the device — live"
+          oninput="companionInput('${name}','${cp}',this.value)"
+          onpointerdown="window._knobDrag='${name}:${cp}'" onpointerup="window._knobDrag=null">
+      <span id="knob-cpv-${name}-${cp}" class="text-[10px] text-zinc-400 font-mono w-12 text-center shrink-0">${val == null ? '?' : (def.fmt ? def.fmt(val) : Math.round(val * 100) + '%')}</span>
+    </div>`;
+  }).join('');
+}
+
 function _companionChipsHTML(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
-  return (COMPANION_FOR[param] || []).map(cp => {
+  return (COMPANION_FOR[param] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
     const labels = ENUM_LABELS[cp] || [];
+    const pinned = (((step.operation || {}).companions) || {})[cp] != null;
     const v = (m.companions || {})[cp];
     const idx = Number.isFinite(parseFloat(v)) ? Math.round(parseFloat(v) * (labels.length - 1)) : null;
-    const text = idx == null ? `${cp.replace(/_/g, ' ')} ?` : labels[idx];
+    const text = (idx == null ? `${cp.replace(/_/g, ' ')} ?` : labels[idx]) + (pinned ? ' ⚲' : '');
     return `<button id="knob-cp-${name}-${cp}" onclick="cycleKnobParam('${name}','${cp}',${labels.length})"
-        title="${_esc(cp.replace(/_/g, ' '))} on the device — click to cycle"
+        title="${_esc(cp.replace(/_/g, ' '))} on the device — click to cycle${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}"
         class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border transition-all ${idx == null ? 'bg-zinc-900 border-zinc-800 text-zinc-600' : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white'}">${_esc(text)}</button>`;
   }).join('');
 }
@@ -290,6 +311,7 @@ function _knobStripHTML(name, m, step) {
         <span id="knob-val-${name}" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
     </div>
     <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>
+    <div id="knob-band-${name}" class="space-y-1 mb-2">${_companionSlidersHTML(name, m, step)}</div>
     <button onclick="toggleDetail('${name}')"
         class="w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
         DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
@@ -1074,6 +1096,11 @@ function _knobControls(name, i, step, sc) {
         title="If the section (EQ / low cut / dynamics / FX) is off when the knob moves, switch it on first">
       <input type="checkbox" data-field="steps.${i}.operation.auto_enable" class="w-3 h-3 accent-orange-500"${op.auto_enable !== false ? ' checked' : ''}>
       turn on with knob move
+    </label>
+    <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none"
+        title="Like a console filter knob: fully down = section off; moving up switches it back on">
+      <input type="checkbox" data-field="steps.${i}.operation.off_at_min" class="w-3 h-3 accent-orange-500"${op.off_at_min ? ' checked' : ''}>
+      lowest position switches it off
     </label>` : ''}
     ${(COMPANION_FOR[(step.target && step.target.param) || ''] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
       const labels = ENUM_LABELS[cp];

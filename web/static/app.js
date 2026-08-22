@@ -298,6 +298,14 @@ function updateKnobCard(name, moveSlider = true) {
   const chip = document.getElementById(`knob-en-${name}`);
   if (chip) chip.outerHTML = _enableChipHTML(name, m, step);
   (COMPANION_FOR[param] || []).forEach(cp => {
+    const sl = document.getElementById(`knob-cps-${name}-${cp}`);
+    const cv = parseFloat((m.companions || {})[cp]);
+    if (sl && Number.isFinite(cv) && window._knobDrag !== `${name}:${cp}`) {
+      sl.value = cv;
+      const lbl = document.getElementById(`knob-cpv-${name}-${cp}`);
+      const def = PARAM_DEFS[cp] || {};
+      if (lbl) lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
+    }
     const el = document.getElementById(`knob-cp-${name}-${cp}`);
     if (el) {
       const tmp = document.createElement('div');
@@ -308,15 +316,48 @@ function updateKnobCard(name, moveSlider = true) {
   });
 }
 
-// Companion chip click: step the enum to its next option on the device
+// Companion chip click: step the enum to its next option on the device.
+// If the knob PINS this param, the pin follows the choice (and is saved),
+// otherwise the next knob move would snap it back.
 window.cycleKnobParam = async function (name, param, count) {
   const m = macros[name];
   if (!m) return;
   const cur = parseFloat((m.companions || {})[param]);
   const idx = Number.isFinite(cur) ? Math.round(cur * (count - 1)) : -1;
   const next = (idx + 1) % count;
-  try { await API.setKnobParam(name, param, next / (count - 1)); }
-  catch (e) { console.warn('[knob] companion write failed:', e.message); }
+  const value = next / (count - 1);
+  try {
+    await API.setKnobParam(name, param, value);
+    const step = _knobStepOf(m);
+    const pins = step && step.operation && step.operation.companions;
+    if (pins && pins[param] != null) {
+      pins[param] = parseFloat(value.toFixed(4));
+      await API.saveMacro(name, _cleanMacro(m));
+      window._lastLocalSave = { name, ts: Date.now() };
+    }
+  } catch (e) { console.warn('[knob] companion write failed:', e.message); }
+};
+
+// Companion mini-slider stream (band gain / Q): coalesced HTTP writes
+window._cpPending = {};
+let _cpFlushTimer = null;
+window.companionInput = function (name, param, value) {
+  const m = macros[name];
+  const def = PARAM_DEFS[param] || {};
+  const v = Math.max(0, Math.min(1, parseFloat(value) || 0));
+  if (m) { m.companions = m.companions || {}; m.companions[param] = v; }
+  const lbl = document.getElementById(`knob-cpv-${name}-${param}`);
+  if (lbl) lbl.textContent = def.fmt ? def.fmt(v) : Math.round(v * 100) + '%';
+  window._cpPending[`${name}\u0000${param}`] = v;
+  if (_cpFlushTimer) return;
+  _cpFlushTimer = setTimeout(() => {
+    _cpFlushTimer = null;
+    const pending = window._cpPending; window._cpPending = {};
+    Object.entries(pending).forEach(([k, val]) => {
+      const [n, p] = k.split('\u0000');
+      API.setKnobParam(n, p, val).catch(() => {});
+    });
+  }, 60);
 };
 
 // Enable chip click: flip the knob's section switch on the device
