@@ -47,7 +47,7 @@ window.pulseGroupLED = function (ws, macroName, triggerTimestamp) {
   const ts = new Date(triggerTimestamp * 1000).toLocaleTimeString([], {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
-  if (label) label.textContent = `${macroName} · ${ts}`;
+  if (label) label.textContent = `${_displayName(macroName, macros[macroName])} · ${ts}`;
   dot.classList.remove('bg-zinc-600');
   dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
   setTimeout(() => {
@@ -306,12 +306,24 @@ function _renderKnobSection(names) {
     : `<div class="col-span-full text-xs text-zinc-600 italic">no knobs yet — <b>New Knob</b> binds a channel parameter to a MIDI control</div>`;
 }
 
-// Double-click a card's name to rename it inline, like a normal text field.
-// Enter commits, Esc cancels, blur commits. The name is the mappings key, so
-// the bridge renames the key in place and re-syncs every tab.
+// Names: every macro has a machine-safe KEY (the mappings key - DOM ids,
+// URLs, the MQTT topic totalmix/macro/<key>) and an optional free-text
+// LABEL ("Lo Cut", any characters) shown everywhere in the UI. Double-click
+// edits the label; the key never changes, so HA automations keep working.
+function _displayName(key, m) {
+  const l = m && typeof m.label === 'string' ? m.label.trim() : '';
+  return l || key;
+}
+
+// Derive a key from a typed name: "Lo Cut!" -> "Lo_Cut"
+function _slugKey(text) {
+  return String(text).trim().replace(/[^A-Za-z0-9_\-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64);
+}
+
 function _nameHTML(name) {
-  return `<h3 id="name-${name}" ondblclick="startRename('${name}')" title="Double-click to rename"
-      class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight cursor-text">${name}</h3>`;
+  const shown = _displayName(name, macros[name]);
+  return `<h3 id="name-${name}" ondblclick="startRename('${name}')" title="Double-click to rename${shown !== name ? ' (key: ' + _esc(name) + ')' : ''}"
+      class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight cursor-text">${_esc(shown)}</h3>`;
 }
 
 window.startRename = function (name) {
@@ -319,29 +331,28 @@ window.startRename = function (name) {
   if (!h || h.dataset.editing) return;
   h.dataset.editing = '1';
   const input = document.createElement('input');
-  input.value = name;
+  input.value = _displayName(name, macros[name]);
   input.className = 'text-sm font-bold text-white font-mono tracking-tight bg-zinc-950 border border-orange-400 rounded-lg px-2 py-0.5 flex-1 min-w-0 focus:outline-none';
   input.setAttribute('maxlength', '64');
-  input.title = 'letters, digits, _ or - · Enter to save · Esc to cancel';
+  input.title = 'any text · Enter to save · Esc to cancel';
   let done = false;
   const finish = async (commit) => {
     if (done) return;
     done = true;
-    const newName = input.value.trim();
-    if (!commit || newName === name) { input.replaceWith(h); delete h.dataset.editing; return; }
-    if (!MACRO_NAME_RE.test(newName)) {
+    const label = input.value.trim();
+    const current = _displayName(name, macros[name]);
+    if (!commit || label === current) { input.replaceWith(h); delete h.dataset.editing; return; }
+    if (!label) {
       input.classList.add('border-red-500'); done = false;
-      input.title = 'Name must be 1–64 chars: letters, digits, _ or -'; return;
-    }
-    if (macros[newName]) {
-      input.classList.add('border-red-500'); done = false;
-      input.title = `"${newName}" already exists`; return;
+      input.title = 'Name cannot be empty'; return;
     }
     try {
-      await API.renameMacro(name, newName);
-      macros[newName] = macros[name];
-      delete macros[name];
-      window._lastLocalSave = { name: newName, ts: Date.now() };
+      // label only - the key stays, so ids/URLs/MQTT topics are untouched
+      const m = { ...(macros[name] || {}), label };
+      if (label === name) delete m.label;        // back to the bare key
+      await API.saveMacro(name, _cleanMacro(m));
+      macros[name] = m;
+      window._lastLocalSave = { name, ts: Date.now() };
       renderCards();
     } catch (e) {
       input.classList.add('border-red-500'); done = false;
@@ -2220,7 +2231,7 @@ function openNewMacro() {
   if (tmpl) {
     tmpl.innerHTML = '<option value="">Blank (send + ramp template)</option>' +
       Object.keys(macros).sort()
-        .map(n => `<option value="${_esc(n)}">Duplicate: ${_esc(n)}</option>`)
+        .map(n => `<option value="${_esc(n)}">Duplicate: ${_esc(_displayName(n, macros[n]))}</option>`)
         .join('');
   }
   if (errEl) errEl.classList.add('hidden');
@@ -2241,10 +2252,11 @@ async function createNewMacro() {
   const showErr = (msg) => {
     if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
   };
-  const name = (nameEl ? nameEl.value : '').trim();
+  const typed = (nameEl ? nameEl.value : '').trim();
+  const name = _slugKey(typed);               // machine-safe key
 
   if (!MACRO_NAME_RE.test(name)) {
-    return showErr('Name must be 1–64 chars: letters, digits, _ or -');
+    return showErr('Name needs at least one letter, digit, _ or - (max 64)');
   }
   if (macros[name]) {
     return showErr(`"${name}" already exists`);
@@ -2255,6 +2267,8 @@ async function createNewMacro() {
              : window._newMacroKind === 'knob' ? _blankKnobTemplate()
              : _blankMacroTemplate();
   window._newMacroKind = null;
+  if (typed !== name) body.label = typed;   // "Lo Cut" shown, key Lo_Cut
+  else delete body.label;
 
   try {
     await API.saveMacro(name, body);

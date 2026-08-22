@@ -31,6 +31,7 @@ Every macro the bridge knows about.
 
 | Field | Default | Description |
 |---|---|---|
+| `label` | unset | Display name (any text, e.g. "Lo Cut"). The macro's KEY stays machine-safe and is what URLs and the MQTT topic use; double-click a card's name in the UI to edit the label. |
 | `description` | unset | Shown on the macro card |
 | `workspace` | unset | Target workspace name. Must match a key in `ufx2_snapshot_map.json`. Case-insensitive. |
 | `snapshot` | unset | Target snapshot name. Must match a value in that workspace's `snapshots` dict. Case-insensitive. |

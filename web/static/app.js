@@ -239,7 +239,7 @@ function updateLastFired() {
   const ts = new Date(lastFiredMacro.ts).toLocaleTimeString([], {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
-  el.textContent = `⚡ ${lastFiredMacro.name} · ${ts}`;
+  el.textContent = `⚡ ${_displayName(lastFiredMacro.name, macros[lastFiredMacro.name])} · ${ts}`;
   el.classList.remove('hidden');
 }
 
