@@ -1830,7 +1830,13 @@ function _harvestEditor(name) {
     let obj = m;
     for (let i = 0; i < parts.length - 1; i++) {
       const k = isNaN(parts[i]) ? parts[i] : Number(parts[i]);
-      if (obj[k] === undefined || obj[k] === null) return;
+      if (obj[k] === undefined || obj[k] === null) {
+        // Auto-vivify: a control rendered for a field the macro doesn't
+        // have yet must still harvest. Bailing here silently dropped the
+        // ramp 'to' slider after re-pointing a raw step (field report:
+        // 38% saved as 100% — the step had no operation.range to land in)
+        obj[k] = isNaN(parts[i + 1]) ? {} : [];
+      }
       obj = obj[k];
     }
     const lastRaw = parts[parts.length - 1];
