@@ -111,6 +111,9 @@ window.API = (function () {
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },
 
+    /** POST /api/knob/{name}/param → write a companion param (low-cut slope, EQ type) */
+    setKnobParam(name, param, value) { return _post(`/api/knob/${encodeURIComponent(name)}/param`, { param, value }); },
+
     /** POST /api/knob/{name}/enable → flip the knob's section switch (EQ/low cut/...) */
     setKnobEnable(name, on) { return _post(`/api/knob/${encodeURIComponent(name)}/enable`, { on }); },
 

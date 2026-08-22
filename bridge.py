@@ -1846,6 +1846,68 @@ class TotalMixOSCBridge:
         en = gu.enable_param_for(step["target"].get("param", "volume"))
         return {**step["target"], "param": en} if en else None
 
+    def _param_state(self, target):
+        """Normalized (0..1) device value of any param on a target from
+        Global feedback, or None when unknown/unresolvable."""
+        if not self._global_active():
+            return None
+        writer, _, status = self.global_transport.resolve_step(target)
+        if status != "resolved":
+            return None
+        st = self.global_listener.state
+        addr = getattr(writer, "address", "")
+        parts = addr.strip("/").split("/")
+        try:
+            if parts[0] in ROW_KEYS_BY_WORD:
+                e = st.get_param(ROW_KEYS_BY_WORD[parts[0]], int(parts[1]),
+                                 "/".join(parts[2:]))
+            else:
+                e = st.get_param("fx", 0, addr.strip("/"))
+        except (ValueError, IndexError):
+            return None
+        if e is None:
+            return None
+        gp = gu.GLOBAL_PARAM_MAP.get(str(target.get("param", "")).lower())
+        return float(gp.from_wire(e[0])) if gp and gp.from_wire else None
+
+    def knob_companions(self, step):
+        """Device state of the knob param's companion params (e.g. the
+        low-cut slope next to a low-cut freq knob): {param: normalized}."""
+        out = {}
+        for p in gu.companions_for(step["target"].get("param", "volume")):
+            out[p] = self._param_state({**step["target"], "param": p})
+        return out
+
+    def knob_param_set(self, macro_name, param, value, source="ui"):
+        """Write any calibrated param on the knob's routing target - used
+        for companion controls (low-cut slope, EQ band type)."""
+        macro = self.mappings.get("macros", {}).get(macro_name)
+        step = self._knob_step(macro) if macro else None
+        if step is None:
+            return {"status": "not_a_knob"}
+        if param not in gu.GLOBAL_PARAM_MAP:
+            return {"status": "unsupported_param"}
+        if not self._global_active():
+            return {"status": "knob_needs_global"}
+        tgt = {**step["target"], "param": param}
+        writer, label, status = self.global_transport.resolve_step(tgt)
+        if status != "resolved":
+            return {"status": status}
+        try:
+            value = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return {"status": "bad_value"}
+        writer.send_message("param", value)
+        self._schedule_knob_readback(macro_name, step, writer.address)
+        self.broadcast_state(macro_event={
+            "type": "knob_update", "name": macro_name, "status": "resolved",
+            "value": self.knob_values.get(macro_name),
+            "device_value": self.knob_device_value(step),
+            "enable_value": self.knob_enable_state(step),
+            "companions": {**self.knob_companions(step), param: value},
+            "source": source})
+        return {"status": "resolved", "param": param, "value": value}
+
     def knob_enable_state(self, step):
         """Device state of the knob's section switch from Global feedback:
         True/False, or None when unknown / no companion."""
@@ -1950,6 +2012,7 @@ class TotalMixOSCBridge:
                 "value": self.knob_values.get(macro_name),
                 "device_value": self.knob_device_value(step) if status == "resolved" else None,
                 "enable_value": self.knob_enable_state(step) if status == "resolved" else None,
+                "companions": self.knob_companions(step) if status == "resolved" else {},
                 "source": source,
             })
         return {"status": status, "value": self.knob_values.get(macro_name)}
@@ -1980,6 +2043,7 @@ class TotalMixOSCBridge:
                     "value": self.knob_values.get(name),
                     "device_value": self.knob_device_value(step),
                     "enable_value": self.knob_enable_state(step),
+                    "companions": self.knob_companions(step),
                     "source": "readback"})
             except Exception as e:
                 logger.debug(f"knob readback for {name} failed: {e}")

@@ -71,6 +71,7 @@ async def get_macros():
             entry["knob_value"] = bridge.knob_values.get(name)
             entry["device_value"] = bridge.knob_device_value(step)
             entry["enable_value"] = bridge.knob_enable_state(step)
+            entry["companions"] = bridge.knob_companions(step)
         out[name] = entry
     return out
 
@@ -221,7 +222,7 @@ MACRO_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 RUNTIME_FIELDS = (
     "name", "value", "progress", "lfo_active",
     "last_trigger", "osc_preview", "midi_trigger", "routing_label",
-    "last_fire", "knob_value", "device_value", "enable_value",
+    "last_fire", "knob_value", "device_value", "enable_value", "companions",
 )
 
 
@@ -509,6 +510,19 @@ def set_knob(name: str, body: dict):
 def set_knob_enable(name: str, body: dict):
     """Flip a KNOB macro's section switch (EQ / low cut / dynamics / FX)."""
     r = bridge.knob_enable(name, bool(body.get("on", True)), source="ui")
+    if r["status"] == "not_a_knob":
+        raise HTTPException(status_code=404, detail=f"'{name}' is not a knob macro")
+    if r["status"] != "resolved":
+        raise HTTPException(status_code=409, detail=r["status"])
+    return r
+
+
+@app.post("/api/knob/{name}/param")
+def set_knob_param(name: str, body: dict):
+    """Write a companion param on a KNOB macro's routing (low-cut slope,
+    EQ band type): {"param": "lowcut_grade", "value": 0..1}."""
+    r = bridge.knob_param_set(name, str(body.get("param", "")),
+                              body.get("value", 0.0), source="ui")
     if r["status"] == "not_a_knob":
         raise HTTPException(status_code=404, detail=f"'{name}' is not a knob macro")
     if r["status"] != "resolved":

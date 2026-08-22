@@ -218,6 +218,33 @@ ENABLE_FOR.lowcut_freq = 'lowcut_enable'; ENABLE_FOR.lowcut_grade = 'lowcut_enab
 ['reverb_time','reverb_volume','reverb_width','reverb_predelay'].forEach(p => ENABLE_FOR[p] = 'reverb_enable');
 ['echo_time','echo_feedback','echo_volume','echo_width'].forEach(p => ENABLE_FOR[p] = 'echo_enable');
 
+// Companion params shown beside the knob (mirror of global_units.COMPANION_FOR
+// / ENUM_LABELS): the low-cut slope next to a low-cut knob, EQ band type
+// next to an EQ knob. Click cycles to the next option on the device.
+const COMPANION_FOR = {
+  lowcut_freq: ['lowcut_grade'],
+  eq_gain_1: ['eq_type_1'], eq_freq_1: ['eq_type_1'], eq_q_1: ['eq_type_1'],
+  eq_gain_3: ['eq_type_3'], eq_freq_3: ['eq_type_3'], eq_q_3: ['eq_type_3'],
+};
+const ENUM_LABELS = {
+  lowcut_grade: ['6 dB/oct', '12 dB/oct', '18 dB/oct', '24 dB/oct'],
+  eq_type_1: ['Peak', 'Low Shelf', 'High Pass', 'Low Pass'],
+  eq_type_3: ['Peak', 'High Shelf', 'Low Pass', 'High Pass'],
+};
+
+function _companionChipsHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  return (COMPANION_FOR[param] || []).map(cp => {
+    const labels = ENUM_LABELS[cp] || [];
+    const v = (m.companions || {})[cp];
+    const idx = Number.isFinite(parseFloat(v)) ? Math.round(parseFloat(v) * (labels.length - 1)) : null;
+    const text = idx == null ? `${cp.replace(/_/g, ' ')} ?` : labels[idx];
+    return `<button id="knob-cp-${name}-${cp}" onclick="cycleKnobParam('${name}','${cp}',${labels.length})"
+        title="${_esc(cp.replace(/_/g, ' '))} on the device — click to cycle"
+        class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border transition-all ${idx == null ? 'bg-zinc-900 border-zinc-800 text-zinc-600' : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white'}">${_esc(text)}</button>`;
+  }).join('');
+}
+
 function _enableChipHTML(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
   const en = ENABLE_FOR[param];
@@ -253,6 +280,7 @@ function _knobStripHTML(name, m, step) {
     <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     <div class="flex gap-2 items-center mt-3 mb-1">
         ${_enableChipHTML(name, m, step)}
+        ${_companionChipsHTML(name, m, step)}
         <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
             class="flex-1 accent-orange-500" title="Drag to set — MIDI moves it too"
             oninput="knobInput('${name}', this.value)"
@@ -646,7 +674,7 @@ window._editBuffers = window._editBuffers || {};
 // stripped when duplicating so clones start clean
 const RUNTIME_FIELDS = ['name', 'value', 'progress', 'lfo_active',
                         'last_trigger', 'osc_preview', 'midi_trigger',
-                        'routing_label', 'last_fire', 'knob_value', 'device_value', 'enable_value'];
+                        'routing_label', 'last_fire', 'knob_value', 'device_value', 'enable_value', 'companions'];
 
 function _cleanMacro(m) {
   const c = JSON.parse(JSON.stringify(m));

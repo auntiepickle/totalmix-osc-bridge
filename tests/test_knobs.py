@@ -243,3 +243,22 @@ def test_enable_http_endpoint(module_knob):
     assert r.status_code == 200 and r.json()["enable"] is True
     assert g.sent[-1] == ("/output/0/lowcut/enable", 1.0)
     assert "enable_value" in client.get("/api/macros").json()["zz_knob"]
+
+
+def test_companion_state_and_write(rig):
+    b, g, listener = rig({"locut": KNOB})
+    step = b._knob_step(KNOB)
+    assert b.knob_companions(step) == {"lowcut_grade": None}      # unknown yet
+    listener.state.ingest("/output/0/lowcut/slope", (1.0,))         # 12 dB/oct
+    assert b.knob_companions(step)["lowcut_grade"] == pytest.approx(1 / 3)
+    r = b.knob_param_set("locut", "lowcut_grade", 2 / 3)            # -> 18 dB/oct
+    assert r["status"] == "resolved"
+    assert g.sent[-1] == ("/output/0/lowcut/slope", 2.0)            # enum index on the wire
+    assert b.knob_param_set("locut", "nope", 0.5)["status"] == "unsupported_param"
+
+
+def test_companion_http_endpoint(module_knob):
+    b, g = module_knob
+    r = client.post("/api/knob/zz_knob/param", json={"param": "lowcut_grade", "value": 1.0})
+    assert r.status_code == 200 and g.sent[-1] == ("/output/0/lowcut/slope", 3.0)
+    assert "companions" in client.get("/api/macros").json()["zz_knob"]

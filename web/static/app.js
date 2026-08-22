@@ -92,6 +92,7 @@ function _onWSMessage(event) {
       if (ev.value != null) macros[ev.name].knob_value = ev.value;
       macros[ev.name].device_value = ev.device_value;
       if ('enable_value' in ev) macros[ev.name].enable_value = ev.enable_value;
+      if (ev.companions) macros[ev.name].companions = ev.companions;
       updateKnobCard(ev.name);   // slider follows MIDI/API/hold alike; drag guard inside
     }
   }
@@ -296,7 +297,27 @@ function updateKnobCard(name, moveSlider = true) {
     ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : '';
   const chip = document.getElementById(`knob-en-${name}`);
   if (chip) chip.outerHTML = _enableChipHTML(name, m, step);
+  (COMPANION_FOR[param] || []).forEach(cp => {
+    const el = document.getElementById(`knob-cp-${name}-${cp}`);
+    if (el) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = _companionChipsHTML(name, m, step);
+      const fresh = tmp.querySelector(`#knob-cp-${name}-${cp}`);
+      if (fresh) el.outerHTML = fresh.outerHTML;
+    }
+  });
 }
+
+// Companion chip click: step the enum to its next option on the device
+window.cycleKnobParam = async function (name, param, count) {
+  const m = macros[name];
+  if (!m) return;
+  const cur = parseFloat((m.companions || {})[param]);
+  const idx = Number.isFinite(cur) ? Math.round(cur * (count - 1)) : -1;
+  const next = (idx + 1) % count;
+  try { await API.setKnobParam(name, param, next / (count - 1)); }
+  catch (e) { console.warn('[knob] companion write failed:', e.message); }
+};
 
 // Enable chip click: flip the knob's section switch on the device
 window.toggleKnobEnable = async function (name) {
