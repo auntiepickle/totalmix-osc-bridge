@@ -148,6 +148,8 @@ class TotalMixOSCBridge:
         self._knob_last_status = {}     # name -> last resolve status (log on change)
         self._knob_last_broadcast = {}  # name -> ts (UI updates throttled ~10Hz)
         self._knob_readback_timers = {} # name -> Timer (settle readback)
+        self._knob_last_pushed = {}     # name -> snapshot tuple (device-sync differ)
+        self._knob_watch_stop = threading.Event()
         self._knob_enable_sent = {}     # name -> ts of last auto-enable write
         self.channel_map = None
         self.channel_map_is_example = False
@@ -1741,12 +1743,15 @@ class TotalMixOSCBridge:
             persist_cb=self._persist_after_global_names,
             heartbeat_timeout_s=GLOBAL_HEARTBEAT_TIMEOUT_S)
         self.global_transport.start()
+        self._knob_watch_stop.clear()
+        threading.Thread(target=self._knob_watch_loop, daemon=True).start()
         mode = ("TRANSPORT ACTIVE" if OSC_TRANSPORT == "global"
                 else "shadow mode (observing only)")
         logger.info(f"Global OSC {mode} → {GLOBAL_OSC_IP}:{GLOBAL_OSC_PORT} "
                     f"(listening on {listener.port})")
 
     def stop_global_osc(self):
+        self._knob_watch_stop.set()
         if self.global_transport:
             self.global_transport.stop()
             self.global_transport = None
@@ -2064,6 +2069,8 @@ class TotalMixOSCBridge:
         now = time.time()
         if now - self._knob_last_broadcast.get(macro_name, 0) >= self.KNOB_BROADCAST_INTERVAL_S:
             self._knob_last_broadcast[macro_name] = now
+            if status == "resolved":
+                self._knob_last_pushed[macro_name] = self._knob_snapshot(step)
             self.broadcast_state(macro_event={
                 "type": "knob_update", "name": macro_name, "status": status,
                 "value": self.knob_values.get(macro_name),
@@ -2075,6 +2082,40 @@ class TotalMixOSCBridge:
         return {"status": status, "value": self.knob_values.get(macro_name)}
 
     KNOB_READBACK_DELAY_S = 0.4
+
+    def _knob_snapshot(self, step):
+        """Comparable tuple of everything a knob card displays from the
+        device: value, section switch, companions."""
+        dv = self.knob_device_value(step)
+        en = self.knob_enable_state(step)
+        comps = tuple(sorted((k, None if v is None else round(v, 4))
+                             for k, v in self.knob_companions(step).items()))
+        return (None if dv is None else round(dv, 4), en, comps)
+
+    def _knob_watch_loop(self):
+        """Device → browser sync (#user report): someone flips EQ off IN
+        TOTALMIX and the chip must follow. The Global listener already holds
+        the truth (change broadcasts update its state); this 1 Hz differ
+        pushes a knob_update whenever a knob's displayed state changed
+        without us writing it."""
+        while not self._knob_watch_stop.wait(1.0):
+            try:
+                for name, macro in list(self.mappings.get("macros", {}).items()):
+                    step = self._knob_step(macro)
+                    if step is None or not self._global_active():
+                        continue
+                    snap = self._knob_snapshot(step)
+                    if snap == self._knob_last_pushed.get(name):
+                        continue
+                    self._knob_last_pushed[name] = snap
+                    self.broadcast_state(macro_event={
+                        "type": "knob_update", "name": name, "status": "resolved",
+                        "value": self.knob_values.get(name),
+                        "device_value": snap[0], "enable_value": snap[1],
+                        "companions": dict(self.knob_companions(step)),
+                        "source": "device"})
+            except Exception as e:
+                logger.debug(f"knob watch tick failed: {e}")
 
     def _schedule_knob_readback(self, name, step, address):
         """Own Global writes never echo (re-send OFF), so after a knob

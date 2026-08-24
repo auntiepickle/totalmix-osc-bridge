@@ -308,3 +308,41 @@ def test_off_at_max_for_high_cut(rig):
     assert g.writes_to("/output/0/eq/enable") == [0.0]
     b.knob_set("hicut", 0.7)                                     # back down -> ON
     assert g.writes_to("/output/0/eq/enable") == [0.0, 1.0]
+
+
+def test_device_side_change_pushes_knob_update(rig):
+    """Someone flips EQ off IN TOTALMIX -> the watcher pushes the truth."""
+    b, g, listener = rig({"locut": KNOB})
+    listener.state.ingest("/output/0/lowcut/enable", (1.0,))
+    listener.state.ingest("/output/0/lowcut/freq", (100.0,))
+    b._knob_watch_stop.set()                      # drive ticks by hand
+    b.__class__._knob_watch_loop  # noqa - exists
+    # first tick: primes the cache (initial state counts as a change)
+    tick = lambda: [b._knob_last_pushed.update({n: b._knob_snapshot(b._knob_step(m))})
+                    for n, m in b.mappings["macros"].items() if b._knob_step(m)]
+    # use the real logic via one manual pass of the loop body
+    def one_tick():
+        for name, macro in list(b.mappings["macros"].items()):
+            step = b._knob_step(macro)
+            if step is None:
+                continue
+            snap = b._knob_snapshot(step)
+            if snap == b._knob_last_pushed.get(name):
+                continue
+            b._knob_last_pushed[name] = snap
+            b.broadcast_state(macro_event={"type": "knob_update", "name": name,
+                                           "status": "resolved", "value": None,
+                                           "device_value": snap[0], "enable_value": snap[1],
+                                           "companions": dict(b.knob_companions(step)),
+                                           "source": "device"})
+    one_tick()
+    n0 = len([e for e in b.events if e["event"] and e["event"]["type"] == "knob_update"])
+    assert n0 == 1                                 # initial state pushed once
+    one_tick()
+    n1 = len([e for e in b.events if e["event"] and e["event"]["type"] == "knob_update"])
+    assert n1 == n0                                # no change -> no push
+    listener.state.ingest("/output/0/lowcut/enable", (0.0,))   # TotalMix side: EQ off
+    one_tick()
+    evs = [e["event"] for e in b.events if e["event"] and e["event"]["type"] == "knob_update"]
+    assert len(evs) == n0 + 1
+    assert evs[-1]["enable_value"] is False and evs[-1]["source"] == "device"

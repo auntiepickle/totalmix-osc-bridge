@@ -91,6 +91,11 @@ function _onWSMessage(event) {
     if (macros[ev.name]) {
       if (ev.value != null) macros[ev.name].knob_value = ev.value;
       macros[ev.name].device_value = ev.device_value;
+      // device-side change (someone moved TotalMix): the screen slider
+      // follows the mixer - it is a window, not a motor fight
+      if (ev.source === 'device' && ev.device_value != null) {
+        macros[ev.name].knob_value = ev.device_value;
+      }
       if ('enable_value' in ev) macros[ev.name].enable_value = ev.enable_value;
       if (ev.companions) macros[ev.name].companions = ev.companions;
       updateKnobCard(ev.name);   // slider follows MIDI/API/hold alike; drag guard inside

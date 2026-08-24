@@ -1192,6 +1192,8 @@ function _modControls(name, i, step) {
     </div>`;
   }
   if (def.mod.range) {
+    const isKnob = op.type === 'knob';
+    const loLbl = isKnob ? 'min' : 'from', hiLbl = isKnob ? 'max' : 'to';
     const rng = Array.isArray(op.range) ? op.range : [def.min, def.max];
     const lo = Number.isFinite(parseFloat(rng[0])) ? parseFloat(rng[0]) : def.min;
     const hi = Number.isFinite(parseFloat(rng[1])) ? parseFloat(rng[1]) : def.max;
@@ -1199,7 +1201,7 @@ function _modControls(name, i, step) {
     // at card width (user screenshot)
     html += `<div class="space-y-2">
       <div class="flex gap-2 items-center">
-        <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">from</span>
+        <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${loLbl}</span>
         <input data-field="steps.${i}.operation.range.0" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${lo}"
             class="flex-1 accent-orange-500" title="sweep start — double-click resets to ${def.fmt(def.min)}"
             oninput="document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
@@ -1207,7 +1209,7 @@ function _modControls(name, i, step) {
         <span id="mod-lo-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(lo)}</span>
       </div>
       <div class="flex gap-2 items-center">
-        <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">to</span>
+        <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${hiLbl}</span>
         <input data-field="steps.${i}.operation.range.1" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${hi}"
             class="flex-1 accent-orange-500" title="sweep end — double-click resets to ${def.fmt(def.max)}"
             oninput="document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
