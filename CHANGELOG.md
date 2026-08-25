@@ -44,6 +44,12 @@
   iOS focus-zoom, nav wraps, panels fit the viewport). MODUL mobile is a
   performance surface: 72px main knobs (thumb-pad scale), 44px minis,
   132px curve drag lanes, 17px value readouts.
+- **Fixed: empty page when the WebSocket is down.** Card rendering was
+  gated on ws.onopen - a wss outage (seen on the HTTPS/Caddy origin)
+  left CONTROLS and MACROS completely blank while every REST-driven
+  element looked healthy. Cards now load from REST at page init, and a
+  visible amber banner replaces the title-only offline signal while the
+  socket reconnects.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

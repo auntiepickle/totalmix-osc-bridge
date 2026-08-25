@@ -22,17 +22,36 @@ function _connectWS() {
     console.log('[WS] Connected to bridge');
     document.title = 'TotalMix OSC Bridge';
     _wsRetryMs = 1000;
+    _wsBanner(false);
     loadMacros();
   };
   ws.onclose = () => {
     console.warn(`[WS] Disconnected — retrying in ${_wsRetryMs / 1000}s`);
     document.title = '⚠ offline — TotalMix OSC Bridge';
+    _wsBanner(true);
     setTimeout(_connectWS, _wsRetryMs);
     _wsRetryMs = Math.min(_wsRetryMs * 2, 10000);
   };
   ws.onmessage = _onWSMessage;
 }
 _connectWS();
+
+// A dead socket must be VISIBLE (title changes are invisible on phones and
+// kiosk tabs): thin amber strip pinned to the top while disconnected.
+// Content still works (REST); live LEDs/values are what's stale.
+function _wsBanner(show) {
+  let el = document.getElementById('ws-down-banner');
+  if (!show) { if (el) el.remove(); return; }
+  if (el) return;
+  el = document.createElement('div');
+  el.id = 'ws-down-banner';
+  el.textContent = 'live connection lost — reconnecting… (values may be stale)';
+  el.style.cssText =
+    'position:fixed;top:0;left:0;right:0;z-index:9999;padding:6px 12px;' +
+    'background:#78350f;color:#fcd34d;font-size:12px;text-align:center;' +
+    'font-family:ui-monospace,monospace;letter-spacing:0.05em;';
+  document.body.appendChild(el);
+}
 
 function _onWSMessage(event) {
   const data = JSON.parse(event.data);
@@ -762,6 +781,11 @@ window.addEventListener('load', async () => {
   // Load snapshot map and bridge state in parallel — populate dropdowns as
   // soon as both resolve rather than waiting for the first WS broadcast.
   await Promise.all([loadSnapshotMap(), prefillBridgeState(), loadPicker()]);
+  // Cards render from REST immediately: the WebSocket must never gate
+  // content (#user report: HTTPS/Caddy origin where the wss upgrade failed
+  // showed a fully empty page — REST worked the whole time). ws.onopen
+  // still calls loadMacros() to re-sync whatever a dead socket missed.
+  loadMacros();
   checkMappingsSource();
   pollHealth();
   setInterval(pollHealth, 15000);
