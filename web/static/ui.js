@@ -197,9 +197,9 @@ function _knobCardHTML(name, m, step) {
   return `<div class="flex gap-2 items-center mb-1">
       <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
           class="flex-1 accent-orange-500" title="Drag to set — MIDI moves it too"
-          oninput="knobInput('${name}', this.value)"
+          oninput="knobInput('${name}', this.value)" ondblclick="resetKnobToDefault('${name}')"
           onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null">
-      <span id="knob-val-${name}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+      <span id="knob-val-${name}" onclick="startKnobValEdit('${name}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
     </div>
     <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>`;
 }
@@ -225,6 +225,18 @@ const COMPANION_FOR = { lowcut_freq: ['lowcut_grade'], lowcut_grade: ['lowcut_fr
   const members = [`eq_freq_${b}`, `eq_gain_${b}`, `eq_q_${b}`];
   members.forEach(m => { COMPANION_FOR[m] = (type ? [type] : []).concat(members.filter(x => x !== m)); });
 });
+// Shape glyphs for the type dropdowns (#user request): the option shows the
+// curve it selects. Overline + box diagonals - survive native pickers.
+// Band 1 shelf acts below its freq (low shelf), band 3 above (high shelf).
+const ENUM_GLYPHS = {
+  eq_type_1: { 'Bell': '∩', 'Shelf': '‾╲_', 'High Pass': '╱‾', 'Low Pass': '‾╲' },
+  eq_type_3: { 'Bell': '∩', 'Shelf': '_╱‾', 'High Pass': '╱‾', 'Low Pass': '‾╲' },
+};
+const _enumGlyph = (cp, label) => {
+  const g = (ENUM_GLYPHS[cp] || {})[label];
+  return g ? `${g}  ` : '';
+};
+
 const ENUM_LABELS = {   // orders wire-verified 2026-08-21 (RME's own labels)
   lowcut_grade: ['6 dB/oct', '12 dB/oct', '18 dB/oct', '24 dB/oct'],
   eq_type_1: ['Bell', 'Shelf', 'High Pass', 'Low Pass'],
@@ -244,9 +256,9 @@ function _companionSlidersHTML(name, m, step) {
       <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${_esc(short)}</span>
       <input id="knob-cps-${name}-${cp}" type="range" min="0" max="1" step="0.002" value="${val ?? 0.5}"
           class="flex-1 min-w-0 accent-zinc-400" title="${_esc(def.label || cp)} on the device — live"
-          oninput="companionInput('${name}','${cp}',this.value)"
+          oninput="companionInput('${name}','${cp}',this.value)" ondblclick="resetCompToDefault('${name}','${cp}')"
           onpointerdown="window._knobDrag='${name}:${cp}'" onpointerup="window._knobDrag=null">
-      <span id="knob-cpv-${name}-${cp}" class="text-[10px] text-zinc-400 font-mono w-12 text-center shrink-0">${val == null ? '?' : (def.fmt ? def.fmt(val) : Math.round(val * 100) + '%')}</span>
+      <span id="knob-cpv-${name}-${cp}" onclick="startCompValEdit('${name}','${cp}')" title="tap to type a value" class="text-[10px] text-zinc-400 font-mono w-12 text-center shrink-0 cursor-text">${val == null ? '?' : (def.fmt ? def.fmt(val) : Math.round(val * 100) + '%')}</span>
     </div>`;
   }).join('');
 }
@@ -258,10 +270,12 @@ function _companionChipsHTML(name, m, step) {
     const pinned = (((step.operation || {}).companions) || {})[cp] != null;
     const v = (m.companions || {})[cp];
     const idx = Number.isFinite(parseFloat(v)) ? Math.round(parseFloat(v) * (labels.length - 1)) : null;
-    const text = (idx == null ? `${cp.replace(/_/g, ' ')} ?` : labels[idx]) + (pinned ? ' ⚲' : '');
-    return `<button id="knob-cp-${name}-${cp}" onclick="cycleKnobParam('${name}','${cp}',${labels.length})"
-        title="${_esc(cp.replace(/_/g, ' '))} on the device — click to cycle${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}"
-        class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border transition-all ${idx == null ? 'bg-zinc-900 border-zinc-800 text-zinc-600' : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white'}">${_esc(text)}</button>`;
+    return `<select id="knob-cp-${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
+        title="${_esc(cp.replace(/_/g, ' '))} on the device${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}"
+        class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border cursor-pointer transition-all ${idx == null ? 'bg-zinc-900 border-zinc-800 text-zinc-600' : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white'}">
+        <option value="" disabled${idx == null ? ' selected' : ''}>${_esc(cp.replace(/_/g, ' '))} ?</option>
+        ${labels.map((l, i) => `<option value="${i}"${i === idx ? ' selected' : ''}>${_enumGlyph(cp, l)}${_esc(l)}${pinned ? ' \u26b2' : ''}</option>`).join('')}
+      </select>`;
   }).join('');
 }
 
@@ -306,7 +320,7 @@ function _knobStripHTML(name, m, step) {
             class="flex-1 min-w-0 accent-orange-500" title="Drag to set — MIDI moves it too"
             oninput="knobInput('${name}', this.value)"
             onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null">
-        <span id="knob-val-${name}" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+        <span id="knob-val-${name}" onclick="startKnobValEdit('${name}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0 cursor-text">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
     </div>
     <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>
     <div id="knob-band-${name}" class="space-y-1 mb-2">${_companionSlidersHTML(name, m, step)}</div>
@@ -417,8 +431,11 @@ function _knobModuleHTML(name, m, step) {
     const cv = parseFloat((m.companions || {})[cp]);
     const idx = Number.isFinite(cv) ? Math.round(cv * (labels.length - 1)) : null;
     const pinned = (((step.operation || {}).companions) || {})[cp] != null;
-    return `<button id="knob-cp-${name}-${cp}" onclick="cycleKnobParam('${name}','${cp}',${labels.length})"
-        class="mplate" title="click to cycle${pinned ? ' (pinned)' : ''}">${idx == null ? '\u2014' : _esc(labels[idx])}${pinned ? ' \u26b2' : ''}</button>`;
+    return `<select id="knob-cp-${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
+        class="mplate" title="${_esc(cp.replace(/_/g, ' '))}${pinned ? ' (pinned)' : ''}">
+        <option value="" disabled${idx == null ? ' selected' : ''}>\u2014</option>
+        ${labels.map((l, i) => `<option value="${i}"${i === idx ? ' selected' : ''}>${_enumGlyph(cp, l)}${_esc(l)}${pinned ? ' \u26b2' : ''}</option>`).join('')}
+      </select>`;
   }).join('');
   const minis = (COMPANION_FOR[param] || []).filter(cp => !ENUM_LABELS[cp]).map(cp => {
     const def = PARAM_DEFS[cp] || {};
@@ -427,7 +444,7 @@ function _knobModuleHTML(name, m, step) {
     return `<div class="mmini" title="${_esc(def.label || cp)} on the device \u2014 live">
       ${ModulKnob.html(name, { size: 'mini', suffix: cp, label: def.label || cp })}
       <span class="mmini-lbl">${_esc(short)}</span>
-      <span id="knob-cpv-${name}-${cp}" class="mmini-val">${Number.isFinite(cv) ? (def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%') : '\u2014'}</span>
+      <span id="knob-cpv-${name}-${cp}" class="mmini-val" onclick="startCompValEdit('${name}','${cp}')" title="tap to type a value">${Number.isFinite(cv) ? (def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%') : '\u2014'}</span>
     </div>`;
   }).join('');
   const hasEnable = !!ENABLE_FOR[param];
@@ -447,7 +464,7 @@ function _knobModuleHTML(name, m, step) {
   ${hasGraph ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
   <div class="mrow">
     ${ModulKnob.html(name, { label: shown })}
-    <span id="knob-val-${name}" class="mval">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+    <span id="knob-val-${name}" class="mval" onclick="startKnobValEdit('${name}')" title="tap to type a value">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
     <span id="knob-dev-${name}" class="mdev">${Number.isFinite(parseFloat(m.device_value)) ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : ''}</span>
     <div class="mminis">${minis}</div>
   </div>
@@ -468,16 +485,13 @@ function _modulWire(name) {
   ModulKnob.wire(name, {
     get: getV,
     send: val => knobInput(name, val),
-    reset: () => {
-      const mm = macros[name] || {};
-      if (!Number.isFinite(parseFloat(mm.device_value))) return null;
-      return _knobNormOf({ device_value: mm.device_value }, step.operation);
-    },
+    reset: () => _knobDefaultNorm(name),   // double-tap -> the param's DEFAULT
   });
   (COMPANION_FOR[param] || []).filter(cp => !ENUM_LABELS[cp]).forEach(cp => {
     const getC = () => { const x = parseFloat(((macros[name] || {}).companions || {})[cp]); return Number.isFinite(x) ? x : 0.5; };
     ModulKnob.set(name, getC(), cp);
-    ModulKnob.wire(name, { get: getC, send: val => companionInput(name, cp, val), reset: null }, cp);
+    ModulKnob.wire(name, { get: getC, send: val => companionInput(name, cp, val),
+      reset: () => { const d = (PARAM_DEFS[cp] || {}).default; return Number.isFinite(d) ? d : 0.5; } }, cp);
   });
   const gEl = document.getElementById(`mgraph-${name}`);
   if (gEl && window.ModulGraph && window.uPlot) {
@@ -503,10 +517,9 @@ window._modulSync = function (name) {
     if (!Number.isFinite(cv)) return;
     if (ENUM_LABELS[cp]) {
       const plate = document.getElementById(`knob-cp-${name}-${cp}`);
-      if (plate && plate.classList.contains('mplate')) {
+      if (plate && plate.classList.contains('mplate') && document.activeElement !== plate) {
         const labels = ENUM_LABELS[cp];
-        const pinned = (((step.operation || {}).companions) || {})[cp] != null;
-        plate.textContent = (labels[Math.round(cv * (labels.length - 1))] || '\u2014') + (pinned ? ' \u26b2' : '');
+        plate.selectedIndex = 1 + Math.round(cv * (labels.length - 1));
       }
     } else {
       if (window._knobDrag !== `${name}:${cp}`) ModulKnob.set(name, cv, cp);
@@ -1161,6 +1174,139 @@ function _currentRouting(m) {
 // Each parameter class declares how its VALUE should be edited and shown.
 // Adding a new mod target (EQ band, gain, ...) means adding a descriptor
 // here — the step editor renders the right control generically.
+// ── Typed value entry + default resets (#user requests) ────────────────
+// _parseParamText: human text -> param-norm 0..1, per unit family.
+// Inverse of the fmt functions; unknown params parse as percent.
+function _parseParamText(param, text) {
+  const t = String(text).trim().toLowerCase().replace(/\s+/g, '');
+  if (!t) return null;
+  const num = parseFloat(t.replace(/^\+/, ''));
+  if (/^eq_freq_\d$/.test(param) || param === 'lowcut_freq') {
+    if (!Number.isFinite(num)) return null;
+    let hz = num;
+    if (/k(hz)?$/.test(t)) hz = num * 1000;
+    const lo = 20, hi = param === 'lowcut_freq' ? 500 : 20000;
+    hz = Math.max(lo, Math.min(hi, hz));
+    return Math.log(hz / lo) / Math.log(hi / lo);
+  }
+  if (/^eq_gain_\d$/.test(param)) {
+    if (!Number.isFinite(num)) return null;
+    return Math.max(0, Math.min(1, (num + 20) / 40));          // +/-20 dB
+  }
+  if (/^eq_q_\d$/.test(param)) {
+    const q = Number.isFinite(num) ? num : parseFloat(t.replace(/^q/, ''));
+    if (!Number.isFinite(q)) return null;
+    return Math.max(0, Math.min(1, (q - 0.4) / 9.5));          // 0.4..9.9
+  }
+  if (param === 'pan') {
+    if (t === 'c' || t === 'center') return 0.5;
+    const mm = t.match(/^([lr])(\d+)$/);
+    if (mm) return Math.max(0, Math.min(1, 0.5 + (mm[1] === 'r' ? 1 : -1) * parseInt(mm[2], 10) / 200));
+  }
+  if (!Number.isFinite(num)) return null;
+  const v = /%$/.test(t) || num > 1 ? num / 100 : num;          // percent-family
+  return Math.max(0, Math.min(1, v));
+}
+
+// Default for a knob, in KNOB-norm (PARAM_DEFS default is param-norm and
+// must inverse-map through the knob's range; device value is the fallback)
+function _knobDefaultNorm(name) {
+  const m = macros[name], step = m && _knobStepOf(m);
+  if (!step) return null;
+  const param = (step.target && step.target.param) || 'volume';
+  const d = (PARAM_DEFS[param] || {}).default;
+  const pv = Number.isFinite(d) ? d : parseFloat(m.device_value);
+  if (!Number.isFinite(pv)) return null;
+  return _knobNormOf({ device_value: pv }, step.operation);
+}
+window.resetKnobToDefault = function (name) {
+  const v = _knobDefaultNorm(name);
+  if (v == null) return;
+  knobInput(name, v);
+  const sl = document.getElementById(`knob-${name}`);
+  if (sl) sl.value = v;
+  if (window.ModulKnob) ModulKnob.set(name, v);
+};
+window.resetCompToDefault = function (name, cp) {
+  const d = (PARAM_DEFS[cp] || {}).default;
+  const v = Number.isFinite(d) ? d : 0.5;
+  companionInput(name, cp, v);
+  const sl = document.getElementById(`knob-cps-${name}-${cp}`);
+  if (sl) sl.value = v;
+  if (window.ModulKnob) ModulKnob.set(name, v, cp);
+};
+
+// Tap the readout -> type a value ("150", "2.5k", "-6", "Q1.4", "38%").
+function _valEditSwap(span, initial, commit) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = initial;
+  input.className = 'mval-edit';
+  input.style.cssText = 'width:4.5rem;font:inherit;color:inherit;background:#101113;' +
+    'border:1px solid #444;border-radius:3px;padding:0 4px;text-align:center;';
+  span.textContent = '';
+  span.appendChild(input);
+  input.focus(); input.select();
+  let done = false;
+  const finish = (apply) => {
+    if (done) return; done = true;
+    commit(apply ? input.value : null);
+  };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+window.startKnobValEdit = function (name) {
+  if (window._valEdit) return;
+  const m = macros[name], step = m && _knobStepOf(m);
+  const span = document.getElementById(`knob-val-${name}`);
+  if (!span || !step) return;
+  const param = (step.target && step.target.param) || 'volume';
+  window._valEdit = name;
+  _valEditSwap(span, span.textContent, (text) => {
+    window._valEdit = null;
+    if (text != null) {
+      const p = _parseParamText(param, text);
+      if (p != null) {
+        const kn = _knobNormOf({ device_value: p }, step.operation);
+        knobInput(name, kn);
+        const sl = document.getElementById(`knob-${name}`);
+        if (sl) sl.value = kn;
+        if (window.ModulKnob) ModulKnob.set(name, kn);
+        span.textContent = fmtParamValue(param, _shapeKnob(kn, step.operation));
+        return;
+      }
+    }
+    const v = _knobNormOf(m, step.operation);
+    span.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
+  });
+};
+window.startCompValEdit = function (name, cp) {
+  if (window._valEdit) return;
+  const span = document.getElementById(`knob-cpv-${name}-${cp}`);
+  if (!span) return;
+  const def = PARAM_DEFS[cp] || {};
+  window._valEdit = `${name}:${cp}`;
+  _valEditSwap(span, span.textContent, (text) => {
+    window._valEdit = null;
+    if (text != null) {
+      const p = _parseParamText(cp, text);
+      if (p != null) {
+        companionInput(name, cp, p);
+        const sl = document.getElementById(`knob-cps-${name}-${cp}`);
+        if (sl) sl.value = p;
+        if (window.ModulKnob) ModulKnob.set(name, p, cp);
+        span.textContent = def.fmt ? def.fmt(p) : Math.round(p * 100) + '%';
+        return;
+      }
+    }
+    const cv = parseFloat(((macros[name] || {}).companions || {})[cp]);
+    span.textContent = Number.isFinite(cv) ? (def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%') : '\u2014';
+  });
+};
+
 const PARAM_DEFS = {
   volume: {
     widget: 'slider', min: 0, max: 1, step: 0.01, default: 0.8,

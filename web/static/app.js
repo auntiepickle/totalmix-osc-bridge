@@ -355,7 +355,7 @@ window.knobInput = function (name, value) {
   const step = m ? _knobStepOf(m) : null;
   if (m) m.knob_value = parseFloat(value);
   const lbl = document.getElementById(`knob-val-${name}`);
-  if (lbl && step) {
+  if (lbl && step && window._valEdit !== name) {
     const param = (step.target && step.target.param) || 'volume';
     lbl.textContent = fmtParamValue(param, _shapeKnob(parseFloat(value), step.operation));
   }
@@ -374,7 +374,7 @@ function updateKnobCard(name, moveSlider = true) {
   const dev = document.getElementById(`knob-dev-${name}`);
   const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value) : null;
   if (slider && v != null && window._knobDrag !== name) slider.value = v;
-  if (lbl && v != null) lbl.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
+  if (lbl && v != null && window._valEdit !== name) lbl.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
   if (dev) dev.textContent = Number.isFinite(parseFloat(m.device_value))
     ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : '';
   // MODUL layout: rotary knob, live curve, power switch, plates — all
@@ -392,10 +392,10 @@ function updateKnobCard(name, moveSlider = true) {
       sl.value = cv;
       const lbl = document.getElementById(`knob-cpv-${name}-${cp}`);
       const def = PARAM_DEFS[cp] || {};
-      if (lbl) lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
+      if (lbl && window._valEdit !== `${name}:${cp}`) lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
     }
     const el = document.getElementById(`knob-cp-${name}-${cp}`);
-    if (el && !el.classList.contains('mplate')) {
+    if (el && !el.classList.contains('mplate') && document.activeElement !== el) {
       const tmp = document.createElement('div');
       tmp.innerHTML = _companionChipsHTML(name, m, step);
       const fresh = tmp.querySelector(`#knob-cp-${name}-${cp}`);
@@ -412,8 +412,15 @@ window.cycleKnobParam = async function (name, param, count) {
   if (!m) return;
   const cur = parseFloat((m.companions || {})[param]);
   const idx = Number.isFinite(cur) ? Math.round(cur * (count - 1)) : -1;
-  const next = (idx + 1) % count;
-  const value = next / (count - 1);
+  return setKnobParam(name, param, (idx + 1) % count, count);
+};
+
+// Direct enum choice (the type/slope DROPDOWNS — #user request: pick from a
+// list instead of tap-cycling). Same write + pin-follow path as cycling.
+window.setKnobParam = async function (name, param, idx, count) {
+  const m = macros[name];
+  if (!m) return;
+  const value = Math.max(0, Math.min(count - 1, idx)) / (count - 1);
   try {
     await API.setKnobParam(name, param, value);
     const step = _knobStepOf(m);
@@ -435,7 +442,7 @@ window.companionInput = function (name, param, value) {
   const v = Math.max(0, Math.min(1, parseFloat(value) || 0));
   if (m) { m.companions = m.companions || {}; m.companions[param] = v; }
   const lbl = document.getElementById(`knob-cpv-${name}-${param}`);
-  if (lbl) lbl.textContent = def.fmt ? def.fmt(v) : Math.round(v * 100) + '%';
+  if (lbl && window._valEdit !== `${name}:${param}`) lbl.textContent = def.fmt ? def.fmt(v) : Math.round(v * 100) + '%';
   window._cpPending[`${name}\u0000${param}`] = v;
   if (_cpFlushTimer) return;
   _cpFlushTimer = setTimeout(() => {

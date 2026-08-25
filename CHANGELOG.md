@@ -50,6 +50,11 @@
   element looked healthy. Cards now load from REST at page init, and a
   visible amber banner replaces the title-only offline signal while the
   socket reconnects.
+- **Knob ergonomics round**: double-tap (touch) or double-click any knob or
+  slider resets it to the param's default; tap any value readout to TYPE a
+  value ("150", "2.5k", "-6", "Q1.4", "L30", "38%") with unit-aware parsing;
+  the type/slope cyclers are now dropdowns with curve glyphs per option
+  (bell, shelf, low/high pass shapes).
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

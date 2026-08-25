@@ -49,15 +49,18 @@
     const el = document.getElementById(`mknob-${name}${sfx}`);
     if (!el || el._mkWired) return;
     el._mkWired = true;
-    let dragging = false, y0 = 0, v0 = 0;
+    let dragging = false, y0 = 0, v0 = 0, moved = false, t0 = 0, lastTap = 0;
     el.addEventListener('pointerdown', ev => {
       dragging = true; y0 = ev.clientY; v0 = opts.get();
+      moved = false; t0 = performance.now();
       window._knobDrag = suffix ? `${name}:${suffix}` : name;
       el.setPointerCapture(ev.pointerId);
       ev.preventDefault();
     });
     el.addEventListener('pointermove', ev => {
       if (!dragging) return;
+      if (Math.abs(ev.clientY - y0) > 4) moved = true;
+      if (!moved) return;
       const span = ev.shiftKey ? 900 : 220;     // px of travel for full range
       const v = Math.max(0, Math.min(1, v0 + (y0 - ev.clientY) / span));
       set(name, v, suffix);
@@ -68,7 +71,22 @@
       const key = suffix ? `${name}:${suffix}` : name;
       if (window._knobDrag === key) window._knobDrag = null;
     };
-    el.addEventListener('pointerup', end);
+    el.addEventListener('pointerup', ev => {
+      // Double-TAP resets to default (#user request). Manual detection:
+      // preventDefault on pointerdown suppresses synthetic dblclick on
+      // touch, so we count our own quick, unmoved taps (mouse included).
+      const now = performance.now();
+      if (!moved && now - t0 < 400) {
+        if (now - lastTap < 350) {
+          lastTap = 0;
+          const v = opts.reset ? opts.reset() : null;
+          if (v != null) { set(name, v, suffix); opts.send(v); }
+        } else {
+          lastTap = now;
+        }
+      }
+      end();
+    });
     el.addEventListener('pointercancel', end);
     el.addEventListener('wheel', ev => {
       ev.preventDefault();
@@ -77,10 +95,6 @@
       set(name, v, suffix);
       opts.send(v);
     }, { passive: false });
-    el.addEventListener('dblclick', () => {
-      const v = opts.reset ? opts.reset() : null;
-      if (v != null) { set(name, v, suffix); opts.send(v); }
-    });
     el.addEventListener('keydown', ev => {
       const d = ev.key === 'ArrowUp' || ev.key === 'ArrowRight' ? 0.02
              : ev.key === 'ArrowDown' || ev.key === 'ArrowLeft' ? -0.02 : 0;
