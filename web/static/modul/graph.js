@@ -156,20 +156,24 @@
   }
 
   // ── waveform: an operation's shape over one run (ramps, LFO cycles) ──
-  function opSamples(op, n = 160) {
-    const xs = Array.from({ length: n + 1 }, (_, i) => i / n);
+  // opShape is PURE (op config -> f(t), both 0..1 domains): part of the
+  // portable core, shared by the sampler and the playhead dot.
+  function opShape(op) {
     const rng = Array.isArray(op.range) ? op.range.map(Number) : [0, 1];
     const lo = rng[0], span = (rng[1] ?? 1) - lo;
-    let f;
     if (op.type === 'lfo') {
       const cycles = Math.max(1, Math.round((op.bars || 2) * 4 * (op.rate ?? 1)));
       const depth = op.depth ?? 1;
-      f = t => lo + span * (0.5 - 0.5 * Math.cos(t * cycles * 2 * Math.PI)) * depth;
-    } else if (op.type === 'ramp' && op.curve === 'linear') {
-      f = t => lo + span * t;
-    } else {          // ramp triangle (default): up and back
-      f = t => lo + span * (t < 0.5 ? t * 2 : 2 - t * 2);
+      return t => lo + span * (0.5 - 0.5 * Math.cos(t * cycles * 2 * Math.PI)) * depth;
     }
+    if (op.type === 'ramp' && op.curve === 'linear') {
+      return t => lo + span * t;
+    }
+    return t => lo + span * (t < 0.5 ? t * 2 : 2 - t * 2);  // triangle: up & back
+  }
+  function opSamples(op, n = 160) {
+    const xs = Array.from({ length: n + 1 }, (_, i) => i / n);
+    const f = opShape(op);
     return [xs, xs.map(f)];
   }
 
@@ -181,8 +185,39 @@
       scales: { x: { time: false, range: [0, 1] }, y: { range: [-0.05, 1.05] } },
       axes: [{ show: false }, { show: false }],
       series: [{}, { stroke: ORANGE, width: 1.5, fill: 'rgba(255,77,0,0.10)', points: { show: false } }],
+      hooks: {
+        draw: [u => {
+          // playhead while the operation runs: vertical hairline + a dot
+          // riding the curve (the signal, live — rule 5)
+          const st = plots[key];
+          if (!st || st.progress == null) return;
+          const ctx = u.ctx, t = st.progress;
+          const x = u.valToPos(t, 'x', true);
+          const y = u.valToPos(opShape(st.model)(t), 'y', true);
+          ctx.save();
+          ctx.strokeStyle = 'rgba(235,232,225,0.28)';
+          ctx.lineWidth = 1 * devicePixelRatio;
+          ctx.beginPath();
+          ctx.moveTo(x, u.valToPos(1.05, 'y', true));
+          ctx.lineTo(x, u.valToPos(-0.05, 'y', true));
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(x, y, 3 * devicePixelRatio, 0, Math.PI * 2);
+          ctx.fillStyle = ORANGE;
+          ctx.strokeStyle = '#141517';
+          ctx.lineWidth = 1.5 * devicePixelRatio;
+          ctx.fill(); ctx.stroke();
+          ctx.restore();
+        }],
+      },
     }, opSamples(op), el);
-    plots[key] = { u, model: op, mix: 1, anim: 0 };
+    plots[key] = { u, model: op, mix: 1, anim: 0, progress: null };
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => {
+        const nw = el.clientWidth;
+        if (nw && Math.abs(nw - u.width) > 4) u.setSize({ width: nw, height: opts.height || 36 });
+      }).observe(el);
+    }
     return u;
   }
   function waveformUpdate(key, op) {
@@ -190,9 +225,32 @@
     if (st) { st.model = op; st.u.setData(opSamples(op)); }
   }
 
+  // Animate the playhead across one run. Reduced-motion: no playhead.
+  function waveformRun(key, durationMs) {
+    const st = plots[key];
+    if (!st || !durationMs || durationMs <= 0) return;
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    cancelAnimationFrame(st.anim);
+    const t0 = performance.now();
+    const step = now => {
+      const t = (now - t0) / durationMs;
+      if (t >= 1 || !plots[key]) { waveformStop(key); return; }
+      st.progress = t;
+      st.u.redraw();
+      st.anim = requestAnimationFrame(step);
+    };
+    st.anim = requestAnimationFrame(step);
+  }
+  function waveformStop(key) {
+    const st = plots[key];
+    if (!st) return;
+    cancelAnimationFrame(st.anim);
+    if (st.progress != null) { st.progress = null; st.u.redraw(); }
+  }
+
   function destroy(key) {
     if (plots[key]) { plots[key].u.destroy(); delete plots[key]; }
   }
 
-  window.ModulGraph = { filterInit, filterUpdate, waveformInit, waveformUpdate, destroy, magDb, fmtHz };
+  window.ModulGraph = { filterInit, filterUpdate, waveformInit, waveformUpdate, waveformRun, waveformStop, destroy, magDb, fmtHz, opShape };
 })();

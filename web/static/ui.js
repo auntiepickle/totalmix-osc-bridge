@@ -584,6 +584,27 @@ window.startRename = function (name) {
   input.select();
 };
 
+// ── MODUL waveforms: ramp/LFO steps render their shape on the card ─────
+// (rule 5 — show the signal). Wired only under data-skin="modul"; the
+// playhead rides the curve during a run (see animateProgress below).
+function _modulWaveStepsOf(m, knobStep) {
+  if (knobStep || document.documentElement.getAttribute('data-skin') !== 'modul') return [];
+  return (m.steps || [])
+    .map((s, i) => ({ s, i }))
+    .filter(x => ['ramp', 'lfo'].includes(((x.s || {}).operation || {}).type))
+    .slice(0, 2);   // cap: a card is a key, not a rack
+}
+
+function _modulWireWaves() {
+  if (document.documentElement.getAttribute('data-skin') !== 'modul' || !window.ModulGraph) return;
+  Object.keys(macros).forEach(name => {
+    _modulWaveStepsOf(macros[name], _knobStepOf(macros[name])).forEach(({ s, i }) => {
+      const el = document.getElementById(`mwave-${name}-${i}`);
+      if (el) ModulGraph.waveformInit(`w:${name}:${i}`, el, s.operation);
+    });
+  });
+}
+
 function createMacroCardHTML(name, m) {
   const knobStep    = _knobStepOf(m);
   const midiLabel   = getMidiTriggerLabel(m);
@@ -604,6 +625,8 @@ function createMacroCardHTML(name, m) {
         <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${_esc(routingLabel)}</p>
         <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     </div>
+    ${_modulWaveStepsOf(m, knobStep).map(({ i }) =>
+      `<div id="mwave-${name}-${i}" class="mwave"></div>`).join('')}
     <!-- Progress bar -->
     <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3${knobStep ? ' hidden' : ''}">
       <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
@@ -697,6 +720,8 @@ function renderCards() {
   });
 
   grid.innerHTML = html;
+  _modulWireWaves();   // synchronous — rAF never fires in hidden tabs
+
   // Run after paint so getBoundingClientRect reflects final layout
   requestAnimationFrame(equalizeCardHeights);
 }
@@ -727,6 +752,7 @@ window.addEventListener('resize', equalizeCardHeights);
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
 function animateProgress(name, durationMs) {
+  _modulWaveKeys(name).forEach(k => ModulGraph.waveformRun(k, durationMs));
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
   bar.style.transition = 'none';
@@ -737,10 +763,18 @@ function animateProgress(name, durationMs) {
 }
 
 function snapProgressToZero(name) {
+  _modulWaveKeys(name).forEach(k => ModulGraph.waveformStop(k));
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
   bar.style.transition = 'none';
   bar.style.width = '0%';
+}
+
+// The wave plots on a card, by engine key (empty outside MODUL)
+function _modulWaveKeys(name) {
+  if (!window.ModulGraph) return [];
+  return [...document.querySelectorAll(`[id^="mwave-${name}-"]`)]
+    .map(el => `w:${name}:${el.id.slice(`mwave-${name}-`.length)}`);
 }
 
 // ── Fire macro ────────────────────────────────────────────────────────────────

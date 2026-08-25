@@ -20,6 +20,11 @@
   portable core for a future C-compiled server (see design doc).
 - Motion system per the design tokens (140ms operations / 260ms settle,
   log-space curve morphs); `prefers-reduced-motion` disables all of it.
+- **Waveforms on macro cards**: RAMP and LFO steps render their shape as a
+  live plot on the card (triangle / one-way ramps, LFO cycle trains from
+  bars x rate x depth), with a playhead riding the curve in sync with the
+  progress bar during a run. MODUL skin only; reduced-motion skips the
+  playhead.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

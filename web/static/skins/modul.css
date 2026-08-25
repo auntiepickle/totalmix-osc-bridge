@@ -594,6 +594,18 @@ html[data-skin="modul"] .mdetails {
 }
 html[data-skin="modul"] .mdetails:hover { color: var(--mo-mut); }
 
+/* waveform strips on macro cards: same glass, shorter throw */
+html[data-skin="modul"] .mwave {
+  background: #0e0f11;
+  border: 1px solid var(--mo-seam);
+  border-radius: 4px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 4px;
+  margin-bottom: 0.6rem;
+  overflow: hidden;
+}
+html[data-skin="modul"] .mwave .u-legend { display: none; }
+
 /* uPlot theme inside the glass */
 html[data-skin="modul"] .mg-wrap .u-legend { display: none; }
 html[data-skin="modul"] .mg-wrap .uplot,
