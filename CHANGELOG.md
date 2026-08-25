@@ -102,6 +102,10 @@
   holds your choice against stale write echoes until the server echoes
   it back - authoritative reads (readback/device) still win. Same
   ordering pattern as the knob jump-back fix.
+- **Fixed: typed bounds quantized** (user report: 30/200 came back as
+  31/203). The editor's MIN/MAX/gate sliders snapped values to a 0.01
+  grid in param-norm space; they now take any value, so typed numbers
+  land exactly.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.
