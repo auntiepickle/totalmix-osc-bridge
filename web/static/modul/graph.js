@@ -22,7 +22,32 @@
   // -30..+12 clipped boosts and resonance off the top of the display.
   const FMIN = 20, FMAX = 20000, DB_TOP = 24, DB_BOT = -24, N = 96;
   const ORANGE = '#ff4d00';
-  const XS = Array.from({ length: N + 1 }, (_, i) => FMIN * Math.pow(FMAX / FMIN, i / N));
+  // Per-plot frequency window (#user report: a lo-cut that can never go
+  // above 500 Hz was squeezed into the left third of a 20 Hz-20 kHz
+  // display). Each module shows the range its parameter can IMPACT.
+  const logSpace = (lo, hi) =>
+    Array.from({ length: N + 1 }, (_, i) => lo * Math.pow(hi / lo, i / N));
+  // 1-2-5 gridline positions inside a window; label density adapts:
+  // narrow windows (< 2 decades) label 1x and 5x, wide ones decades only
+  const gridFor = (lo, hi) => {
+    const out = [];
+    for (let d = 1; d <= 100000; d *= 10) {
+      for (const m of [1, 2, 5]) {
+        const f = m * d;
+        if (f > lo * 1.15 && f < hi * 0.87) out.push(f);
+      }
+    }
+    return out;
+  };
+  const labelFor = (lo, hi) => {
+    const narrow = hi / lo < 100;
+    return f => {
+      const mant = f / Math.pow(10, Math.floor(Math.log10(f) + 1e-9));
+      const isDecade = Math.abs(mant - 1) < 1e-6;
+      const isFive = Math.abs(mant - 5) < 1e-6;
+      return (isDecade || (narrow && isFive)) ? fmtHz(f) : '';
+    };
+  };
 
   function magDb(model, f) {
     if (!model || !model.f) return 0;
@@ -67,7 +92,7 @@
     }
     return 0;
   }
-  const ys = (model, mix) => XS.map(f => magDb(model, f) * mix);
+  const ys = (model, mix, xs) => xs.map(f => magDb(model, f) * mix);
 
   const fmtHz = f => f >= 9950 ? (f / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
                   : f >= 995 ? (f / 1000).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + 'k'
@@ -86,18 +111,22 @@
   function filterInit(key, el, opts = {}) {
     if (plots[key]) { plots[key].u.destroy(); delete plots[key]; }
     const w = el.clientWidth || 280, h = opts.height || 96;
+    const fr = Array.isArray(opts.frange) ? opts.frange : [FMIN, FMAX];
+    const flo = Math.max(1, fr[0]), fhi = Math.min(100000, fr[1]);
+    const xs = logSpace(flo, fhi);
+    const label = labelFor(flo, fhi);
     const u = new uPlot({
       width: w, height: h,
       cursor: { show: false }, legend: { show: false },
       scales: {
-        x: { distr: 3, log: 10, range: () => [FMIN, FMAX] },
+        x: { distr: 3, log: 10, range: () => [flo, fhi] },
         y: { range: () => [DB_BOT, DB_TOP] },
       },
       axes: [
-        // 1-2-5 frequency grid (EQ convention), decade labels only - the
-        // module display is small; minor lines give context without clutter
-        { ...AXIS, splits: () => [50, 100, 200, 500, 1000, 2000, 5000, 10000],
-          values: (u, s) => s.map(f => (f === 100 || f === 1000 || f === 10000) ? fmtHz(f) : '') },
+        // 1-2-5 frequency grid (EQ convention) inside THIS module's window
+        { ...AXIS, splits: () => gridFor(flo, fhi),
+          filter: (u, splits) => splits,   // we control density; uPlot's
+          values: (u, s) => s.map(label) },  // space filter ate 50/500
         { ...AXIS, side: 3, splits: () => [-24, -12, 0, 12, 24],
           values: (u, s) => s.map(v => (v === 0 ? '0' : v === 24 ? '+24' : v === -24 ? '-24' : '')), size: 22 },
       ],
@@ -136,9 +165,9 @@
           ctx.restore();
         }],
       },
-    }, [XS, ys(null, 0)], el);
+    }, [xs, ys(null, 0, xs)], el);
 
-    const st = plots[key] = { u, model: null, mix: 0, anim: 0 };
+    const st = plots[key] = { u, model: null, mix: 0, anim: 0, xs, flo, fhi };
 
     // direct manipulation: drag anywhere on the plot = set cutoff
     if (opts.toKnob) {
@@ -147,7 +176,7 @@
       const toF = ev => {
         const r = over.getBoundingClientRect();
         const f = u.posToVal(Math.max(0, Math.min(r.width, ev.clientX - r.left)), 'x');
-        return Math.max(FMIN, Math.min(FMAX, f));
+        return Math.max(flo, Math.min(fhi, f));
       };
       const toDb = ev => {
         const r = over.getBoundingClientRect();
@@ -240,7 +269,7 @@
     const from = { f: (st.model && st.model.f) || model.f, q: (st.model && st.model.q) ?? model.q, mix: st.mix };
     const to = { f: model.f, q: model.q, mix: model.enabled ? 1 : 0 };
     st.model = { ...model };
-    const apply = () => st.u.setData([XS, ys(st.model, st.mix)]);
+    const apply = () => st.u.setData([st.xs, ys(st.model, st.mix, st.xs)]);
     if ((opts && opts.instant) || document.hidden ||
         (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
       st.model.f = to.f; st.model.q = to.q; st.mix = to.mix; apply(); return;

@@ -120,6 +120,13 @@
   follows the 1-2-5 convention (50/100/200/500/1k/2k/5k/10k) with
   decade labels. Bonus: graph-drag Q now reaches the full 9.9 (the +12
   ceiling had silently capped it near 4).
+- **Per-module frequency windows** (user point: a lo-cut never goes
+  above 500 Hz, so displaying 20 Hz-20 kHz wasted two thirds of the
+  plot). Each graph now shows the range its parameter can IMPACT plus
+  one octave of shoulder: the lo-cut displays 20 Hz-1 kHz with its
+  rolloff filling the plot; EQ bands keep the full spectrum they can
+  reach. Gridlines/labels adapt per window (1-2-5, denser labels on
+  narrow windows).
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.
