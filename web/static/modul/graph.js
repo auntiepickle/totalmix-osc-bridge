@@ -15,7 +15,12 @@
  *   lowpass-q:        resonant biquad LP (EQ band 3 'Low Pass'), Q shows.
  */
 (function () {
-  const FMIN = 20, FMAX = 20000, DB_TOP = 12, DB_BOT = -30, N = 96;
+  // Scale per EQ-display convention (researched: FabFilter Pro-Q ranges
+  // are SYMMETRIC around 0 dB - +/-3/6/12/30; RME's own channel EQ gain
+  // is +/-20 dB and Q 9.9 peaks at +19.9 dB): +/-24 dB fits everything
+  // the device can produce, centered on an emphasized 0 dB line. The old
+  // -30..+12 clipped boosts and resonance off the top of the display.
+  const FMIN = 20, FMAX = 20000, DB_TOP = 24, DB_BOT = -24, N = 96;
   const ORANGE = '#ff4d00';
   const XS = Array.from({ length: N + 1 }, (_, i) => FMIN * Math.pow(FMAX / FMIN, i / N));
 
@@ -89,8 +94,12 @@
         y: { range: () => [DB_BOT, DB_TOP] },
       },
       axes: [
-        { ...AXIS, splits: () => [100, 1000, 10000], values: (u, s) => s.map(fmtHz) },
-        { ...AXIS, side: 3, splits: () => [0, -12, -24], values: (u, s) => s.map(v => v + ''), size: 22 },
+        // 1-2-5 frequency grid (EQ convention), decade labels only - the
+        // module display is small; minor lines give context without clutter
+        { ...AXIS, splits: () => [50, 100, 200, 500, 1000, 2000, 5000, 10000],
+          values: (u, s) => s.map(f => (f === 100 || f === 1000 || f === 10000) ? fmtHz(f) : '') },
+        { ...AXIS, side: 3, splits: () => [-24, -12, 0, 12, 24],
+          values: (u, s) => s.map(v => (v === 0 ? '0' : v === 24 ? '+24' : v === -24 ? '-24' : '')), size: 22 },
       ],
       series: [
         {},
@@ -99,6 +108,19 @@
       hooks: {
         draw: [u => {
           const st = plots[key];
+          // the 0 dB line is the reference every EQ emphasizes
+          {
+            const ctx = u.ctx;
+            const y0 = u.valToPos(0, 'y', true);
+            ctx.save();
+            ctx.strokeStyle = 'rgba(235, 232, 225, 0.22)';
+            ctx.lineWidth = 1 * devicePixelRatio;
+            ctx.beginPath();
+            ctx.moveTo(u.bbox.left, y0);
+            ctx.lineTo(u.bbox.left + u.bbox.width, y0);
+            ctx.stroke();
+            ctx.restore();
+          }
           if (!st || !st.model || !st.model.f) return;
           // cutoff handle, drawn on-canvas so it is always in sync
           const ctx = u.ctx;

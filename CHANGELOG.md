@@ -112,6 +112,14 @@
   through the 170ms morph. Local writes (knobInput/companionInput) now
   refresh the curve directly on every tick, morph-free - the finger IS
   the animation. The morph remains for non-drag transitions.
+- **EQ-correct graph scale** (user report: scale issues; researched
+  against FabFilter Pro-Q and RME's own EQ). The dB axis is now
+  SYMMETRIC +/-24 centered on an emphasized 0 dB line (the old -30..+12
+  clipped boosts and resonance off the top - RME gain is +/-20 dB and
+  Q 9.9 peaks at +19.9 dB, neither displayable before). Frequency grid
+  follows the 1-2-5 convention (50/100/200/500/1k/2k/5k/10k) with
+  decade labels. Bonus: graph-drag Q now reaches the full 9.9 (the +12
+  ceiling had silently capped it near 4).
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

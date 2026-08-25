@@ -68,6 +68,11 @@ glows unless it means something.
   MACROS ─ keypad of ET66 keys (FIRE = the key, RAMP = shifted key)
 ```
 
+- Curve display scale (revised 2026-08-25 after an EQ-design research
+  pass): dB axis SYMMETRIC +/-24 centered on an emphasized 0 dB line
+  (Pro-Q convention: symmetric ranges; sized to the device: RME gain
+  +/-20 dB, Q 9.9 = +19.9 dB peak); frequency grid 1-2-5 with decade
+  labels.
 - Curve display: 100×36-ish ratio SVG, log-f 20..20k, dB +6..-30, decade
   gridlines, orange response line + translucent orange fill, a handle dot at
   the −3 dB point. **Drag the handle = set frequency** (same coalesced write
