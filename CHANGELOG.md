@@ -66,6 +66,15 @@
   "20" on the 5k-20k hi-cut parked at the floor). A bare number now
   prefers the reading that lands inside the knob's bounds ("20" -> 20k,
   "8" -> 8k on a hi-cut); explicit units ("20hz", "12k") stay literal.
+- **Unity by design** (user design note: 100% of a gain slider was +6 dB
+  overgain). Volume/send controls now read in REAL dB via RME's own fader
+  law (CalcFaderDB, wire-verified, mirrored client-side): readouts,
+  companion minis, ramp/LFO wave ranges ("-inf <-> +6.0dB") and live
+  playhead values. New volume knobs default their range to [0, unity] -
+  full travel tops out at 0.0 dB; widen the bounds in DETAILS to opt back
+  into the +6 dB headroom. Typed entry on volume takes dB ("-12", "0",
+  "u"/"unity", "-inf", or "82%"); double-tap resets to unity. Legacy
+  /1/volumeN ramp steps read in dB too. Existing knob configs unchanged.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

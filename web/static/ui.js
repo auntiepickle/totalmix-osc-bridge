@@ -618,7 +618,13 @@ function _modulWaveStepsOf(m, knobStep) {
 // Value formatter for a wave step: real units when the param is known
 // (Hz, dB, ...), honest percent otherwise (generic sends).
 function _mwaveFmt(step) {
-  const def = PARAM_DEFS[((step || {}).target || {}).param];
+  // a TARGETED step without a param is a send/volume (the convention
+  // everywhere): those now read in real dB via the fader law. Raw OSC
+  // steps (no target) keep honest percent.
+  let par = (step && step.target) ? (step.target.param || 'volume') : null;
+  // legacy raw classic fader steps (/1/volumeN) are the fader law too
+  if (!par && step && typeof step.osc === 'string' && step.osc.startsWith('/1/volume')) par = 'volume';
+  const def = PARAM_DEFS[par];
   return def && def.fmt ? (v => def.fmt(v)) : (v => Math.round(v * 100) + '%');
 }
 // Idle text: the step's travel. One-way ramps park at the destination
@@ -1174,6 +1180,31 @@ function _currentRouting(m) {
 // Each parameter class declares how its VALUE should be edited and shown.
 // Adding a new mod target (EQ band, gain, ...) means adding a descriptor
 // here — the step editor renders the right control generically.
+// ── RME fader law (CalcFaderDB / CalcFaderLin) ─────────────────────────
+// Mirrored verbatim from global_units.py (wire-verified: HW-2 confirmed
+// classic volume values are IDENTITY with global faderlin). 0..1 fader
+// position <-> dB. Top of travel = +6.0 dB; UNITY (0.0 dB) = 836/1023.
+const FADER_UNITY = 836 / 1023;                    // 0.817204...
+function _faderDb(v) {
+  const pos = Math.max(0, Math.min(1, v)) * 1023.0;
+  const db = pos >= 649.0
+    ? pos * 0.0320855615 - 26.8235294118
+    : (pos * pos) * (-1.0 / 11033.0) + pos * 0.1497326203 - 65.0;
+  return db < -64.9 ? -Infinity : db;
+}
+function _faderLin(db) {
+  if (db <= -64.9) return 0;
+  const pos = db >= -6.0
+    ? (db - (-26.8235294118)) / 0.0320855615
+    : 826.0 - Math.sqrt(-34869.0 - 11033.0 * db);
+  return Math.max(0, Math.min(1, pos / 1023.0));
+}
+function _fmtFaderDb(v) {
+  const db = _faderDb(v);
+  if (db === -Infinity) return '-inf';
+  return (db > 0 ? '+' : '') + db.toFixed(1) + 'dB';
+}
+
 // ── Typed value entry + default resets (#user requests) ────────────────
 // _parseParamText: human text -> param-norm 0..1, per unit family.
 // Inverse of the fmt functions; unknown params parse as percent.
@@ -1204,6 +1235,13 @@ function _parseParamText(param, text, op) {
     const q = Number.isFinite(num) ? num : parseFloat(t.replace(/^q/, ''));
     if (!Number.isFinite(q)) return null;
     return Math.max(0, Math.min(1, (q - 0.4) / 9.5));          // 0.4..9.9
+  }
+  if (param === 'volume') {
+    if (t === 'u' || t === 'unity' || t === '0db' || t === '0.0db') return FADER_UNITY;
+    if (t === '-inf' || t === 'inf-' || t === 'off') return 0;
+    if (t.endsWith('%')) return Math.max(0, Math.min(1, num / 100));
+    if (!Number.isFinite(num)) return null;
+    return _faderLin(Math.max(-65, Math.min(6, num)));   // bare number = dB
   }
   if (param === 'pan') {
     if (t === 'c' || t === 'center') return 0.5;
@@ -1337,8 +1375,11 @@ window.startCompValEdit = function (name, cp) {
 
 const PARAM_DEFS = {
   volume: {
-    widget: 'slider', min: 0, max: 1, step: 0.01, default: 0.8,
-    fmt: v => `${Math.round(v * 100)}%`,
+    // Real dB via the RME fader law (top of the raw scale is +6 dB
+    // OVERGAIN - #user design note: 100% of a knob should be unity
+    // unless specified otherwise; new knobs default range [0, unity])
+    widget: 'slider', min: 0, max: 1, step: 0.01, default: FADER_UNITY,
+    fmt: _fmtFaderDb,
     mod: { range: true },       // ramps/LFOs sweep a window, not always 0..1
   },
   pan: {
@@ -1688,13 +1729,16 @@ window.changeStepMode = function (name, i, mode) {
   if (mode === 'set') {
     delete step.operation;
     if (step.value === '{{param}}') {
-      step.value = String(def.default ?? 1.0);
+      step.value = String(+((def.default ?? 1.0).toFixed ? (def.default ?? 1.0).toFixed(4) : def.default ?? 1.0));
     }
   } else if (mode === 'knob') {
     // canonical knob op: no timing, no curve/rate — just range + hold
     const prev = step.operation || {};
     step.operation = { type: 'knob', hold: prev.hold !== false };
     if (Array.isArray(prev.range)) step.operation.range = prev.range;
+    else if (((step.target && step.target.param) || 'volume') === 'volume') {
+      step.operation.range = [0, 0.8172];   // full travel = unity, not +6 dB
+    }
     else if (def.mod?.range) step.operation.range = [def.min ?? 0, def.max ?? 1];
     if (def.mod?.threshold) step.operation.threshold = prev.threshold ?? 0.5;
     step.value = '{{param}}';
@@ -2683,7 +2727,10 @@ function _blankKnobTemplate() {
   const firstOut = (picker.outputs || [])[0];
   const firstIn  = (picker.inputs || [])[0];
   const step = { osc: '', value: '{{param}}',
-                 operation: { type: 'knob', hold: true, range: [0, 1] } };
+                 // full travel tops out at UNITY, not +6 dB overgain
+                 // (#user design note) - widen to [0, 1] in DETAILS to
+                 // opt back into the overgain headroom
+                 operation: { type: 'knob', hold: true, range: [0, 0.8172] } };
   if (firstOut && firstIn) step.target = { submix: firstOut.name, channel: firstIn.name };
   return { description: '', steps: [step],
            midi_triggers: [{ type: 'control_change', number: 20, channel: 1,
