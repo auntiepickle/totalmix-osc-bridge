@@ -81,6 +81,18 @@
   or band gain on bell/shelf (place the dot at the dB you want). Bell,
   shelf (band-correct direction) and resonant high-pass curves now
   render (RBJ analog prototypes) instead of a flat line.
+- **Fixed: 2D handle jumped while dragging** (user report). Vertical is
+  now RELATIVE to the grab point (touching the graph no longer teleports
+  Q/gain; only deliberate up/down movement applies a dB delta), and sync
+  updates leave a module alone while it is being dragged (stale echoes
+  were re-morphing the curve mid-gesture). Graph cursor is a pointer.
+- **Graphs in every theme** (user request): the live filter curves and
+  ramp/LFO wave plots now render in all skins, not just MODUL - new
+  base graphs.css look, same engine, same 2D drag. Toggle under gear
+  menu -> Design -> "Graphs" (default on).
+- **MIN/MAX/gate readouts are typeable** (user request): tap the value
+  next to a bounds or gate slider in the editors and type real units
+  ("150", "8k", "75%"); the paired slider follows and saves normally.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

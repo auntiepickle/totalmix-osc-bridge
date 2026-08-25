@@ -131,28 +131,41 @@
         const r = over.getBoundingClientRect();
         return u.posToVal(Math.max(0, Math.min(r.height, ev.clientY - r.top)), 'y');
       };
-      const applyDrag = ev => {
+      // vertical axis (#user request: the dot moves Q and gain too).
+      // RELATIVE from the grab point (#user report: it jumped a lot -
+      // absolute mapping teleported Q/gain to wherever you touched):
+      // grabbing changes nothing vertically; moving up/down applies the
+      // dB delta to the value you started from.
+      let vStart = null;
+      const applyDrag = (ev, isDown) => {
         window.knobInput(opts.name, opts.toKnob(toF(ev)));
-        // vertical axis (#user request: the dot moves Q and gain too):
-        // resonant LP/HP -> Q (dot height = resonance peak in dB);
-        // bell/shelf -> band gain (dot height = the gain you place)
         const st = plots[key], k = st.model && st.model.kind;
-        if ((k === 'lowpass-q' || k === 'highpass-q') && opts.setQ) {
-          const q = Math.pow(10, toDb(ev) / 20);
+        const resonant = (k === 'lowpass-q' || k === 'highpass-q') && opts.setQ;
+        const gained   = (k === 'bell' || k === 'shelf-hi' || k === 'shelf-lo') && opts.setGain;
+        if (isDown) {
+          vStart = (resonant || gained)
+            ? { db: toDb(ev), q: st.model.q || 0.7, gain: st.model.gain || 0 }
+            : null;
+          return;
+        }
+        if (!vStart) return;
+        const dDb = toDb(ev) - vStart.db;
+        if (resonant) {
+          const q = vStart.q * Math.pow(10, dDb / 20);   // dB delta on the peak
           opts.setQ(Math.max(0, Math.min(1, (q - 0.4) / 9.5)));
-        } else if ((k === 'bell' || k === 'shelf-hi' || k === 'shelf-lo') && opts.setGain) {
-          opts.setGain(Math.max(0, Math.min(1, (toDb(ev) + 20) / 40)));
+        } else if (gained) {
+          opts.setGain(Math.max(0, Math.min(1, (vStart.gain + dDb + 20) / 40)));
         }
       };
       over.style.touchAction = 'none';
       over.addEventListener('pointerdown', ev => {
         dragging = true; over.setPointerCapture(ev.pointerId);
         window._knobDrag = opts.dragKey || key;
-        applyDrag(ev);
+        applyDrag(ev, true);
         ev.preventDefault();
       });
       over.addEventListener('pointermove', ev => {
-        if (dragging) applyDrag(ev);
+        if (dragging) applyDrag(ev, false);
       });
       const end = () => {
         dragging = false;

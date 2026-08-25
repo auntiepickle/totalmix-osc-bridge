@@ -11,6 +11,8 @@
     <link href="style.css" rel="stylesheet">
     <!-- Mobile ergonomics (all skins): thumb-scale targets for live playback -->
     <link href="mobile.css" rel="stylesheet">
+    <!-- Graphs base look, every theme (toggle in gear menu / Design) -->
+    <link href="graphs.css" rel="stylesheet">
     <!-- Optional skin (pure CSS re-style, scoped by html[data-skin]) -->
     <link id="skin-css" rel="stylesheet" href="" disabled>
     <!-- MODUL: realtime graphing engine (uPlot, vendored) + components -->
@@ -133,6 +135,7 @@
                             <button onclick="applySkin('ableton')"  class="skin-btn text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" data-skin-name="ableton">Ableton</button>
                             <button onclick="applySkin('roland')"   class="skin-btn text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" data-skin-name="roland">Roland</button>
                             <button onclick="applySkin('modul')"    class="skin-btn text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" data-skin-name="modul" title="The MODUL instrument layout: live filter curves, rotary knobs, motion">Modul</button>
+                            <button onclick="toggleGraphs()" id="graphs-toggle" class="text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" title="Live filter curves and ramp/LFO wave plots on the cards, in every theme">Graphs: on</button>
                         </div>
 
                         <div class="border-t border-zinc-700 my-1"></div>

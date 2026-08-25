@@ -185,6 +185,27 @@ window.applySkin = function (name) {
 };
 try { const s = localStorage.getItem('uiSkin'); if (s) applySkin(s); } catch (_) {}
 
+// Graphs in every theme (#user request) - default ON, hide via the toggle
+window.toggleGraphs = function () {
+  let off = false;
+  try {
+    off = localStorage.getItem('uiGraphs') !== 'off';   // flipping TO off?
+    localStorage.setItem('uiGraphs', off ? 'off' : 'on');
+  } catch (_) {}
+  _syncGraphsToggleLabel();
+  if (typeof renderCards === 'function' && typeof macros === 'object'
+      && Object.keys(macros).length) renderCards();
+};
+function _syncGraphsToggleLabel() {
+  const b = document.getElementById('graphs-toggle');
+  if (!b) return;
+  let on = true;
+  try { on = localStorage.getItem('uiGraphs') !== 'off'; } catch (_) {}
+  b.textContent = `Graphs: ${on ? 'on' : 'off'}`;
+  b.classList.toggle('text-orange-400', on);
+}
+window.addEventListener('load', _syncGraphsToggleLabel);
+
 // ── Macro loading ─────────────────────────────────────────────────────────────
 async function loadMacros() {
   try {
@@ -382,6 +403,8 @@ function updateKnobCard(name, moveSlider = true) {
   if (typeof _modulSync === 'function'
       && document.documentElement.getAttribute('data-skin') === 'modul') {
     _modulSync(name);
+  } else if (typeof _syncKnobGraph === 'function') {
+    _syncKnobGraph(name);   // graphs-in-every-theme: strip curve follows
   }
   const chip = document.getElementById(`knob-en-${name}`);
   if (chip && !chip.classList.contains('mpower')) chip.outerHTML = _enableChipHTML(name, m, step);

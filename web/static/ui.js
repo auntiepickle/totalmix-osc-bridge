@@ -315,6 +315,7 @@ function _knobStripHTML(name, m, step) {
         ${_enableChipHTML(name, m, step)}
         ${_companionChipsHTML(name, m, step)}
     </div>
+    ${_graphsEnabled() && _MODUL_TAPER[param] ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
     <div class="flex gap-2 items-center mb-1 min-w-0">
         <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
             class="flex-1 min-w-0 accent-orange-500" title="Drag to set — MIDI moves it too"
@@ -342,6 +343,7 @@ function _renderKnobSection(names) {
   // wire synchronously: innerHTML is parsed already, and rAF never fires
   // in a hidden tab (graphs would stay empty until the next visible render)
   if (modul && names.length) names.forEach(n => _modulWire(n));
+  else if (names.length && _graphsEnabled()) names.forEach(n => _wireKnobGraph(n));
 }
 
 // ═══ MODUL layout (docs/design-modul.md) ═══════════════════════════
@@ -356,6 +358,11 @@ function _renderKnobSection(names) {
 // server; everything DOM-flavored stays in the shell functions.
 const _MODUL_TAPER = { lowcut_freq: [20, 500], eq_freq_1: [20, 20000],
                        eq_freq_2: [20, 20000], eq_freq_3: [20, 20000] };
+
+// Graphs in EVERY theme (#user request), gear-menu toggle to hide
+function _graphsEnabled() {
+  try { return localStorage.getItem('uiGraphs') !== 'off'; } catch (_) { return true; }
+}
 
 // Knob position from macro state: knob_value IS knob-norm; device_value is
 // param-norm and must be inverse-mapped through the knob's range (never
@@ -493,6 +500,14 @@ function _modulWire(name) {
     ModulKnob.wire(name, { get: getC, send: val => companionInput(name, cp, val),
       reset: () => _compDefault(cp) }, cp);
   });
+  _wireKnobGraph(name);
+}
+
+// Graph wiring, shared by the MODUL module and the strip layouts
+function _wireKnobGraph(name) {
+  const m = macros[name], step = m && _knobStepOf(m);
+  if (!step) return;
+  const param = (step.target && step.target.param) || 'volume';
   const gEl = document.getElementById(`mgraph-${name}`);
   if (gEl && window.ModulGraph && window.uPlot) {
     // phones: a taller plot = a real finger lane for the cutoff drag
@@ -513,6 +528,15 @@ function _modulWire(name) {
   }
 }
 
+// Strip-layout curve follow (updateKnobCard calls this outside MODUL)
+window._syncKnobGraph = function (name) {
+  if (window._knobDrag === name) return;   // drag frames own the curve
+  const m = macros[name], step = m && _knobStepOf(m);
+  if (!step || !document.getElementById(`mgraph-${name}`)) return;
+  const model = _modulModel(name, m, step);
+  if (model && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, model);
+};
+
 // One sync entry point, called by updateKnobCard on every knob_update
 // while MODUL is active: knob positions, curve morph, power switch,
 // companion plates and readouts.
@@ -520,8 +544,10 @@ window._modulSync = function (name) {
   const m = macros[name], step = m && _knobStepOf(m);
   if (!step || !document.getElementById(`mknob-${name}`)) return;
   const param = (step.target && step.target.param) || 'volume';
-  if (window._knobDrag !== name) ModulKnob.set(name, _knobNormOf(m, step.operation));
+  const draggingThis = window._knobDrag === name;
+  if (!draggingThis) ModulKnob.set(name, _knobNormOf(m, step.operation));
   (COMPANION_FOR[param] || []).forEach(cp => {
+    if (draggingThis) return;   // drag frames own the module (#jump report)
     const cv = parseFloat((m.companions || {})[cp]);
     if (!Number.isFinite(cv)) return;
     if (ENUM_LABELS[cp]) {
@@ -538,8 +564,10 @@ window._modulSync = function (name) {
         lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
     }
   });
-  const model = _modulModel(name, m, step);
-  if (model && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, model);
+  if (!draggingThis) {
+    const model = _modulModel(name, m, step);
+    if (model && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, model);
+  }
   const pw = document.getElementById(`knob-en-${name}`);
   if (pw && pw.classList.contains('mpower')) {
     pw.classList.toggle('on', m.enable_value === true);
@@ -617,7 +645,7 @@ window.startRename = function (name) {
 // (rule 5 — show the signal). Wired only under data-skin="modul"; the
 // playhead rides the curve during a run (see animateProgress below).
 function _modulWaveStepsOf(m, knobStep) {
-  if (knobStep || document.documentElement.getAttribute('data-skin') !== 'modul') return [];
+  if (knobStep || !_graphsEnabled()) return [];
   return (m.steps || [])
     .map((s, i) => ({ s, i }))
     .filter(x => ['ramp', 'lfo'].includes(((x.s || {}).operation || {}).type))
@@ -647,7 +675,7 @@ function _mwaveIdleText(step) {
 }
 
 function _modulWireWaves() {
-  if (document.documentElement.getAttribute('data-skin') !== 'modul' || !window.ModulGraph) return;
+  if (!_graphsEnabled() || !window.ModulGraph) return;
   const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
   Object.keys(macros).forEach(name => {
     _modulWaveStepsOf(macros[name], _knobStepOf(macros[name])).forEach(({ s, i }) => {
@@ -1358,6 +1386,33 @@ window.startKnobValEdit = function (name) {
     span.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
   });
 };
+// MIN/MAX/gate readouts in the editors are typeable too (#user request).
+// The typed value lands in the paired slider (which owns the data-field),
+// so the normal save harvest picks it up.
+window.startModValEdit = function (name, i, which, param) {
+  const key = `${name}:mod:${i}:${which}`;
+  if (window._valEdit) return;
+  const span = document.getElementById(`mod-${which}-${name}-${i}`);
+  const slider = document.getElementById(`mod-${which}-sl-${name}-${i}`);
+  if (!span || !slider) return;
+  const def = PARAM_DEFS[param] || {};
+  const fmt = which === 'thr' ? (v => Math.round(v * 100) + '%')
+            : (def.fmt ? def.fmt : (v => Math.round(v * 100) + '%'));
+  window._valEdit = key;
+  _valEditSwap(span, span.textContent, (text) => {
+    window._valEdit = null;
+    if (text != null) {
+      const pv = _parseParamText(which === 'thr' ? '__gate__' : param, text);
+      if (pv != null) {
+        slider.value = pv;
+        span.textContent = fmt(pv);
+        return;
+      }
+    }
+    span.textContent = fmt(parseFloat(slider.value));
+  });
+};
+
 window.startCompValEdit = function (name, cp) {
   if (window._valEdit) return;
   const span = document.getElementById(`knob-cpv-${name}-${cp}`);
@@ -1685,11 +1740,11 @@ function _modControls(name, i, step) {
     const t = Number.isFinite(parseFloat(op.threshold)) ? parseFloat(op.threshold) : 0.5;
     html += `<div class="flex gap-2 items-center">
       <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0" title="where the wave trips on/off">gate</span>
-      <input data-field="steps.${i}.operation.threshold" type="range" min="0" max="1" step="0.01" value="${t}"
+      <input id="mod-thr-sl-${name}-${i}" data-field="steps.${i}.operation.threshold" type="range" min="0" max="1" step="0.01" value="${t}"
           class="flex-1 accent-orange-500" title="double-click resets to 50%"
           oninput="document.getElementById('mod-thr-${name}-${i}').textContent = Math.round(this.value*100)+'%'"
           ondblclick="this.value=0.5; document.getElementById('mod-thr-${name}-${i}').textContent='50%'">
-      <span id="mod-thr-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${Math.round(t * 100)}%</span>
+      <span id="mod-thr-${name}-${i}" onclick="startModValEdit('${name}',${i},'thr','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${Math.round(t * 100)}%</span>
     </div>`;
   }
   if (def.mod.range) {
@@ -1703,19 +1758,19 @@ function _modControls(name, i, step) {
     html += `<div class="space-y-2">
       <div class="flex gap-2 items-center">
         <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${loLbl}</span>
-        <input data-field="steps.${i}.operation.range.0" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${lo}"
+        <input id="mod-lo-sl-${name}-${i}" data-field="steps.${i}.operation.range.0" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${lo}"
             class="flex-1 accent-orange-500" title="sweep start — double-click resets to ${def.fmt(def.min)}"
             oninput="document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
             ondblclick="this.value=${def.min}; document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
-        <span id="mod-lo-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(lo)}</span>
+        <span id="mod-lo-${name}-${i}" onclick="startModValEdit('${name}',${i},'lo','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${def.fmt(lo)}</span>
       </div>
       <div class="flex gap-2 items-center">
         <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${hiLbl}</span>
-        <input data-field="steps.${i}.operation.range.1" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${hi}"
+        <input id="mod-hi-sl-${name}-${i}" data-field="steps.${i}.operation.range.1" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${hi}"
             class="flex-1 accent-orange-500" title="sweep end — double-click resets to ${def.fmt(def.max)}"
             oninput="document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
             ondblclick="this.value=${def.max}; document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
-        <span id="mod-hi-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(hi)}</span>
+        <span id="mod-hi-${name}-${i}" onclick="startModValEdit('${name}',${i},'hi','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${def.fmt(hi)}</span>
       </div>
     </div>`;
   }
