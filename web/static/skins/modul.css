@@ -444,6 +444,8 @@ html[data-skin="modul"] select.mplate {
   background-repeat: no-repeat;
 }
 html[data-skin="modul"] select.mplate option { background: var(--mo-well); color: var(--mo-txt); }
+/* pinned param (the knob re-asserts this choice): quiet signal tint */
+html[data-skin="modul"] select.mplate.pinned { border-color: rgba(255, 77, 0, 0.45); }
 /* value readouts invite typing */
 html[data-skin="modul"] .mval, html[data-skin="modul"] .mmini-val { cursor: text; }
 

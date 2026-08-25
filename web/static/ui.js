@@ -271,10 +271,10 @@ function _companionChipsHTML(name, m, step) {
     const v = (m.companions || {})[cp];
     const idx = Number.isFinite(parseFloat(v)) ? Math.round(parseFloat(v) * (labels.length - 1)) : null;
     return `<select id="knob-cp-${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
-        title="${_esc(cp.replace(/_/g, ' '))} on the device${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}"
+        title="${_esc(cp.replace(/_/g, ' '))} on the device${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}"${pinned ? ' style="border-color:rgba(251,146,60,0.5)"' : ''}
         class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border cursor-pointer transition-all ${idx == null ? 'bg-zinc-900 border-zinc-800 text-zinc-600' : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white'}">
         <option value="" disabled${idx == null ? ' selected' : ''}>${_esc(cp.replace(/_/g, ' '))} ?</option>
-        ${labels.map((l, i) => `<option value="${i}"${i === idx ? ' selected' : ''}>${_enumGlyph(cp, l)}${_esc(l)}${pinned ? ' \u26b2' : ''}</option>`).join('')}
+        ${labels.map((l, i) => `<option value="${i}"${i === idx ? ' selected' : ''}>${_enumGlyph(cp, l)}${_esc(l)}</option>`).join('')}
       </select>`;
   }).join('');
 }
@@ -432,9 +432,9 @@ function _knobModuleHTML(name, m, step) {
     const idx = Number.isFinite(cv) ? Math.round(cv * (labels.length - 1)) : null;
     const pinned = (((step.operation || {}).companions) || {})[cp] != null;
     return `<select id="knob-cp-${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
-        class="mplate" title="${_esc(cp.replace(/_/g, ' '))}${pinned ? ' (pinned)' : ''}">
+        class="mplate${pinned ? ' pinned' : ''}" title="${_esc(cp.replace(/_/g, ' '))}${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}">
         <option value="" disabled${idx == null ? ' selected' : ''}>\u2014</option>
-        ${labels.map((l, i) => `<option value="${i}"${i === idx ? ' selected' : ''}>${_enumGlyph(cp, l)}${_esc(l)}${pinned ? ' \u26b2' : ''}</option>`).join('')}
+        ${labels.map((l, i) => `<option value="${i}"${i === idx ? ' selected' : ''}>${_enumGlyph(cp, l)}${_esc(l)}</option>`).join('')}
       </select>`;
   }).join('');
   const minis = (COMPANION_FOR[param] || []).filter(cp => !ENUM_LABELS[cp]).map(cp => {
