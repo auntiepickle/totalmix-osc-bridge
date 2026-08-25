@@ -12,6 +12,9 @@ __pycache__/
 tools/*.json
 ufx2_snapshot_map.json
 
+# Editor-save backups of live config (local state, never version-controlled)
+backups/
+
 # Live-edited config files (local to each deployment, not version-controlled)
 # Use mappings.example.json / ufx2_channel_map.example.json as templates
 mappings.json
