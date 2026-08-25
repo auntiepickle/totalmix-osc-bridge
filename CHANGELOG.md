@@ -106,6 +106,12 @@
   31/203). The editor's MIN/MAX/gate sliders snapped values to a 0.01
   grid in param-norm space; they now take any value, so typed numbers
   land exactly.
+- **Fixed: dot drag felt laggy** (user report). Two causes: the curve
+  never followed the horizontal axis during a drag (the anti-jump sync
+  skip left rendering to 10 Hz server echoes), and every update ran
+  through the 170ms morph. Local writes (knobInput/companionInput) now
+  refresh the curve directly on every tick, morph-free - the finger IS
+  the animation. The morph remains for non-drag transitions.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

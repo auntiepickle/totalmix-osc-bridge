@@ -514,9 +514,7 @@ function _wireKnobGraph(name) {
     const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
     const band = param.slice(-1);
     const _cpWrite = cp => v => {
-      companionInput(name, cp, v);
-      const mdl = _modulModel(name, macros[name], step);
-      if (mdl) ModulGraph.filterUpdate(`f:${name}`, mdl);
+      companionInput(name, cp, v);   // refreshes the curve itself (instant)
       if (window.ModulKnob) ModulKnob.set(name, v, cp);
     };
     ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
@@ -527,6 +525,17 @@ function _wireKnobGraph(name) {
     if (model) ModulGraph.filterUpdate(`f:${name}`, model);
   }
 }
+
+// Instant curve refresh from LOCAL writes: knobInput and companionInput
+// call this on every tick, so the curve tracks the finger directly in
+// every layout (#user report: dragging was not smooth - the curve only
+// followed server echoes, through the 170ms morph).
+window.refreshKnobGraph = function (name) {
+  const m = macros[name], step = m && _knobStepOf(m);
+  if (!step || !document.getElementById(`mgraph-${name}`)) return;
+  const mdl = _modulModel(name, m, step);
+  if (mdl && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, mdl, { instant: true });
+};
 
 // Strip-layout curve follow (updateKnobCard calls this outside MODUL)
 window._syncKnobGraph = function (name) {

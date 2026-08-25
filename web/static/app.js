@@ -396,6 +396,7 @@ window.knobInput = function (name, value) {
   const m = macros[name];
   const step = m ? _knobStepOf(m) : null;
   if (m) m.knob_value = parseFloat(value);
+  if (typeof refreshKnobGraph === 'function') refreshKnobGraph(name);
   const lbl = document.getElementById(`knob-val-${name}`);
   if (lbl && step && window._valEdit !== name) {
     const param = (step.target && step.target.param) || 'volume';
@@ -495,6 +496,7 @@ window.companionInput = function (name, param, value) {
   if (m) { m.companions = m.companions || {}; m.companions[param] = v; }
   window._cpEcho = window._cpEcho || {};
   window._cpEcho[name + '|' + param] = v;
+  if (typeof refreshKnobGraph === 'function') refreshKnobGraph(name);
   const lbl = document.getElementById(`knob-cpv-${name}-${param}`);
   if (lbl && window._valEdit !== `${name}:${param}`) lbl.textContent = def.fmt ? def.fmt(v) : Math.round(v * 100) + '%';
   window._cpPending[`${name}\u0000${param}`] = v;

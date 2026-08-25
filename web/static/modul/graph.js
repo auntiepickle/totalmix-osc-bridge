@@ -209,15 +209,17 @@
     return u;
   }
 
-  // rAF morph: log-space frequency easing + power mix — the motion system
-  function filterUpdate(key, model) {
+  // rAF morph: log-space frequency easing + power mix — the motion system.
+  // opts.instant skips the morph entirely: drag frames are DIRECT
+  // manipulation (the finger is the animation — easing reads as lag).
+  function filterUpdate(key, model, opts) {
     const st = plots[key];
     if (!st) return;
     const from = { f: (st.model && st.model.f) || model.f, q: (st.model && st.model.q) ?? model.q, mix: st.mix };
     const to = { f: model.f, q: model.q, mix: model.enabled ? 1 : 0 };
     st.model = { ...model };
     const apply = () => st.u.setData([XS, ys(st.model, st.mix)]);
-    if (document.hidden ||
+    if ((opts && opts.instant) || document.hidden ||
         (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
       st.model.f = to.f; st.model.q = to.q; st.mix = to.mix; apply(); return;
     }
