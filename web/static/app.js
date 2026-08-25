@@ -140,7 +140,27 @@ function _onWSMessage(event) {
           : ev.device_value;
       }
       if ('enable_value' in ev) macros[ev.name].enable_value = ev.enable_value;
-      if (ev.companions) macros[ev.name].companions = ev.companions;
+      if (ev.companions) {
+        // Companion echo guard: our own write-sourced echoes can lag and
+        // carry values we already moved past (type switch flashed the old
+        // curve). Held until the server echoes our value back or an
+        // authoritative read (readback/device/hold/fire) supersedes.
+        const merged = { ...ev.companions };
+        if (window._cpEcho) {
+          Object.keys(merged).forEach(cp => {
+            const k = ev.name + '|' + cp;
+            const sent = window._cpEcho[k];
+            if (sent == null) return;
+            const evv = parseFloat(merged[cp]);
+            if (!isWriteEcho || (Number.isFinite(evv) && Math.abs(evv - sent) <= 0.005)) {
+              delete window._cpEcho[k];
+            } else {
+              merged[cp] = sent;
+            }
+          });
+        }
+        macros[ev.name].companions = merged;
+      }
       updateKnobCard(ev.name);   // slider follows MIDI/API/hold alike; drag guard inside
     }
   }
@@ -211,6 +231,7 @@ async function loadMacros() {
   try {
     macros = await API.getMacros();
     window._knobEcho = {};   // full re-sync: no stale echo suppression
+    window._cpEcho = {};
     console.log(`[UI] Loaded ${Object.keys(macros).length} macros`);
     renderCards();
     updateStatusHeader();
@@ -444,6 +465,14 @@ window.setKnobParam = async function (name, param, idx, count) {
   const m = macros[name];
   if (!m) return;
   const value = Math.max(0, Math.min(count - 1, idx)) / (count - 1);
+  // Optimistic: apply locally NOW and hold against stale echoes - the
+  // curve flashed the OLD type until the readback caught up (#user
+  // report, same ordering disease as the knob jump-back)
+  m.companions = m.companions || {};
+  m.companions[param] = value;
+  window._cpEcho = window._cpEcho || {};
+  window._cpEcho[name + '|' + param] = value;
+  updateKnobCard(name);
   try {
     await API.setKnobParam(name, param, value);
     const step = _knobStepOf(m);
@@ -464,6 +493,8 @@ window.companionInput = function (name, param, value) {
   const def = PARAM_DEFS[param] || {};
   const v = Math.max(0, Math.min(1, parseFloat(value) || 0));
   if (m) { m.companions = m.companions || {}; m.companions[param] = v; }
+  window._cpEcho = window._cpEcho || {};
+  window._cpEcho[name + '|' + param] = v;
   const lbl = document.getElementById(`knob-cpv-${name}-${param}`);
   if (lbl && window._valEdit !== `${name}:${param}`) lbl.textContent = def.fmt ? def.fmt(v) : Math.round(v * 100) + '%';
   window._cpPending[`${name}\u0000${param}`] = v;

@@ -96,6 +96,12 @@
 - **Tap-to-place on the graphs** (user request): a tap (no movement)
   places the dot AT the tap point - frequency and Q/gain both, absolute.
   Drags keep the relative, no-teleport behavior.
+- **Fixed: type switch flashed the old curve** (user report: Low Pass ->
+  High Pass showed Low Pass momentarily). The dropdown now applies
+  locally the instant you pick (optimistic), and a companion echo ledger
+  holds your choice against stale write echoes until the server echoes
+  it back - authoritative reads (readback/device) still win. Same
+  ordering pattern as the knob jump-back fix.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.
