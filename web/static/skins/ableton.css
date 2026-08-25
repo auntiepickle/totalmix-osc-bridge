@@ -1,0 +1,515 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   ABLETON — a Live 12 dark-theme device-rack skin for TotalMix OSC Bridge
+   Inspiration: Ableton Live device/module windows. Radically flat: zero
+   shadows, zero gradients, square corners, one calm panel grey, 1px charcoal
+   separators, slim device title bars, accents ONLY on live state.
+
+   Palette
+   ─────────────────────────────────────────────────────────────
+   #161616  canvas          page background (the space between devices)
+   #232323  device body     cards, nav, menus, modals
+   #2e2e2e  raised surface  device title bars, buttons, chips
+   #1a1a1a  well            value boxes, slider tracks, editors
+   #171717  separator       every 1px line
+   #d0d0d0  text primary    (10.2:1 on #232323)
+   #9a9a9a  text secondary  (5.6:1 on #232323)
+   #a9c92f  clip green      running / on / press states only
+   #d5493c  automation red  progress line, errors, destructive
+   #5c9edd  selection blue  focus, selection, primary action
+   #e5b84b  warm yellow     warnings, hold/peak states
+   ─────────────────────────────────────────────────────────────
+   Tradeoffs: the base's orange "primary" role is remapped to selection blue
+   (Live has no orange CTA); the rounded-2xl geometry is flattened to 0 —
+   equalizeCardHeights min-heights are respected; grey-on-grey pairs were
+   contrast-checked and lifted (zinc-600/700 tints raised to >= 4.5:1).
+   ════════════════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap');
+
+/* ── 1. Geometry + light: flat everything ─────────────────────────────────── */
+
+html[data-skin="ableton"] [class*="rounded"] { border-radius: 0 !important; }
+html[data-skin="ableton"] [class*="shadow"] { box-shadow: none !important; }
+html[data-skin="ableton"] [class*="bg-gradient"] { background-image: none !important; }
+html[data-skin="ableton"] [class*="active:scale"]:active { transform: none; }
+
+/* ── 2. Type: one geometric sans; mono stays for data ─────────────────────── */
+
+html[data-skin="ableton"] body,
+html[data-skin="ableton"] button,
+html[data-skin="ableton"] input:not(.font-mono),
+html[data-skin="ableton"] select,
+html[data-skin="ableton"] h1, html[data-skin="ableton"] h2, html[data-skin="ableton"] h3 {
+  font-family: 'Archivo', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+html[data-skin="ableton"] .font-mono,
+html[data-skin="ableton"] pre,
+html[data-skin="ableton"] code,
+html[data-skin="ableton"] textarea {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+}
+/* Micro-labels: lift the 9/10px whispers to legible caption size */
+html[data-skin="ableton"] [class*="text-[9px]"]  { font-size: 0.65rem; }
+html[data-skin="ableton"] [class*="text-[10px]"] { font-size: 0.6875rem; }
+html[data-skin="ableton"] ::selection { background: #3d6a99; color: #ffffff; }
+
+/* ── 3. Surfaces: canvas / device body / raised / well ────────────────────── */
+
+html[data-skin="ableton"] body.bg-zinc-950 { background: #161616; }
+html[data-skin="ableton"] .bg-zinc-950 { background-color: #1a1a1a; }
+html[data-skin="ableton"] [class*="bg-zinc-950/"] { background-color: #1d1d1d; }
+html[data-skin="ableton"] .bg-zinc-900 { background-color: #232323; }
+html[data-skin="ableton"] [class*="bg-zinc-900/"] { background-color: #262626; }
+html[data-skin="ableton"] .bg-zinc-800 { background-color: #2e2e2e; }
+html[data-skin="ableton"] .hover\:bg-zinc-800:hover { background-color: #2e2e2e; }
+html[data-skin="ableton"] .hover\:bg-zinc-700:hover { background-color: #383838; }
+html[data-skin="ableton"] .active\:bg-zinc-600:active { background-color: #a9c92f; }
+
+html[data-skin="ableton"] .border-zinc-700,
+html[data-skin="ableton"] .border-zinc-800,
+html[data-skin="ableton"] [class*="border-zinc-700/"] { border-color: #171717; }
+html[data-skin="ableton"] .hover\:border-zinc-700:hover,
+html[data-skin="ableton"] .hover\:border-zinc-600:hover,
+html[data-skin="ableton"] .hover\:border-zinc-500:hover { border-color: #454545; }
+/* Section hairlines need one step of light against the canvas */
+html[data-skin="ableton"] .h-px.bg-zinc-800 { background-color: #2e2e2e; }
+
+/* ── 4. Text greys, contrast-lifted ───────────────────────────────────────── */
+
+html[data-skin="ableton"] .text-white { color: #e2e2e2; }
+html[data-skin="ableton"] .hover\:text-white:hover { color: #f2f2f2; }
+html[data-skin="ableton"] .text-zinc-300 { color: #c8c8c8; }
+html[data-skin="ableton"] .hover\:text-zinc-300:hover { color: #c8c8c8; }
+html[data-skin="ableton"] .text-zinc-400 { color: #b0b0b0; }
+html[data-skin="ableton"] .hover\:text-zinc-400:hover { color: #b0b0b0; }
+html[data-skin="ableton"] .text-zinc-500 { color: #9a9a9a; }
+html[data-skin="ableton"] .hover\:text-zinc-500:hover { color: #9a9a9a; }
+html[data-skin="ableton"] .text-zinc-600 { color: #8a8a8a; }
+html[data-skin="ableton"] .text-zinc-700 { color: #808080; }
+html[data-skin="ableton"] .text-black { color: #101010; }
+
+/* ── 5. Accent remap: orange → the Live palette, state only ───────────────── */
+
+/* Primary action / active tab / active mode card → selection blue */
+html[data-skin="ableton"] .bg-orange-500 { background-color: #5c9edd; color: #101010; }
+html[data-skin="ableton"] .hover\:bg-orange-400:hover { background-color: #74afe6; color: #101010; }
+/* Warning actions stay warm yellow */
+html[data-skin="ableton"] .bg-amber-500 { background-color: #e5b84b; color: #101010; }
+html[data-skin="ableton"] .hover\:bg-amber-400:hover { background-color: #f0c95c; }
+/* Informational oranges become Live's warm value-yellow */
+html[data-skin="ableton"] .text-orange-400,
+html[data-skin="ableton"] [class*="text-orange-400/"] { color: #d9b04a; }
+html[data-skin="ableton"] .hover\:text-orange-400:hover { color: #e5c05f; }
+html[data-skin="ableton"] .text-orange-300 { color: #dcc06a; }
+html[data-skin="ableton"] .text-amber-400 { color: #e5b84b; }
+html[data-skin="ableton"] .text-red-400 { color: #ec6a5e; }
+html[data-skin="ableton"] .hover\:text-red-400:hover { color: #ec6a5e; }
+html[data-skin="ableton"] .text-emerald-500,
+html[data-skin="ableton"] [class*="text-emerald-500/"] { color: #8ab82f; }
+html[data-skin="ableton"] .text-green-400 { color: #8ab82f; }
+html[data-skin="ableton"] .text-cyan-400 { color: #6fb3d2; }
+html[data-skin="ableton"] .text-purple-400 { color: #a98fd6; }
+html[data-skin="ableton"] .accent-orange-500 { accent-color: #a9c92f; }
+html[data-skin="ableton"] .accent-zinc-400 { accent-color: #9a9a9a; }
+html[data-skin="ableton"] .focus\:border-orange-400:focus,
+html[data-skin="ableton"] [class*="focus:border-orange-400"]:focus { border-color: #5c9edd; }
+
+/* Keyboard focus reads as Live's selection frame */
+html[data-skin="ableton"] :focus-visible {
+  outline: 1px solid #5c9edd;
+  outline-offset: 0;
+}
+
+/* ── 6. Nav bar: the transport strip ──────────────────────────────────────── */
+
+html[data-skin="ableton"] .max-w-7xl > div:first-child {
+  background: #232323;
+  border: 1px solid #171717;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+html[data-skin="ableton"] .max-w-7xl > div:first-child h1 {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #d0d0d0;
+}
+/* Status pills flatten into labelled segments of the strip */
+html[data-skin="ableton"] #midi-status,
+html[data-skin="ableton"] #midi-cc-stats:not(.hidden),
+html[data-skin="ableton"] #midi-bpm-badge:not(.hidden) {
+  background: #1a1a1a;
+  border: 1px solid #171717;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+/* Value boxes: every select / text / number input is a Live value field */
+html[data-skin="ableton"] select[class],
+html[data-skin="ableton"] input[class][type="text"],
+html[data-skin="ableton"] input[class][type="number"],
+html[data-skin="ableton"] input[class]:not([type]),
+html[data-skin="ableton"] textarea[class] {
+  background-color: #1a1a1a;
+  border: 1px solid #454545;
+  color: #d0d0d0;
+  border-radius: 0;
+}
+html[data-skin="ableton"] select[class]:hover,
+html[data-skin="ableton"] input[class][type="text"]:hover,
+html[data-skin="ableton"] input[class][type="number"]:hover,
+html[data-skin="ableton"] textarea[class]:hover { border-color: #5a5a5a; }
+html[data-skin="ableton"] select[class]:focus,
+html[data-skin="ableton"] input[class][type="text"]:focus,
+html[data-skin="ableton"] input[class][type="number"]:focus,
+html[data-skin="ableton"] input[class]:not([type]):focus,
+html[data-skin="ableton"] textarea[class]:focus { border-color: #5c9edd; }
+
+/* ── 7. Cards as Live devices ─────────────────────────────────────────────── */
+
+html[data-skin="ableton"] .card {
+  background: #232323;
+  border: 1px solid #171717;
+  transition: border-color 120ms linear;
+}
+html[data-skin="ableton"] .card:hover { border-color: #3d3d3d; }
+/* Peak-hold "last fired" frame → selection blue, flat */
+html[data-skin="ableton"] .card.\!border-cyan-500 { border-color: #5c9edd !important; }
+
+/* Title bar: the name row becomes a slim device header strip */
+html[data-skin="ableton"] #macro-grid .card > div:first-of-type {
+  margin: -1.25rem -1.25rem 0.8rem;
+  padding: 0.45rem 0.8rem;
+  background: #2e2e2e;
+  border-bottom: 1px solid #171717;
+}
+html[data-skin="ableton"] #knob-row .card > div:first-of-type {
+  margin: -1rem -1rem 0.7rem;
+  padding: 0.45rem 0.8rem;
+  background: #2e2e2e;
+  border-bottom: 1px solid #171717;
+}
+html[data-skin="ableton"] .card h3 {
+  font-family: 'Archivo', 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #d8d8d8;
+}
+/* Description/routing block loses its LED indent — devices set text flush */
+html[data-skin="ableton"] #macro-grid .card > .pl-6 { padding-left: 0.1rem; }
+
+/* LED: a square clip-launch cell at the left of the title bar */
+html[data-skin="ableton"] [id^="led-dot-"] {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0 !important;
+  background-color: #3a3a3a;
+  border: 1px solid #171717;
+}
+html[data-skin="ableton"] [id^="led-dot-"].bg-white     { background-color: #f2f2f2; }
+html[data-skin="ableton"] [id^="led-dot-"].bg-green-400 { background-color: #a9c92f; }
+html[data-skin="ableton"] [id^="led-dot-"].bg-amber-400 { background-color: #e5b84b; }
+html[data-skin="ableton"] [id^="led-dot-"].bg-red-500   { background-color: #d5493c; }
+html[data-skin="ableton"] [id^="led-dot-"].bg-cyan-400  { background-color: #5c9edd; }
+html[data-skin="ableton"] [id^="led-dot-"].bg-zinc-700  { background-color: #3a3a3a; }
+
+/* Group + nav health dots: same square language, smaller */
+html[data-skin="ableton"] [id^="group-led-dot-"],
+html[data-skin="ableton"] #mqtt-health-dot,
+html[data-skin="ableton"] #osc-health-dot,
+html[data-skin="ableton"] #midi-status-dot { border-radius: 0 !important; }
+html[data-skin="ableton"] [id^="group-led-dot-"].bg-green-400,
+html[data-skin="ableton"] #mqtt-health-dot.bg-green-500,
+html[data-skin="ableton"] #osc-health-dot.bg-green-400,
+html[data-skin="ableton"] #osc-health-dot.bg-green-500,
+html[data-skin="ableton"] #midi-status-dot.bg-green-400 { background-color: #a9c92f; }
+html[data-skin="ableton"] #osc-health-dot.bg-amber-400  { background-color: #e5b84b; }
+html[data-skin="ableton"] #osc-health-dot.bg-red-500    { background-color: #d5493c; }
+
+/* MIDI badge in the title bar: a quiet dark tag */
+html[data-skin="ableton"] .card [class*="text-[10px]"].font-mono.bg-zinc-800 {
+  background: #1d1d1d;
+  border-color: #171717;
+  color: #9a9a9a;
+}
+
+/* Progress: a thin automation-red line on a dark lane */
+html[data-skin="ableton"] .card .h-1.bg-zinc-800 {
+  background-color: #1a1a1a;
+  height: 3px;
+  border: none;
+}
+html[data-skin="ableton"] [id^="progress-bar-"] {
+  background-image: none !important;
+  background-color: #d5493c;
+}
+
+/* FIRE / RAMP: flat Live buttons — state = fill change, nothing else */
+html[data-skin="ableton"] .card .grid.grid-cols-3 > button {
+  background: #2e2e2e;
+  border: 1px solid #171717;
+  color: #c8c8c8;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  border-radius: 0;
+  min-height: 2.1rem;
+  transition: background-color 80ms linear, color 80ms linear;
+}
+html[data-skin="ableton"] .card .grid.grid-cols-3 > button:hover {
+  background: #383838;
+  border-color: #171717;
+  color: #f0f0f0;
+}
+html[data-skin="ableton"] .card .grid.grid-cols-3 > button:active {
+  background: #a9c92f;
+  border-color: #a9c92f;
+  color: #101010;
+}
+
+/* DETAILS toggle: a hairline footer control */
+html[data-skin="ableton"] .card > button[onclick^="toggleDetail"] {
+  border-top: 1px solid #1d1d1d;
+  padding-top: 0.45rem;
+  color: #808080;
+}
+html[data-skin="ableton"] .card > button[onclick^="toggleDetail"]:hover { color: #b0b0b0; }
+
+/* Detail panel: a well inside the device */
+html[data-skin="ableton"] [id^="detail-"]:not([id^="detail-arrow"]) {
+  background: #1d1d1d;
+  border: 1px solid #171717;
+}
+
+/* ── 8. Knob strips: chips + sliders as Live controls ─────────────────────── */
+
+/* Toggle chips: dark keys that light yellow-green when the section is ON */
+html[data-skin="ableton"] [id^="knob-en-"],
+html[data-skin="ableton"] [id^="knob-cp-"] {
+  background-color: #1a1a1a;
+  border: 1px solid #454545;
+  color: #b0b0b0;
+  border-radius: 0;
+  min-height: 1.6rem;
+  transition: background-color 80ms linear, color 80ms linear;
+}
+html[data-skin="ableton"] [id^="knob-en-"]:hover,
+html[data-skin="ableton"] [id^="knob-cp-"]:hover { border-color: #5a5a5a; color: #e2e2e2; }
+html[data-skin="ableton"] [id^="knob-en-"].text-green-400 {
+  background-color: #a9c92f;
+  border-color: #a9c92f;
+  color: #101010;
+}
+html[data-skin="ableton"] [id^="knob-en-"].text-zinc-500 { color: #9a9a9a; }
+/* Unknown-state chips stay legible, just dimmer */
+html[data-skin="ableton"] [id^="knob-en-"].text-zinc-600,
+html[data-skin="ableton"] [id^="knob-cp-"].text-zinc-600 {
+  color: #8a8a8a;
+  border-color: #2e2e2e;
+}
+
+/* Sliders: Live's thin line with a rectangular grab handle */
+html[data-skin="ableton"] input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 20px;
+  accent-color: auto;
+  cursor: ew-resize;
+}
+html[data-skin="ableton"] input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: #454545;
+  border: none;
+  border-radius: 0;
+}
+html[data-skin="ableton"] input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 6px;
+  height: 14px;
+  margin-top: -6px;
+  background: #d0d0d0;
+  border: none;
+  border-radius: 0;
+}
+html[data-skin="ableton"] input[type="range"]:hover::-webkit-slider-thumb,
+html[data-skin="ableton"] input[type="range"]:active::-webkit-slider-thumb { background: #5c9edd; }
+html[data-skin="ableton"] input[type="range"]::-moz-range-track {
+  height: 2px;
+  background: #454545;
+  border: none;
+  border-radius: 0;
+}
+html[data-skin="ableton"] input[type="range"]::-moz-range-thumb {
+  width: 6px;
+  height: 14px;
+  background: #d0d0d0;
+  border: none;
+  border-radius: 0;
+}
+html[data-skin="ableton"] input[type="range"]:hover::-moz-range-thumb,
+html[data-skin="ableton"] input[type="range"]:active::-moz-range-thumb { background: #5c9edd; }
+html[data-skin="ableton"] input[type="range"]:focus-visible { outline-offset: 2px; }
+/* Companion mini-sliders: even quieter handle until touched */
+html[data-skin="ableton"] [id^="knob-cps-"]::-webkit-slider-thumb { background: #9a9a9a; }
+html[data-skin="ableton"] [id^="knob-cps-"]::-moz-range-thumb { background: #9a9a9a; }
+html[data-skin="ableton"] [id^="knob-cps-"]:hover::-webkit-slider-thumb,
+html[data-skin="ableton"] [id^="knob-cps-"]:active::-webkit-slider-thumb { background: #5c9edd; }
+html[data-skin="ableton"] [id^="knob-cps-"]:hover::-moz-range-thumb,
+html[data-skin="ableton"] [id^="knob-cps-"]:active::-moz-range-thumb { background: #5c9edd; }
+
+/* Readouts: plain digits, no chrome */
+html[data-skin="ableton"] [id^="knob-val-"] { color: #d0d0d0; }
+html[data-skin="ableton"] [id^="knob-dev-"] { color: #8a8a8a; }
+
+/* ── 9. Section headers: rack labels ──────────────────────────────────────── */
+
+html[data-skin="ableton"] #knob-section span.uppercase.text-zinc-400,
+html[data-skin="ableton"] .max-w-7xl > .flex.items-center.gap-3 span.uppercase.text-zinc-400,
+html[data-skin="ableton"] #macro-grid button span.uppercase { letter-spacing: 0.18em; }
+
+/* ── 10. Gear menu: a flat context menu ───────────────────────────────────── */
+
+html[data-skin="ableton"] #settings-menu {
+  background: #232323;
+  border: 1px solid #171717;
+  padding: 0.4rem;
+}
+html[data-skin="ableton"] #settings-menu > button,
+html[data-skin="ableton"] #settings-menu > label { border-radius: 0; }
+html[data-skin="ableton"] #settings-menu .skin-btn {
+  background: #1a1a1a;
+  border: 1px solid #454545;
+  color: #b0b0b0;
+}
+html[data-skin="ableton"] #settings-menu .skin-btn:hover { color: #e2e2e2; border-color: #5a5a5a; }
+/* The active skin is a selected state → blue */
+html[data-skin="ableton"] #settings-menu .skin-btn.text-orange-400 {
+  background: #5c9edd;
+  border-color: #5c9edd;
+  color: #101010;
+}
+
+/* ── 11. Banners: flat severity strips ────────────────────────────────────── */
+
+html[data-skin="ableton"] #bank-width-banner,
+html[data-skin="ableton"] #sweep-needed-banner,
+html[data-skin="ableton"] #example-mappings-banner {
+  background: #262016;
+  border: 1px solid #171717;
+  border-left: 3px solid #e5b84b;
+  color: #e8c15a;
+}
+html[data-skin="ableton"] #example-mappings-banner code {
+  background: #1a1a1a;
+  color: #e8c15a;
+}
+html[data-skin="ableton"] #device-dead-banner {
+  background: #2a1c1c;
+  border: 1px solid #171717;
+  border-left: 3px solid #d5493c;
+  color: #ec6a5e;
+}
+/* Issue strips inside details/editors share the red treatment */
+html[data-skin="ableton"] [class*="bg-red-900/"] {
+  background-color: #2a1c1c;
+  border-color: #171717;
+  border-left: 3px solid #d5493c;
+}
+html[data-skin="ableton"] [class*="bg-amber-950/"] { background-color: #262016; }
+
+/* ── 12. Editors: value boxes, mode tabs, trigger rows ────────────────────── */
+
+/* Step / trigger / section wrappers inside editors: shallow wells */
+html[data-skin="ableton"] [id^="detail-"] [class*="bg-zinc-900/"] {
+  background-color: #232323;
+  border-color: #171717;
+}
+html[data-skin="ableton"] [id^="detail-"] pre {
+  background: #161616;
+  border-color: #171717;
+  color: #b0b0b0;
+}
+/* Fire-mode + KNOB badges: flat outlined tags */
+html[data-skin="ableton"] [class*="bg-cyan-900/"],
+html[data-skin="ableton"] [class*="bg-yellow-900/"],
+html[data-skin="ableton"] [class*="bg-green-900/"] { background-color: #1d1d1d; }
+html[data-skin="ableton"] .text-yellow-400 { color: #e5b84b; }
+
+/* ── 13. Modals ───────────────────────────────────────────────────────────── */
+
+html[data-skin="ableton"] #new-macro-modal > div,
+html[data-skin="ableton"] #editor-modal > div {
+  background: #232323;
+  border: 1px solid #454545;
+}
+html[data-skin="ableton"] #editor-textarea {
+  background: #161616;
+  border-color: #171717;
+  color: #c8c8c8;
+}
+
+/* ── 14. Emulator panel: a floating utility device ────────────────────────── */
+
+html[data-skin="ableton"] #midi-emu-panel {
+  background: #232323;
+  border: 1px solid #454545;
+  max-width: calc(100vw - 2rem);
+}
+
+/* ── 15. Scrollbars ───────────────────────────────────────────────────────── */
+
+html[data-skin="ableton"] * { scrollbar-width: thin; scrollbar-color: #3d3d3d #1a1a1a; }
+html[data-skin="ableton"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+html[data-skin="ableton"] ::-webkit-scrollbar-track { background: #1a1a1a; }
+html[data-skin="ableton"] ::-webkit-scrollbar-thumb {
+  background: #3d3d3d;
+  border: 2px solid #1a1a1a;
+  border-radius: 0;
+}
+html[data-skin="ableton"] ::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+
+/* ── 16. Mobile: single column, real touch targets ────────────────────────── */
+
+@media (max-width: 767px) {
+  html[data-skin="ableton"] .max-w-7xl { padding: 0.75rem; }
+  html[data-skin="ableton"] .max-w-7xl > div:first-child,
+  html[data-skin="ableton"] .max-w-7xl > div:first-child > div {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  html[data-skin="ableton"] .card .grid.grid-cols-3 > button { min-height: 44px; }
+  html[data-skin="ableton"] [id^="knob-en-"],
+  html[data-skin="ableton"] [id^="knob-cp-"] {
+    min-height: 40px;
+    padding-left: 0.6rem;
+    padding-right: 0.6rem;
+  }
+  html[data-skin="ableton"] input[type="range"] { height: 28px; }
+  html[data-skin="ableton"] input[type="range"]::-webkit-slider-thumb {
+    width: 10px;
+    height: 20px;
+    margin-top: -9px;
+  }
+  html[data-skin="ableton"] input[type="range"]::-moz-range-thumb {
+    width: 10px;
+    height: 20px;
+  }
+  html[data-skin="ableton"] #settings-menu { min-width: min(240px, calc(100vw - 2rem)); }
+  html[data-skin="ableton"] .card > button[onclick^="toggleDetail"] { min-height: 40px; }
+}
+
+/* ── 17. Reduced motion ───────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="ableton"] *,
+  html[data-skin="ableton"] *::before,
+  html[data-skin="ableton"] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

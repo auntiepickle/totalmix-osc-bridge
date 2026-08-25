@@ -111,6 +111,28 @@ function _onWSMessage(event) {
   updateStatusHeader();
 };
 
+// ── Design skins (pure CSS re-styles) ────────────────────────────────────────
+// A skin is web/static/skins/<name>.css, scoped under html[data-skin="name"],
+// overriding the default look with higher-specificity selectors. Swapping is
+// instant and per-browser (localStorage).
+window.applySkin = function (name) {
+  const link = document.getElementById('skin-css');
+  const root = document.documentElement;
+  if (name) {
+    root.setAttribute('data-skin', name);
+    if (link) { link.href = `skins/${name}.css`; link.disabled = false; }
+    localStorage.setItem('uiSkin', name);
+  } else {
+    root.removeAttribute('data-skin');
+    if (link) { link.disabled = true; link.href = ''; }
+    localStorage.removeItem('uiSkin');
+  }
+  document.querySelectorAll('.skin-btn').forEach(b => {
+    b.classList.toggle('text-orange-400', (b.dataset.skinName || '') === (name || ''));
+  });
+};
+try { const s = localStorage.getItem('uiSkin'); if (s) applySkin(s); } catch (_) {}
+
 // ── Macro loading ─────────────────────────────────────────────────────────────
 async function loadMacros() {
   try {

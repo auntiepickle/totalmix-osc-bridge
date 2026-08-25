@@ -1,0 +1,807 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ROLAND — a TR-808/909 → AIRA/TR-8S skin for the TotalMix OSC Bridge
+   ───────────────────────────────────────────────────────────────────────────
+   Inspiration: the Roland drum-machine lineage. A strict black field, thin
+   white "silk-screen" rules and boxed uppercase labels, rubber pads that
+   depress, backlit LEDs, colored fader caps, and one orange segment display
+   for everything numeric. Color only where something is ALIVE.
+
+   PALETTE
+   ┌──────────────┬───────────┬────────────────────────────────────────────┐
+   │ role         │ hex       │ where                                      │
+   ├──────────────┼───────────┼────────────────────────────────────────────┤
+   │ field        │ #0d0d0d   │ page background                            │
+   │ panel        │ #161616   │ nav / menus / modals / emulator            │
+   │ tile         │ #191919   │ macro cards (pad tiles)                    │
+   │ well         │ #0e0e0e   │ inputs, detail panels, fader slots         │
+   │ silk         │ #f4f1ea   │ silk-screen text (warm white)              │
+   │ silk-rule    │ rgba(255,255,255,.26) │ 1px hairlines + label boxes    │
+   │ red          │ #ef4136   │ 808 bank 1, errors, skipped LED            │
+   │ orange       │ #ff7a1a   │ 808 bank 2, primary action pads            │
+   │ yellow       │ #ffc832   │ 808 bank 3 (accents only — never text)     │
+   │ cap-white    │ #f5f2ea   │ 808 bank 4, companion fader caps           │
+   │ green        │ #35e07a   │ backlit ON pads, ok LEDs, fired-hold       │
+   │ display      │ #ffa02e   │ 7-segment readouts, progress, routing      │
+   └──────────────┴───────────┴────────────────────────────────────────────┘
+
+   TRADEOFFS
+   · The app's cyan "last-fired peak-hold" (LED + card border) is remapped to
+     dim backlit GREEN — Roland pads hold a dim green when selected; cyan is
+     off-palette. Running stays orange, so the two states remain distinct.
+   · Radii are forced small (4–6px): Roland is boxy. rounded-full survives
+     so LEDs stay circular.
+   · Sliders drop accent-color for full custom fader slots + colored caps
+     (orange = main, white = companions, green = emulator test rig).
+   · No segment FONT — the display look comes from color, a dark lens box and
+     a restrained glow on the existing mono text, so values stay readable.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700;1,800&display=swap');
+
+html[data-skin="roland"] {
+  --rol-field:  #0d0d0d;
+  --rol-panel:  #161616;
+  --rol-tile:   #191919;
+  --rol-well:   #0e0e0e;
+  --rol-silk:   #f4f1ea;
+  --rol-dim:    #a8a49b;
+  --rol-faint:  #7d7a73;
+  --rol-rule:   rgba(255, 255, 255, .26);
+  --rol-rule-soft: rgba(255, 255, 255, .14);
+  --rol-red:    #ef4136;
+  --rol-orange: #ff7a1a;
+  --rol-yellow: #ffc832;
+  --rol-white:  #f5f2ea;
+  --rol-green:  #35e07a;
+  --rol-display:#ffa02e;
+  --rol-display-dim: #b06a1d;
+  --rol-display-bg: #0f0a05;
+  --rol-glow-display: 0 0 6px rgba(255, 160, 46, .45);
+  --rol-font: 'Barlow', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+/* ── Field ─────────────────────────────────────────────────────────────── */
+
+html[data-skin="roland"] body {
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(255, 255, 255, .035), transparent 65%),
+    var(--rol-field);
+  color: var(--rol-silk);
+  font-family: var(--rol-font);
+}
+
+html[data-skin="roland"] ::selection {
+  background: var(--rol-orange);
+  color: #0a0a0a;
+}
+
+html[data-skin="roland"] :focus-visible {
+  outline: 2px solid var(--rol-display);
+  outline-offset: 1px;
+}
+
+/* Boxy discipline: Roland machines are rectangles. LEDs (rounded-full)
+   are untouched and stay circular. */
+html[data-skin="roland"] .rounded-3xl,
+html[data-skin="roland"] .rounded-2xl,
+html[data-skin="roland"] .rounded-xl { border-radius: 6px; }
+html[data-skin="roland"] .rounded-lg,
+html[data-skin="roland"] .rounded-md { border-radius: 4px; }
+
+/* Silk-screen hairlines (section rulers) */
+html[data-skin="roland"] .h-px { background: var(--rol-rule-soft); }
+
+/* Legibility floor: lift Tailwind's darkest grays off the black field */
+html[data-skin="roland"] .text-zinc-400 { color: #b9b5ac; }
+html[data-skin="roland"] .text-zinc-500 { color: #a19d94; }
+html[data-skin="roland"] .text-zinc-600 { color: #8b8880; }
+html[data-skin="roland"] .text-zinc-700 { color: #757269; }
+
+/* ── Scrollbars ────────────────────────────────────────────────────────── */
+
+html[data-skin="roland"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+html[data-skin="roland"] ::-webkit-scrollbar-track { background: #101010; }
+html[data-skin="roland"] ::-webkit-scrollbar-thumb {
+  background: #333029;
+  border: 2px solid #101010;
+  border-radius: 4px;
+}
+html[data-skin="roland"] ::-webkit-scrollbar-thumb:hover { background: var(--rol-orange); }
+html[data-skin="roland"] * { scrollbar-color: #333029 #101010; }
+
+/* ── Nav bar — the brushed top panel ───────────────────────────────────── */
+
+html[data-skin="roland"] .max-w-7xl > .bg-zinc-900.rounded-3xl {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 45%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .012) 0 2px, transparent 2px 4px),
+    var(--rol-panel);
+  border: 1px solid var(--rol-rule);
+  border-bottom-width: 2px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
+}
+
+/* Wordmark: bold italic uppercase silk-screen with an orange block tab */
+html[data-skin="roland"] h1 {
+  font-family: var(--rol-font);
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--rol-silk);
+}
+html[data-skin="roland"] h1::before {
+  content: '';
+  display: inline-block;
+  width: .62em;
+  height: .62em;
+  margin-right: .45em;
+  background: var(--rol-orange);
+  box-shadow: 0 0 8px rgba(255, 122, 26, .5);
+}
+
+html[data-skin="roland"] #last-fired-label {
+  color: var(--rol-display);
+  text-shadow: var(--rol-glow-display);
+}
+
+/* Nav selects + pills: dark wells with silk borders */
+html[data-skin="roland"] #workspace-select,
+html[data-skin="roland"] #snapshot-select-nav,
+html[data-skin="roland"] #midi-device-selector {
+  background: var(--rol-well);
+  border: 1px solid var(--rol-rule);
+  color: var(--rol-silk);
+}
+html[data-skin="roland"] #workspace-select:hover,
+html[data-skin="roland"] #snapshot-select-nav:hover,
+html[data-skin="roland"] #midi-device-selector:hover { border-color: rgba(255, 255, 255, .5); }
+
+html[data-skin="roland"] #midi-status,
+html[data-skin="roland"] #midi-cc-stats,
+html[data-skin="roland"] #midi-bpm-badge,
+html[data-skin="roland"] .max-w-7xl [title="Connection health"] {
+  background: var(--rol-well);
+  border: 1px solid var(--rol-rule-soft);
+}
+html[data-skin="roland"] #midi-status[class*="border-green"] { border-color: rgba(53, 224, 122, .55); }
+
+/* BPM + CC readouts read as display glass */
+html[data-skin="roland"] #midi-bpm,
+html[data-skin="roland"] #midi-cc-last {
+  color: var(--rol-display);
+  text-shadow: var(--rol-glow-display);
+}
+
+/* ── LEDs — backlit, with lens depth ───────────────────────────────────── */
+
+html[data-skin="roland"] [id^="led-dot-"],
+html[data-skin="roland"] [id^="group-led-dot-"],
+html[data-skin="roland"] #midi-status-dot,
+html[data-skin="roland"] #mqtt-health-dot,
+html[data-skin="roland"] #osc-health-dot {
+  border: 1px solid rgba(0, 0, 0, .7);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .07);
+}
+
+/* Unlit lens */
+html[data-skin="roland"] [id^="led-dot-"].bg-zinc-700,
+html[data-skin="roland"] [id^="group-led-dot-"].bg-zinc-600,
+html[data-skin="roland"] #midi-status-dot.bg-zinc-600,
+html[data-skin="roland"] #mqtt-health-dot.bg-zinc-700,
+html[data-skin="roland"] #osc-health-dot.bg-zinc-700 { background: #2b2823; }
+
+/* Lit states — saturated + real glow */
+html[data-skin="roland"] [id^="led-dot-"].bg-white {
+  background: #fff;
+  box-shadow: 0 0 8px #fff, 0 0 18px rgba(255, 255, 255, .5) !important;
+}
+html[data-skin="roland"] [id^="led-dot-"].bg-amber-400,
+html[data-skin="roland"] #mqtt-health-dot.bg-amber-400,
+html[data-skin="roland"] #osc-health-dot.bg-amber-400 {
+  background: var(--rol-orange);
+  box-shadow: 0 0 8px rgba(255, 122, 26, .9), 0 0 16px rgba(255, 122, 26, .4) !important;
+}
+html[data-skin="roland"] [id^="led-dot-"].bg-green-400,
+html[data-skin="roland"] [id^="group-led-dot-"].bg-green-400,
+html[data-skin="roland"] #midi-status-dot.bg-green-400,
+html[data-skin="roland"] #mqtt-health-dot.bg-green-400,
+html[data-skin="roland"] #osc-health-dot.bg-green-400,
+html[data-skin="roland"] #mqtt-health-dot.bg-green-500,
+html[data-skin="roland"] #osc-health-dot.bg-green-500 {
+  background: var(--rol-green);
+  box-shadow: 0 0 8px rgba(53, 224, 122, .9), 0 0 16px rgba(53, 224, 122, .4) !important;
+}
+html[data-skin="roland"] [id^="led-dot-"].bg-red-500,
+html[data-skin="roland"] #mqtt-health-dot.bg-red-500,
+html[data-skin="roland"] #osc-health-dot.bg-red-500 {
+  background: var(--rol-red);
+  box-shadow: 0 0 8px rgba(239, 65, 54, .9), 0 0 16px rgba(239, 65, 54, .4) !important;
+}
+/* Peak-hold: cyan → dim backlit green (Roland "selected pad" idiom) */
+html[data-skin="roland"] [id^="led-dot-"].bg-cyan-400 {
+  background: #1f9e56;
+  box-shadow: 0 0 6px rgba(53, 224, 122, .55) !important;
+}
+html[data-skin="roland"] .card[class*="border-cyan-500"] {
+  border-color: rgba(53, 224, 122, .55) !important;
+  box-shadow: 0 0 14px rgba(53, 224, 122, .12), 0 6px 14px rgba(0, 0, 0, .45) !important;
+}
+
+/* ── Section headers — boxed silk-screen labels ────────────────────────── */
+
+html[data-skin="roland"] #knob-section .uppercase.tracking-widest.font-semibold,
+html[data-skin="roland"] .max-w-7xl > .flex.items-center.gap-3 > .uppercase.tracking-widest.font-semibold,
+html[data-skin="roland"] #macro-grid button > .uppercase.tracking-widest.font-semibold {
+  border: 1px solid rgba(255, 255, 255, .65);
+  color: var(--rol-silk);
+  padding: 2px 9px 1px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  border-radius: 0;
+  line-height: 1.5;
+}
+html[data-skin="roland"] #macro-grid button:hover > .uppercase.tracking-widest.font-semibold {
+  background: var(--rol-silk);
+  color: #0d0d0d;
+}
+/* Snapshot sub-headers: small silk arrows, display-orange on hover */
+html[data-skin="roland"] #macro-grid [id^="ss-body-"] ~ *,
+html[data-skin="roland"] #macro-grid button .text-zinc-600.uppercase { letter-spacing: .16em; }
+
+/* ── Banners — dark strips with a colored rule, not washed tints ───────── */
+
+html[data-skin="roland"] #bank-width-banner,
+html[data-skin="roland"] #sweep-needed-banner,
+html[data-skin="roland"] #example-mappings-banner {
+  background: linear-gradient(180deg, rgba(255, 122, 26, .09), rgba(255, 122, 26, .04)), var(--rol-panel);
+  border: 1px solid var(--rol-rule-soft);
+  border-left: 4px solid var(--rol-orange);
+  color: #ffd9ae;
+}
+html[data-skin="roland"] #device-dead-banner {
+  background: linear-gradient(180deg, rgba(239, 65, 54, .1), rgba(239, 65, 54, .04)), var(--rol-panel);
+  border: 1px solid var(--rol-rule-soft);
+  border-left: 4px solid var(--rol-red);
+  color: #ffb7b1;
+}
+html[data-skin="roland"] #example-mappings-banner code {
+  background: rgba(255, 122, 26, .15);
+  color: #ffcf9a;
+}
+
+/* ── Cards — pad-bank tiles ────────────────────────────────────────────── */
+
+html[data-skin="roland"] .card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, 0) 30%),
+    var(--rol-tile);
+  border: 1px solid var(--rol-rule-soft);
+  border-radius: 6px;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, .45);
+}
+html[data-skin="roland"] .card:hover { border-color: var(--rol-rule); }
+
+html[data-skin="roland"] .card h3 {
+  font-family: var(--rol-font);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--rol-silk);
+}
+
+/* Routing label = a line of the display */
+html[data-skin="roland"] .routing-label {
+  color: var(--rol-display);
+  text-shadow: var(--rol-glow-display);
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+
+/* Health line: emerald → palette green */
+html[data-skin="roland"] .health-line-slot .text-emerald-500 { color: var(--rol-green); }
+
+/* MIDI trigger badge: silk-screen mini box */
+html[data-skin="roland"] .card div[class*="font-mono"][class*="bg-zinc-800"] {
+  background: var(--rol-well);
+  border: 1px solid var(--rol-rule);
+  color: var(--rol-dim);
+  border-radius: 3px;
+}
+
+/* Progress = orange segment strip in a dark lens */
+html[data-skin="roland"] .card .h-1.bg-zinc-800 {
+  background: var(--rol-display-bg);
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 2px;
+  height: 7px;
+}
+html[data-skin="roland"] [id^="progress-bar-"] {
+  background-image: repeating-linear-gradient(90deg,
+    var(--rol-display) 0 5px, rgba(255, 160, 46, .12) 5px 7px);
+  box-shadow: 0 0 6px rgba(255, 160, 46, .5);
+}
+
+/* ── FIRE / RAMP — rubber pads with 808 bank color caps ────────────────── */
+
+/* 808 bank cycling: red / orange / yellow / white cap-lines across the grid */
+html[data-skin="roland"] .card:nth-child(4n+1) { --pad-c: var(--rol-red); }
+html[data-skin="roland"] .card:nth-child(4n+2) { --pad-c: var(--rol-orange); }
+html[data-skin="roland"] .card:nth-child(4n+3) { --pad-c: var(--rol-yellow); }
+html[data-skin="roland"] .card:nth-child(4n)   { --pad-c: var(--rol-white); }
+
+html[data-skin="roland"] .fire-btn {
+  background: linear-gradient(180deg, #2a2a28, #1d1d1b 60%, #181816);
+  border: 1px solid rgba(0, 0, 0, .8);
+  border-top: 3px solid var(--pad-c, var(--rol-red));
+  border-radius: 5px;
+  color: #e9e5dc;
+  font-weight: 700;
+  letter-spacing: .22em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .08),
+    0 3px 0 rgba(0, 0, 0, .55),
+    0 5px 10px rgba(0, 0, 0, .4);
+  transition: transform .06s ease, box-shadow .06s ease, border-color .12s ease;
+}
+html[data-skin="roland"] .fire-btn:hover {
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .1),
+    0 3px 0 rgba(0, 0, 0, .55),
+    0 0 14px -2px var(--pad-c, var(--rol-red));
+}
+html[data-skin="roland"] .fire-btn:active {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, .6),
+    0 0 0 rgba(0, 0, 0, 0),
+    0 0 16px -2px var(--pad-c, var(--rol-red));
+  background: linear-gradient(180deg, #1c1c1a, #222220);
+}
+
+/* RAMP: secondary rubber key — no bank color, quieter */
+html[data-skin="roland"] .card .grid > button:not(.fire-btn) {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  border-top: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 5px;
+  color: #b9b5ac;
+  font-weight: 600;
+  letter-spacing: .18em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 2px 0 rgba(0, 0, 0, .5);
+  transition: transform .06s ease, box-shadow .06s ease, color .12s ease;
+}
+html[data-skin="roland"] .card .grid > button:not(.fire-btn):hover { color: var(--rol-silk); }
+html[data-skin="roland"] .card .grid > button:not(.fire-btn):active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, .55);
+}
+
+/* DETAILS toggle: tiny silk label, display-orange on hover */
+html[data-skin="roland"] .card button[onclick^="toggleDetail"] { letter-spacing: .24em; }
+html[data-skin="roland"] .card button[onclick^="toggleDetail"]:hover { color: var(--rol-display); }
+
+/* ── Faders — slot tracks + colored caps ───────────────────────────────── */
+
+html[data-skin="roland"] input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  accent-color: var(--rol-orange);
+  background: transparent;
+  height: 28px;
+  cursor: pointer;
+}
+html[data-skin="roland"] input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 2px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, .1) 0 1px, transparent 1px) 0 0 / 10% 100%,
+    linear-gradient(180deg, #060606, #131311);
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .8);
+}
+html[data-skin="roland"] input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #060606, #131311);
+  border: 1px solid rgba(255, 255, 255, .12);
+}
+/* The cap: colored body, contrasting center line, machined edges */
+html[data-skin="roland"] input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 26px;
+  margin-top: -11px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, .85);
+  background:
+    linear-gradient(180deg,
+      var(--cap, var(--rol-orange)) 0 40%,
+      #fffdf8 40% 58%,
+      var(--cap, var(--rol-orange)) 58% 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .45),
+    inset 0 -2px 2px rgba(0, 0, 0, .35),
+    0 2px 4px rgba(0, 0, 0, .6);
+}
+html[data-skin="roland"] input[type="range"]::-moz-range-thumb {
+  width: 15px;
+  height: 26px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, .85);
+  background:
+    linear-gradient(180deg,
+      var(--cap, var(--rol-orange)) 0 40%,
+      #fffdf8 40% 58%,
+      var(--cap, var(--rol-orange)) 58% 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .45),
+    inset 0 -2px 2px rgba(0, 0, 0, .35),
+    0 2px 4px rgba(0, 0, 0, .6);
+}
+html[data-skin="roland"] input[type="range"]:active::-webkit-slider-thumb {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 1px 2px rgba(0, 0, 0, .6),
+    0 0 10px -1px var(--cap, var(--rol-orange));
+}
+
+/* Companion mini-faders: white caps with a dark center line */
+html[data-skin="roland"] input[type="range"][class*="accent-zinc-400"] {
+  --cap: var(--rol-white);
+}
+html[data-skin="roland"] input[type="range"][class*="accent-zinc-400"]::-webkit-slider-thumb,
+html[data-skin="roland"] input[type="range"][class*="accent-zinc-400"]::-moz-range-thumb {
+  background: linear-gradient(180deg,
+    var(--rol-white) 0 40%, #35322b 40% 58%, var(--rol-white) 58% 100%);
+}
+
+/* Emulator test-rig fader: green cap */
+html[data-skin="roland"] #emu-val { --cap: var(--rol-green); }
+
+/* ── 7-segment readouts — the orange display ───────────────────────────── */
+
+html[data-skin="roland"] [id^="knob-val-"],
+html[data-skin="roland"] [id^="knob-cpv-"],
+html[data-skin="roland"] [id^="val-label-"],
+html[data-skin="roland"] [id^="mod-thr-"],
+html[data-skin="roland"] [id^="mod-lo-"],
+html[data-skin="roland"] [id^="mod-hi-"],
+html[data-skin="roland"] #emu-val-label {
+  background: var(--rol-display-bg);
+  border: 1px solid rgba(255, 160, 46, .22);
+  border-radius: 3px;
+  color: var(--rol-display);
+  text-shadow: var(--rol-glow-display);
+  padding: 1px 2px;
+  font-variant-numeric: tabular-nums;
+}
+/* Device echo line: dim display segment */
+html[data-skin="roland"] [id^="knob-dev-"] {
+  color: var(--rol-display-dim);
+  letter-spacing: .04em;
+}
+
+/* ── Chips — small backlit rubber buttons ──────────────────────────────── */
+
+html[data-skin="roland"] [id^="knob-en-"],
+html[data-skin="roland"] [id^="knob-cp-"] {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .45);
+  transition: transform .06s ease, box-shadow .06s ease, color .12s ease;
+  color: #a19d94;
+}
+html[data-skin="roland"] [id^="knob-en-"]:active,
+html[data-skin="roland"] [id^="knob-cp-"]:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .55);
+}
+/* Backlit ON (JS applies green classes) */
+html[data-skin="roland"] [id^="knob-en-"][class*="green"] {
+  background: linear-gradient(180deg, rgba(53, 224, 122, .2), rgba(53, 224, 122, .08)), #142018;
+  border-color: rgba(53, 224, 122, .6);
+  color: var(--rol-green);
+  text-shadow: 0 0 6px rgba(53, 224, 122, .5);
+  box-shadow: 0 0 8px rgba(53, 224, 122, .25), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+/* Populated companion chips: lit silk */
+html[data-skin="roland"] [id^="knob-cp-"][class*="text-zinc-300"] { color: var(--rol-silk); }
+
+/* ── Detail panels + step rows — display glass ─────────────────────────── */
+
+html[data-skin="roland"] [id^="detail-"][class*="bg-zinc-950"] ,
+html[data-skin="roland"] .card > div[id^="detail-"] {
+  background: #101010;
+  border: 1px solid var(--rol-rule-soft);
+}
+html[data-skin="roland"] [id^="detail-"] .text-orange-300 {
+  color: var(--rol-display);
+  text-shadow: var(--rol-glow-display);
+}
+html[data-skin="roland"] [id^="detail-"] [class*="bg-zinc-900/60"] {
+  background: var(--rol-well);
+  border: 1px solid rgba(255, 255, 255, .07);
+}
+html[data-skin="roland"] [id^="detail-"] pre {
+  background: var(--rol-display-bg);
+  border-color: rgba(255, 160, 46, .18);
+  color: #cfa26a;
+}
+html[data-skin="roland"] [id^="detail-"] summary:hover { color: var(--rol-display); }
+/* Op badges keep their semantics; cyan KNOB badge joins the green family */
+html[data-skin="roland"] [id^="detail-"] [class*="text-cyan-400"],
+html[data-skin="roland"] [id^="detail-"] [class*="text-purple-400"] { color: var(--rol-green); }
+html[data-skin="roland"] [id^="detail-"] [class*="bg-cyan-900"] {
+  background: rgba(53, 224, 122, .1);
+  border-color: rgba(53, 224, 122, .4);
+}
+
+/* ── Editors (inline card editors + shared inputs) ─────────────────────── */
+
+html[data-skin="roland"] .card input:not([type="range"]):not([type="checkbox"]),
+html[data-skin="roland"] .card select,
+html[data-skin="roland"] .card textarea {
+  background: var(--rol-well);
+  border-color: var(--rol-rule);
+  color: var(--rol-silk);
+  font-family: var(--rol-font);
+}
+html[data-skin="roland"] .card input:focus,
+html[data-skin="roland"] .card select:focus,
+html[data-skin="roland"] .card textarea:focus {
+  border-color: var(--rol-display);
+  box-shadow: 0 0 0 1px rgba(255, 160, 46, .35);
+}
+html[data-skin="roland"] select option { background: #141414; color: var(--rol-silk); }
+html[data-skin="roland"] input[type="checkbox"] { accent-color: var(--rol-orange); }
+
+/* Editor utility keys (add step / add trigger / duplicate / mode rows) */
+html[data-skin="roland"] .card button[class*="bg-zinc-800"] {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .4);
+  color: #b9b5ac;
+}
+html[data-skin="roland"] .card button[class*="bg-zinc-800"]:hover { color: var(--rol-silk); }
+html[data-skin="roland"] .card button[class*="bg-zinc-800"]:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .5);
+}
+
+/* wiggle / pulse / learn utility keys: silk text, not cyan */
+html[data-skin="roland"] [id^="wiggle-btn-"],
+html[data-skin="roland"] [id^="pulse-btn-"],
+html[data-skin="roland"] [id^="learn-btn-"] {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .4);
+  color: var(--rol-dim);
+}
+html[data-skin="roland"] [id^="wiggle-btn-"]:hover,
+html[data-skin="roland"] [id^="pulse-btn-"]:hover,
+html[data-skin="roland"] [id^="learn-btn-"]:hover { color: var(--rol-green); }
+html[data-skin="roland"] [id^="wiggle-btn-"]:active,
+html[data-skin="roland"] [id^="pulse-btn-"]:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .5);
+}
+
+/* ── Primary action pads (orange Tailwind buttons) ─────────────────────── */
+
+html[data-skin="roland"] [class*="bg-orange-500"],
+html[data-skin="roland"] [class*="bg-amber-500"] {
+  background: linear-gradient(180deg, #ff8c3a, var(--rol-orange) 55%, #f26a0e);
+  border: 1px solid #b34e08;
+  color: #140a02;
+  font-weight: 800;
+  letter-spacing: .04em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .35),
+    0 3px 0 #8a3c05,
+    0 5px 10px rgba(0, 0, 0, .4);
+  transition: transform .06s ease, box-shadow .06s ease, filter .12s ease;
+}
+html[data-skin="roland"] [class*="bg-orange-500"]:hover,
+html[data-skin="roland"] [class*="bg-amber-500"]:hover {
+  filter: brightness(1.07);
+  background: linear-gradient(180deg, #ff8c3a, var(--rol-orange) 55%, #f26a0e);
+}
+html[data-skin="roland"] [class*="bg-orange-500"]:active,
+html[data-skin="roland"] [class*="bg-amber-500"]:active {
+  transform: translateY(3px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, .35), 0 0 0 #8a3c05;
+}
+
+/* ── Gear menu ─────────────────────────────────────────────────────────── */
+
+html[data-skin="roland"] #settings-menu {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .04), transparent 30%),
+    var(--rol-panel);
+  border: 1px solid var(--rol-rule);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .65);
+}
+html[data-skin="roland"] #settings-menu .uppercase.tracking-widest {
+  color: var(--rol-faint);
+  letter-spacing: .22em;
+  border-bottom: 1px solid var(--rol-rule-soft);
+  padding-bottom: 3px;
+}
+html[data-skin="roland"] #settings-menu button:hover,
+html[data-skin="roland"] #settings-menu label:hover { background: rgba(255, 255, 255, .06); }
+/* Icon accents: hold the line — utility icons go silk, danger stays red */
+html[data-skin="roland"] #settings-menu .fa-arrows-rotate,
+html[data-skin="roland"] #settings-menu .fa-flask,
+html[data-skin="roland"] #settings-menu .fa-stethoscope { color: var(--rol-dim); }
+html[data-skin="roland"] #settings-menu .fa-pen,
+html[data-skin="roland"] #settings-menu .fa-upload { color: var(--rol-display); }
+html[data-skin="roland"] #settings-menu .fa-sync { color: var(--rol-green); }
+html[data-skin="roland"] #settings-menu .fa-plug-circle-xmark { color: var(--rol-red); }
+
+/* Skin swatch keys */
+html[data-skin="roland"] .skin-btn {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .4);
+}
+html[data-skin="roland"] .skin-btn:active { transform: translateY(2px); box-shadow: inset 0 2px 3px rgba(0,0,0,.5); }
+html[data-skin="roland"] .skin-btn[data-skin-name="roland"] {
+  border-color: rgba(255, 122, 26, .7);
+  color: var(--rol-orange);
+  text-shadow: 0 0 6px rgba(255, 122, 26, .4);
+}
+
+/* ── MIDI emulator — the utility/test section ──────────────────────────── */
+
+html[data-skin="roland"] #midi-emu-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .04), transparent 25%),
+    var(--rol-panel);
+  border: 1px solid var(--rol-rule);
+  border-top: 3px solid var(--rol-green);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .65);
+}
+html[data-skin="roland"] #midi-emu-panel .fa-flask { color: var(--rol-green); }
+html[data-skin="roland"] #midi-emu-panel input[type="number"] {
+  background: var(--rol-display-bg);
+  border: 1px solid rgba(255, 160, 46, .25);
+  color: var(--rol-display);
+  text-shadow: var(--rol-glow-display);
+  font-variant-numeric: tabular-nums;
+}
+html[data-skin="roland"] #midi-emu-panel input[type="number"]:focus { border-color: var(--rol-display); }
+html[data-skin="roland"] #midi-emu-panel button:not([onclick^="toggleMIDIEmuPanel"]) {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  border-radius: 3px;
+  color: #b9b5ac;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .4);
+  transition: transform .06s ease, box-shadow .06s ease, color .12s ease;
+}
+html[data-skin="roland"] #midi-emu-panel button:not([onclick^="toggleMIDIEmuPanel"]):hover { color: var(--rol-silk); }
+html[data-skin="roland"] #midi-emu-panel button:not([onclick^="toggleMIDIEmuPanel"]):active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .5);
+}
+html[data-skin="roland"] #emu-clock-state { color: var(--rol-display-dim); }
+
+/* ── Modals ────────────────────────────────────────────────────────────── */
+
+html[data-skin="roland"] #new-macro-modal > div,
+html[data-skin="roland"] #editor-modal > div {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .04), transparent 20%),
+    var(--rol-panel);
+  border: 1px solid var(--rol-rule);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .75);
+}
+html[data-skin="roland"] #new-macro-modal input,
+html[data-skin="roland"] #new-macro-modal select {
+  background: var(--rol-well);
+  border-color: var(--rol-rule);
+  color: var(--rol-silk);
+}
+html[data-skin="roland"] #new-macro-modal input:focus,
+html[data-skin="roland"] #new-macro-modal select:focus {
+  border-color: var(--rol-display);
+  box-shadow: 0 0 0 1px rgba(255, 160, 46, .35);
+}
+html[data-skin="roland"] #new-macro-modal h2 { text-transform: uppercase; letter-spacing: .08em; }
+html[data-skin="roland"] #new-macro-error { color: var(--rol-red); }
+
+/* Config editor: a big display pane */
+html[data-skin="roland"] #editor-textarea {
+  background: var(--rol-display-bg);
+  border: 1px solid rgba(255, 160, 46, .2);
+  color: #e3d5bd;
+  caret-color: var(--rol-display);
+}
+html[data-skin="roland"] #editor-textarea:focus { border-color: var(--rol-display); }
+html[data-skin="roland"] [id^="editor-tab-"]:not([class*="bg-orange-500"]) {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .4);
+}
+html[data-skin="roland"] #editor-status { color: var(--rol-display-dim); }
+
+/* Generic secondary buttons (Cancel etc.) inside modals */
+html[data-skin="roland"] #editor-modal [class*="bg-zinc-800"],
+html[data-skin="roland"] #new-macro-modal [class*="bg-zinc-800"] {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .4);
+  color: #b9b5ac;
+}
+html[data-skin="roland"] #editor-modal [class*="bg-zinc-800"]:hover,
+html[data-skin="roland"] #new-macro-modal [class*="bg-zinc-800"]:hover { color: var(--rol-silk); }
+
+/* New Knob key + banner keys share the rubber treatment */
+html[data-skin="roland"] #knob-section button[onclick="openNewKnob()"] {
+  background: linear-gradient(180deg, #232321, #1a1a18);
+  border: 1px solid rgba(0, 0, 0, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 0 rgba(0, 0, 0, .4);
+}
+html[data-skin="roland"] #knob-section button[onclick="openNewKnob()"]:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .5);
+}
+
+/* Gear button: machined round-ish key */
+html[data-skin="roland"] [data-settings-toggle] {
+  background: linear-gradient(180deg, #262624, #1b1b19);
+  border: 1px solid rgba(0, 0, 0, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 2px 0 rgba(0, 0, 0, .5);
+}
+html[data-skin="roland"] [data-settings-toggle]:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .5);
+}
+
+/* ── Mobile — must hold at 390px, touch targets ≥ 40px ─────────────────── */
+
+@media (max-width: 768px) {
+  /* Nav contents wrap instead of overflowing the panel */
+  html[data-skin="roland"] .max-w-7xl > .bg-zinc-900.rounded-3xl,
+  html[data-skin="roland"] .max-w-7xl > .bg-zinc-900.rounded-3xl > .flex.items-center.gap-3 {
+    flex-wrap: wrap;
+    row-gap: .5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  html[data-skin="roland"] .max-w-7xl { padding: .75rem; }
+  html[data-skin="roland"] .max-w-7xl > .bg-zinc-900.rounded-3xl { padding: 1rem; }
+
+  /* Touch targets */
+  html[data-skin="roland"] .fire-btn,
+  html[data-skin="roland"] .card .grid > button:not(.fire-btn),
+  html[data-skin="roland"] [id^="knob-en-"],
+  html[data-skin="roland"] [id^="knob-cp-"],
+  html[data-skin="roland"] [id^="wiggle-btn-"],
+  html[data-skin="roland"] [id^="pulse-btn-"],
+  html[data-skin="roland"] [id^="learn-btn-"],
+  html[data-skin="roland"] .skin-btn,
+  html[data-skin="roland"] #midi-emu-panel button,
+  html[data-skin="roland"] #settings-menu button,
+  html[data-skin="roland"] .card button[onclick^="toggleDetail"] { min-height: 40px; }
+
+  html[data-skin="roland"] input[type="range"] { height: 40px; }
+  html[data-skin="roland"] input[type="range"]::-webkit-slider-thumb {
+    width: 18px;
+    height: 32px;
+    margin-top: -14px;
+  }
+  html[data-skin="roland"] input[type="range"]::-moz-range-thumb { width: 18px; height: 32px; }
+
+  html[data-skin="roland"] .card select,
+  html[data-skin="roland"] .card input:not([type="range"]):not([type="checkbox"]) { min-height: 40px; }
+
+  /* Emulator panel: fixed 360px inline width would overflow a 390px screen */
+  html[data-skin="roland"] #midi-emu-panel {
+    width: calc(100vw - 2rem) !important;
+    right: 1rem;
+  }
+}

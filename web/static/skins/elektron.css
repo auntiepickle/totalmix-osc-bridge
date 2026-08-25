@@ -1,0 +1,566 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   ELEKTRON — a machined-panel skin for the TotalMix OSC Bridge
+   ────────────────────────────────────────────────────────────────────────────
+   Inspiration : Elektron hardware (Digitakt / Octatrack / Analog Rytm MkII).
+                 Near-black machined aluminum panels, crisp rectangular
+                 geometry (2px radii), tight uppercase micro-labels, warm
+                 amber LED accents, off-white trig keys with a top-light
+                 gradient, monospaced type, 1px black inner seams under
+                 1px graphite outer edges.
+
+   Palette
+   ┌─────────────┬──────────┬───────────────────────────────────────────────┐
+   │ token       │ hex      │ role                                          │
+   ├─────────────┼──────────┼───────────────────────────────────────────────┤
+   │ --elk-bg    │ #0a0a0b  │ page ground (desk mat under the machine)      │
+   │ --elk-panel │ #17171a  │ card / panel face                             │
+   │ --elk-raise │ #202024  │ raised elements (dark keys, badges)           │
+   │ --elk-well  │ #0e0e10  │ recessed wells (inputs, detail panels)        │
+   │ --elk-lcd   │ #0d0b07  │ LCD glass behind amber readouts               │
+   │ --elk-seam  │ #2e2e33  │ outer panel edge (1px, over a 1px #000 seam)  │
+   │ --elk-amber │ #ffb000  │ THE accent — LEDs, keys, focus, readouts      │
+   │ --elk-amber2│ #ffc247  │ lit amber text / LCD digits                   │
+   │ --elk-cyan  │ #6fd3e2  │ secondary info (learn, KNOB, hold state)      │
+   │ --elk-key   │ #e8e6e0  │ off-white trig-key plastic                    │
+   │ --elk-text  │ #d6d4cf  │ body text (warm off-white)                    │
+   │ --elk-mut   │ #8a8880  │ muted labels (≈4.9:1 on panel)                │
+   │ --elk-dim   │ #7b7a72  │ micro-labels / de-emphasized (≈4.1:1)         │
+   └─────────────┴──────────┴───────────────────────────────────────────────┘
+
+   Tradeoffs / notes
+   · --elk-dim (mapped from text-zinc-600) sits at ≈4.1:1 — used only for
+     9–10px decorative micro-copy, never for content the user must read.
+   · The MIDI emulator panel has an inline width:360px; one !important
+     override caps it to the viewport below 480px (inline styles can't be
+     beaten any other way).
+   · LED dots keep their Tailwind color classes (green/red/cyan flashes from
+     app.js) but are squared to 1px radius with a black bezel via `outline`,
+     so the JS-driven glow box-shadows still land untouched.
+   · Fonts: one Google family (IBM Plex Mono) with full system-mono fallback;
+     the UI renders correctly offline on the fallback stack.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+/* ── Tokens ────────────────────────────────────────────────────────────── */
+html[data-skin="elektron"] {
+  --elk-bg:     #0a0a0b;
+  --elk-panel:  #17171a;
+  --elk-raise:  #202024;
+  --elk-well:   #0e0e10;
+  --elk-lcd:    #0d0b07;
+  --elk-seam:   #2e2e33;
+  --elk-amber:  #ffb000;
+  --elk-amber2: #ffc247;
+  --elk-cyan:   #6fd3e2;
+  --elk-key:    #e8e6e0;
+  --elk-text:   #d6d4cf;
+  --elk-mut:    #8a8880;
+  --elk-dim:    #7b7a72;
+  color-scheme: dark;              /* native selects, spinners, scrollbars */
+}
+
+/* ── Base type + ground ────────────────────────────────────────────────── */
+html[data-skin="elektron"] body {
+  font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas,
+               'Liberation Mono', Menlo, monospace;
+  background: linear-gradient(180deg, #0b0b0c 0%, #09090a 100%) fixed;
+  color: var(--elk-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+html[data-skin="elektron"] ::selection {
+  background: var(--elk-amber);
+  color: #141210;
+}
+
+/* Square geometry: every soft radius collapses to the 2px system */
+html[data-skin="elektron"] .rounded,
+html[data-skin="elektron"] .rounded-md,
+html[data-skin="elektron"] .rounded-lg,
+html[data-skin="elektron"] .rounded-xl,
+html[data-skin="elektron"] .rounded-2xl,
+html[data-skin="elektron"] .rounded-3xl {
+  border-radius: 2px;
+}
+
+/* ── Utility remaps: surfaces ──────────────────────────────────────────── */
+html[data-skin="elektron"] .bg-zinc-950            { background-color: var(--elk-well); }
+html[data-skin="elektron"] body.bg-zinc-950        { background-color: var(--elk-bg); }
+html[data-skin="elektron"] .bg-zinc-900            { background-color: var(--elk-panel); }
+html[data-skin="elektron"] .bg-zinc-900\/80,
+html[data-skin="elektron"] .bg-zinc-900\/60,
+html[data-skin="elektron"] .bg-zinc-950\/80        { background-color: rgba(11, 11, 13, 0.75); }
+html[data-skin="elektron"] .bg-zinc-800            { background-color: var(--elk-raise); }
+html[data-skin="elektron"] .bg-zinc-700            { background-color: #26262b; }
+html[data-skin="elektron"] .bg-zinc-600            { background-color: #2e2e33; }
+html[data-skin="elektron"] .hover\:bg-zinc-800:hover,
+html[data-skin="elektron"] .hover\:bg-zinc-700:hover { background-color: #26262b; }
+
+/* Seams */
+html[data-skin="elektron"] .border-zinc-700,
+html[data-skin="elektron"] .border-zinc-800,
+html[data-skin="elektron"] .border-zinc-700\/60      { border-color: var(--elk-seam); }
+html[data-skin="elektron"] .hover\:border-zinc-600:hover,
+html[data-skin="elektron"] .hover\:border-zinc-700:hover,
+html[data-skin="elektron"] .hover\:border-zinc-500:hover { border-color: #45454c; }
+html[data-skin="elektron"] .h-px.bg-zinc-800 {
+  background: linear-gradient(90deg, var(--elk-seam), rgba(46, 46, 51, 0.15));
+}
+
+/* ── Utility remaps: text ──────────────────────────────────────────────── */
+html[data-skin="elektron"] .text-white     { color: #ece9e2; }
+html[data-skin="elektron"] .text-zinc-300  { color: #c9c7c0; }
+html[data-skin="elektron"] .text-zinc-400  { color: #a5a39b; }
+html[data-skin="elektron"] .text-zinc-500  { color: var(--elk-mut); }
+html[data-skin="elektron"] .text-zinc-600  { color: var(--elk-dim); }
+html[data-skin="elektron"] .text-zinc-700  { color: #605f59; }
+html[data-skin="elektron"] .hover\:text-white:hover     { color: #f6f4ee; }
+html[data-skin="elektron"] .hover\:text-zinc-400:hover  { color: #a5a39b; }
+html[data-skin="elektron"] .hover\:text-zinc-300:hover  { color: #c9c7c0; }
+
+/* Single accent: every orange becomes machine amber */
+html[data-skin="elektron"] .text-orange-300,
+html[data-skin="elektron"] .text-orange-400,
+html[data-skin="elektron"] .text-orange-400\/80,
+html[data-skin="elektron"] .text-orange-400\/70,
+html[data-skin="elektron"] .hover\:text-orange-400:hover { color: var(--elk-amber); }
+html[data-skin="elektron"] .text-amber-400 { color: var(--elk-amber); }
+html[data-skin="elektron"] .text-amber-300 { color: #ffd98a; }
+html[data-skin="elektron"] .text-amber-200 { color: #ffe3ad; }
+html[data-skin="elektron"] .accent-orange-500 { accent-color: var(--elk-amber); }
+html[data-skin="elektron"] input[type="checkbox"] { accent-color: var(--elk-amber); }
+
+/* Secondary: cyan info channel (purple flask/LFO folds into it too) */
+html[data-skin="elektron"] .text-cyan-400,
+html[data-skin="elektron"] .text-purple-400 { color: var(--elk-cyan); }
+html[data-skin="elektron"] .bg-cyan-900\/30   { background-color: rgba(111, 211, 226, 0.08); }
+html[data-skin="elektron"] .border-cyan-800\/50 { border-color: rgba(111, 211, 226, 0.3); }
+
+/* ── Nav bar: the machine's top panel ──────────────────────────────────── */
+html[data-skin="elektron"] .max-w-7xl > .flex.items-center.justify-between.mb-8 {
+  background: linear-gradient(180deg, #1b1b1e 0%, #131316 100%);
+  border: 1px solid var(--elk-seam);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px #000, inset 0 1px 0 rgba(255, 255, 255, 0.05),
+              0 4px 18px rgba(0, 0, 0, 0.55);
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+html[data-skin="elektron"] h1.text-2xl {
+  font-size: 1.15rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: #ece9e2;
+}
+/* Power LED — the one piece of ornament this panel gets */
+html[data-skin="elektron"] h1.text-2xl::before {
+  content: '';
+  display: inline-block;
+  width: 8px; height: 8px;
+  margin-right: 12px;
+  background: var(--elk-amber);
+  border-radius: 1px;
+  outline: 1px solid rgba(0, 0, 0, 0.7);
+  box-shadow: 0 0 8px rgba(255, 176, 0, 0.75);
+  vertical-align: 6%;
+}
+
+/* Uppercase micro-labels: tighter, printed-on-panel look */
+html[data-skin="elektron"] .uppercase.tracking-widest {
+  letter-spacing: 0.16em;
+}
+
+/* ── Panels: cards, menus, modals, emulator ────────────────────────────── */
+html[data-skin="elektron"] .card {
+  background: linear-gradient(180deg, #19191c 0%, #141417 100%);
+  border: 1px solid var(--elk-seam);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px #000, inset 0 1px 0 rgba(255, 255, 255, 0.045),
+              0 2px 10px rgba(0, 0, 0, 0.45);
+}
+html[data-skin="elektron"] .card:hover { border-color: #3c3c42; }
+
+html[data-skin="elektron"] #settings-menu,
+html[data-skin="elektron"] #midi-emu-panel,
+html[data-skin="elektron"] #new-macro-modal > div,
+html[data-skin="elektron"] #editor-modal > div {
+  background: linear-gradient(180deg, #1b1b1e 0%, #141417 100%);
+  border: 1px solid #38383e;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px #000, inset 0 1px 0 rgba(255, 255, 255, 0.05),
+              0 16px 40px rgba(0, 0, 0, 0.7);
+}
+html[data-skin="elektron"] #settings-menu button:hover { background-color: #26262b; }
+
+/* Macro name: silkscreened key legend */
+html[data-skin="elektron"] .card h3 {
+  color: #ece9e2;
+  letter-spacing: 0.03em;
+}
+html[data-skin="elektron"] .routing-label {
+  color: var(--elk-amber);
+  letter-spacing: 0.06em;
+}
+
+/* ── LEDs: square, bezeled, glow preserved ─────────────────────────────── */
+/* app.js swaps bg-*/shadow-[...] classes on these; outline gives them a
+   machined bezel without ever touching the JS-driven glow box-shadows. */
+html[data-skin="elektron"] span[id^="led-dot-"],
+html[data-skin="elektron"] span[id^="group-led-dot-"],
+html[data-skin="elektron"] #midi-status-dot,
+html[data-skin="elektron"] #mqtt-health-dot,
+html[data-skin="elektron"] #osc-health-dot {
+  border-radius: 1px;
+  outline: 1px solid rgba(0, 0, 0, 0.65);
+}
+
+/* ── Progress bar: amber sweep in a recessed groove ────────────────────── */
+html[data-skin="elektron"] .card .h-1.bg-zinc-800 {
+  background-color: #0b0b0c;
+  border-radius: 1px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.7), 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+html[data-skin="elektron"] [id^="progress-bar-"] {
+  background: linear-gradient(90deg, #f0a300, var(--elk-amber));
+  box-shadow: 0 0 6px rgba(255, 176, 0, 0.55);
+}
+
+/* ── Trig keys: FIRE (off-white) and RAMP (dark key) ───────────────────── */
+html[data-skin="elektron"] .fire-btn,
+html[data-skin="elektron"] .card .grid.grid-cols-3 > button {
+  border-radius: 2px;
+  border: 1px solid #000;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+}
+
+html[data-skin="elektron"] button.fire-btn.bg-zinc-800, html[data-skin="elektron"] .fire-btn {
+  background: linear-gradient(180deg, #f4f2ec 0%, #e6e3db 55%, #dad7ce 100%);
+  color: #17140e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
+              inset 0 -2px 0 rgba(0, 0, 0, 0.14),
+              0 2px 0 #000, 0 3px 7px rgba(0, 0, 0, 0.5);
+  font-weight: 700;
+}
+html[data-skin="elektron"] button.fire-btn.bg-zinc-800:hover, html[data-skin="elektron"] .fire-btn:hover {
+  background: linear-gradient(180deg, #fbf9f4 0%, #efece4 55%, #e2dfd6 100%);
+  color: #17140e;
+  border-color: #000;
+}
+html[data-skin="elektron"] button.fire-btn.bg-zinc-800:active, html[data-skin="elektron"] .fire-btn:active {
+  transform: translateY(2px);
+  background: linear-gradient(180deg, #ddd9d0 0%, #d2cfc6 100%);
+  color: #17140e;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3), 0 0 0 1px #000,
+              0 0 12px rgba(255, 176, 0, 0.35);
+}
+
+html[data-skin="elektron"] .card .grid.grid-cols-3 > button:not(.fire-btn) {
+  background: linear-gradient(180deg, #2c2c31 0%, #1e1e22 100%);
+  color: #b7b5ae;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08),
+              inset 0 -2px 0 rgba(0, 0, 0, 0.3),
+              0 2px 0 #000, 0 3px 7px rgba(0, 0, 0, 0.45);
+}
+html[data-skin="elektron"] .card .grid.grid-cols-3 > button:not(.fire-btn):hover {
+  background: linear-gradient(180deg, #34343a 0%, #26262b 100%);
+  color: #e2e0d9;
+}
+html[data-skin="elektron"] .card .grid.grid-cols-3 > button:not(.fire-btn):active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45), 0 0 0 1px #000;
+}
+
+/* ── Amber keys: New Macro, Save, Create, banner actions, active tabs ──── */
+html[data-skin="elektron"] button.bg-orange-500,
+html[data-skin="elektron"] button.bg-amber-500 {
+  background: linear-gradient(180deg, #ffc233 0%, var(--elk-amber) 55%, #ec9f00 100%);
+  color: #141210;
+  border: 1px solid #000;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55),
+              inset 0 -2px 0 rgba(0, 0, 0, 0.18),
+              0 2px 0 #000, 0 0 10px rgba(255, 176, 0, 0.18);
+  letter-spacing: 0.06em;
+}
+html[data-skin="elektron"] button.bg-orange-500:hover,
+html[data-skin="elektron"] button.bg-amber-500:hover {
+  background: linear-gradient(180deg, #ffd061 0%, #ffbb1f 55%, #f5a800 100%);
+  color: #141210;
+}
+html[data-skin="elektron"] button.bg-orange-500:active,
+html[data-skin="elektron"] button.bg-amber-500:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3), 0 0 0 1px #000,
+              0 0 12px rgba(255, 176, 0, 0.3);
+}
+
+/* Dark machined keys: every raised bg-zinc-800 button (emulator, chips,
+   New Knob, skin buttons, editor cancels, mode cards…) */
+html[data-skin="elektron"] button.bg-zinc-800 {
+  background: linear-gradient(180deg, #26262b 0%, #1c1c20 100%);
+  border-color: #000;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 0 #000;
+}
+html[data-skin="elektron"] button.bg-zinc-800:hover {
+  background: linear-gradient(180deg, #2d2d33 0%, #222227 100%);
+}
+html[data-skin="elektron"] button.bg-zinc-800:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Inputs / selects / textarea: recessed wells ───────────────────────── */
+html[data-skin="elektron"] select,
+html[data-skin="elektron"] textarea,
+html[data-skin="elektron"] input:not([type="range"]):not([type="checkbox"]):not([type="file"]) {
+  background-color: var(--elk-well);
+  border: 1px solid #050506;
+  border-radius: 2px;
+  color: var(--elk-text);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(255, 255, 255, 0.045);
+  font-family: inherit;
+}
+html[data-skin="elektron"] .focus\:border-orange-400:focus,
+html[data-skin="elektron"] .focus\:border-orange-400\/60:focus {
+  border-color: var(--elk-amber);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 176, 0, 0.35);
+}
+html[data-skin="elektron"] select option { background-color: var(--elk-well); }
+
+/* Config editor: amber phosphor on LCD glass */
+html[data-skin="elektron"] #editor-textarea {
+  background-color: var(--elk-lcd);
+  color: #ffcf6e;
+  caret-color: var(--elk-amber);
+  text-shadow: 0 0 4px rgba(255, 176, 0, 0.2);
+}
+
+/* ── Range sliders: machined groove + fader cap ────────────────────────── */
+html[data-skin="elektron"] input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 22px;
+  cursor: ew-resize;
+}
+html[data-skin="elektron"] input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #0a0a0b;
+  border: 1px solid #000;
+  border-radius: 1px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+html[data-skin="elektron"] input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 18px;
+  margin-top: -7px;
+  border: 1px solid #000;
+  border-radius: 1px;
+  /* off-white cap with a dark index line down the middle */
+  background:
+    linear-gradient(90deg, transparent 0 5px, rgba(20, 18, 14, 0.85) 5px 8px, transparent 8px),
+    linear-gradient(180deg, #f2f0ea 0%, #dcd9d0 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 2px 4px rgba(0, 0, 0, 0.55);
+}
+html[data-skin="elektron"] input[type="range"]:hover::-webkit-slider-thumb {
+  background:
+    linear-gradient(90deg, transparent 0 5px, rgba(20, 18, 14, 0.85) 5px 8px, transparent 8px),
+    linear-gradient(180deg, #fbf9f4 0%, #e4e1d8 100%);
+}
+html[data-skin="elektron"] input[type="range"]:active::-webkit-slider-thumb {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85),
+              0 1px 2px rgba(0, 0, 0, 0.55), 0 0 8px rgba(255, 176, 0, 0.4);
+}
+html[data-skin="elektron"] input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--elk-amber);
+}
+html[data-skin="elektron"] input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: #0a0a0b;
+  border: 1px solid #000;
+  border-radius: 1px;
+}
+html[data-skin="elektron"] input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 16px;
+  border: 1px solid #000;
+  border-radius: 1px;
+  background:
+    linear-gradient(90deg, transparent 0 4px, rgba(20, 18, 14, 0.85) 4px 7px, transparent 7px),
+    linear-gradient(180deg, #f2f0ea 0%, #dcd9d0 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 2px 4px rgba(0, 0, 0, 0.55);
+}
+html[data-skin="elektron"] input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--elk-amber);
+}
+
+/* Companion mini-sliders: smaller dark caps — clearly secondary controls */
+html[data-skin="elektron"] input[id^="knob-cps-"]::-webkit-slider-thumb {
+  width: 10px;
+  height: 14px;
+  margin-top: -5px;
+  background:
+    linear-gradient(90deg, transparent 0 3.5px, rgba(255, 176, 0, 0.8) 3.5px 6px, transparent 6px),
+    linear-gradient(180deg, #3a3a40 0%, #26262b 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+html[data-skin="elektron"] input[id^="knob-cps-"]::-moz-range-thumb {
+  width: 9px;
+  height: 13px;
+  background:
+    linear-gradient(90deg, transparent 0 3px, rgba(255, 176, 0, 0.8) 3px 5px, transparent 5px),
+    linear-gradient(180deg, #3a3a40 0%, #26262b 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+/* ── Readouts: amber LCD windows ───────────────────────────────────────── */
+html[data-skin="elektron"] span[id^="knob-val-"],
+html[data-skin="elektron"] span[id^="knob-cpv-"],
+html[data-skin="elektron"] span[id^="val-label-"],
+html[data-skin="elektron"] span[id^="mod-lo-"],
+html[data-skin="elektron"] span[id^="mod-hi-"],
+html[data-skin="elektron"] span[id^="mod-thr-"],
+html[data-skin="elektron"] #emu-val-label {
+  background: var(--elk-lcd);
+  color: var(--elk-amber2);
+  border: 1px solid #000;
+  border-radius: 1px;
+  padding: 2px 0;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 0 5px rgba(255, 176, 0, 0.35);
+}
+html[data-skin="elektron"] div[id^="knob-dev-"] { letter-spacing: 0.04em; }
+
+/* ── Chips: enable switch + companion cyclers ──────────────────────────── */
+html[data-skin="elektron"] button[id^="knob-en-"],
+html[data-skin="elektron"] button[id^="knob-cp-"] {
+  border-radius: 2px;
+  letter-spacing: 0.08em;
+  border-color: #000;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 0 #000;
+}
+/* Section ON = lit amber LED chip (ui.js marks it text-green-400) */
+html[data-skin="elektron"] button[id^="knob-en-"].text-green-400 {
+  background: linear-gradient(180deg, #33260a 0%, #241a05 100%);
+  border-color: rgba(255, 176, 0, 0.55);
+  color: var(--elk-amber);
+  text-shadow: 0 0 6px rgba(255, 176, 0, 0.55);
+  box-shadow: inset 0 0 6px rgba(255, 176, 0, 0.12), 0 0 8px rgba(255, 176, 0, 0.2);
+}
+html[data-skin="elektron"] button[id^="knob-en-"].text-green-400:hover { color: #ffc247; }
+
+/* ── Detail panels + editors: recessed service bay ─────────────────────── */
+html[data-skin="elektron"] div[id^="detail-"] {
+  background-color: var(--elk-well);
+  border: 1px solid #000;
+  border-radius: 2px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+html[data-skin="elektron"] div[id^="detail-"] pre {
+  background: var(--elk-lcd);
+  color: #d9b96a;
+  border-color: #000;
+}
+/* LIVE tag: keep it green but phosphor-flavored */
+html[data-skin="elektron"] .text-emerald-500\/90 { color: #7ddc8f; }
+
+/* ── Banners: printed warning strips ───────────────────────────────────── */
+html[data-skin="elektron"] .bg-amber-950\/60 {
+  background-color: rgba(38, 26, 5, 0.8);
+  border-left: 3px solid var(--elk-amber);
+}
+html[data-skin="elektron"] .border-amber-700\/60 { border-color: rgba(255, 176, 0, 0.35); }
+html[data-skin="elektron"] .bg-amber-900\/40     { background-color: rgba(255, 176, 0, 0.12); }
+html[data-skin="elektron"] .bg-red-900\/20 {
+  background-color: rgba(40, 10, 10, 0.7);
+  border-left: 3px solid #e5484d;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+html[data-skin="elektron"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+html[data-skin="elektron"] ::-webkit-scrollbar-track { background: var(--elk-bg); }
+html[data-skin="elektron"] ::-webkit-scrollbar-thumb {
+  background: #2c2c31;
+  border: 2px solid var(--elk-bg);
+  border-radius: 0;
+}
+html[data-skin="elektron"] ::-webkit-scrollbar-thumb:hover { background: #45454c; }
+html[data-skin="elektron"] ::-webkit-scrollbar-corner { background: var(--elk-bg); }
+
+/* ── Focus: one visible amber ring everywhere ──────────────────────────── */
+html[data-skin="elektron"] :is(button, select, a, summary, [tabindex]):focus-visible {
+  outline: 1px solid var(--elk-amber);
+  outline-offset: 2px;
+}
+html[data-skin="elektron"] :is(input, textarea):focus-visible {
+  outline: 1px solid rgba(255, 176, 0, 0.5);
+  outline-offset: 0;
+}
+
+/* ── Mobile: ≤480px — keep keys and chips finger-sized ─────────────────── */
+@media (max-width: 480px) {
+  html[data-skin="elektron"] .max-w-7xl { padding: 0.875rem; }
+
+  /* nav clusters wrap instead of overflowing the 390px panel */
+  html[data-skin="elektron"] .max-w-7xl > .flex.items-center.justify-between.mb-8 {
+    padding: 1rem;
+  }
+  html[data-skin="elektron"] .max-w-7xl > .flex.items-center.justify-between.mb-8 .flex.items-center.gap-3 {
+    flex-wrap: wrap;
+  }
+
+  /* trig keys: ≥44px targets */
+  html[data-skin="elektron"] .fire-btn,
+  html[data-skin="elektron"] .card .grid.grid-cols-3 > button {
+    min-height: 44px;
+  }
+
+  /* chips + editor micro-buttons: ≥40px targets */
+  html[data-skin="elektron"] button[id^="knob-en-"],
+  html[data-skin="elektron"] button[id^="knob-cp-"] {
+    min-height: 40px;
+    padding: 0.5rem 0.75rem;
+  }
+  html[data-skin="elektron"] button[id^="wiggle-btn-"],
+  html[data-skin="elektron"] button[id^="pulse-btn-"],
+  html[data-skin="elektron"] button[id^="learn-btn-"] {
+    min-height: 40px;
+  }
+
+  /* bigger fader caps for thumbs */
+  html[data-skin="elektron"] input[type="range"] { height: 28px; }
+  html[data-skin="elektron"] input[type="range"]::-webkit-slider-thumb {
+    width: 18px;
+    height: 24px;
+    margin-top: -10px;
+  }
+  html[data-skin="elektron"] input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 22px;
+  }
+
+  /* emulator panel has an inline width:360px — cap it to the viewport
+     (inline style; !important is the only lever) */
+  html[data-skin="elektron"] #midi-emu-panel {
+    width: calc(100vw - 2rem) !important;
+  }
+}
+
+/* ── Reduced motion: mechanical, not animated ──────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="elektron"] *,
+  html[data-skin="elektron"] *::before,
+  html[data-skin="elektron"] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  html[data-skin="elektron"] .fire-btn:active,
+  html[data-skin="elektron"] button:active { transform: none; }
+}
