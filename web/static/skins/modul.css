@@ -604,7 +604,28 @@ html[data-skin="modul"] .mwave {
   margin-bottom: 0.6rem;
   overflow: hidden;
 }
+html[data-skin="modul"] .mwave { position: relative; }
 html[data-skin="modul"] .mwave .u-legend { display: none; }
+
+/* the wave readout: travel range at rest, LIVE VALUE while running */
+html[data-skin="modul"] .mwave-val {
+  position: absolute;
+  top: 5px; right: 8px;
+  z-index: 1;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--mo-dim);
+  background: rgba(14, 15, 17, 0.75);
+  padding: 1px 5px;
+  border-radius: 2px;
+  pointer-events: none;
+  transition: color var(--mo-fast);
+}
+html[data-skin="modul"] .mwave-val.live {
+  color: var(--mo-sig);
+  font-weight: 600;
+}
 
 /* uPlot theme inside the glass */
 html[data-skin="modul"] .mg-wrap .u-legend { display: none; }

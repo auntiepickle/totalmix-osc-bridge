@@ -89,12 +89,36 @@ function _onWSMessage(event) {
   if (data.macro_event && data.macro_event.type === 'knob_update') {
     const ev = data.macro_event;
     if (macros[ev.name]) {
-      if (ev.value != null) macros[ev.name].knob_value = ev.value;
+      // Echo guard (#knob jump-back): while OUR writes are still in flight,
+      // write-sourced broadcasts (midi/api = the WS knob stream, i.e. our
+      // own drag echoes) can lag the throttle and arrive AFTER release
+      // carrying values we already moved past. Our last-sent value wins
+      // until the server echoes it back (match -> in sync) or an
+      // authoritative read (readback/device/hold/fire) supersedes it.
+      // Value-matching only — no timers, no sleeps; the server's
+      // trailing-edge broadcast guarantees the matching echo arrives.
+      const echo = window._knobEcho ? window._knobEcho[ev.name] : null;
+      const isWriteEcho = ev.source === 'midi' || ev.source === 'api' || ev.source === 'ui';
+      let staleEcho = false;
+      if (echo != null && ev.value != null) {
+        if (!isWriteEcho || Math.abs(ev.value - echo) <= 0.0005) {
+          delete window._knobEcho[ev.name];      // caught up / superseded
+        } else {
+          staleEcho = true;                       // behind our own stream
+        }
+      }
+      if (ev.value != null && !staleEcho) macros[ev.name].knob_value = ev.value;
       macros[ev.name].device_value = ev.device_value;
       // device-side change (someone moved TotalMix): the screen slider
-      // follows the mixer - it is a window, not a motor fight
+      // follows the mixer - it is a window, not a motor fight.
+      // device_value is param-norm; the knob position is knob-norm, so
+      // inverse-map through the knob's range (raw assign showed a wrong
+      // position on bounded knobs).
       if (ev.source === 'device' && ev.device_value != null) {
-        macros[ev.name].knob_value = ev.device_value;
+        const dstep = _knobStepOf(macros[ev.name]);
+        macros[ev.name].knob_value = dstep
+          ? _knobNormOf({ device_value: ev.device_value }, dstep.operation)
+          : ev.device_value;
       }
       if ('enable_value' in ev) macros[ev.name].enable_value = ev.enable_value;
       if (ev.companions) macros[ev.name].companions = ev.companions;
@@ -146,6 +170,7 @@ try { const s = localStorage.getItem('uiSkin'); if (s) applySkin(s); } catch (_)
 async function loadMacros() {
   try {
     macros = await API.getMacros();
+    window._knobEcho = {};   // full re-sync: no stale echo suppression
     console.log(`[UI] Loaded ${Object.keys(macros).length} macros`);
     renderCards();
     updateStatusHeader();
@@ -284,6 +309,7 @@ function updateLastFired() {
 // one in-flight write per knob and zero HTTP round-trips (WS when open,
 // POST fallback otherwise).
 window._knobPending = {};
+window._knobEcho = {};   // name -> last value THIS client sent (echo guard)
 let _knobFlushTimer = null;
 
 window.sendKnob = function (name, value) {
@@ -294,6 +320,7 @@ window.sendKnob = function (name, value) {
     const pending = window._knobPending;
     window._knobPending = {};
     Object.entries(pending).forEach(([n, v]) => {
+      window._knobEcho[n] = v;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'knob', name: n, value: v }));
       } else {

@@ -360,11 +360,15 @@ function _modulModel(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
   const taper = _MODUL_TAPER[param];
   if (!taper) return null;                       // non-frequency knob: no graph
-  // device_value is already param-norm (0..1 across the full taper);
-  // knob_value is knob-norm and must go through the range shaping first
+  // knob_value (knob-norm, shaped through the range) is the display
+  // authority: it is the commanded state, updated by every write AND by
+  // device-side changes (the handler inverse-maps those into knob-norm).
+  // device_value is param-norm and only fresh after a readback — using it
+  // first made the curve snap back to stale device state right after a
+  // drag (#knob jump-back). It remains the fallback before any state.
   const dv = parseFloat(m.device_value), kv = parseFloat(m.knob_value);
-  const t = Number.isFinite(dv) ? dv
-          : _shapeKnob(Number.isFinite(kv) ? kv : 0, step.operation);
+  const t = Number.isFinite(kv) ? _shapeKnob(Math.max(0, Math.min(1, kv)), step.operation)
+          : Number.isFinite(dv) ? dv : 0;
   const f = taper[0] * Math.pow(taper[1] / taper[0], Math.max(0, Math.min(1, t)));
   const comps = m.companions || {};
   const model = { f, enabled: m.enable_value !== false };
@@ -595,6 +599,22 @@ function _modulWaveStepsOf(m, knobStep) {
     .slice(0, 2);   // cap: a card is a key, not a rack
 }
 
+// Value formatter for a wave step: real units when the param is known
+// (Hz, dB, ...), honest percent otherwise (generic sends).
+function _mwaveFmt(step) {
+  const def = PARAM_DEFS[((step || {}).target || {}).param];
+  return def && def.fmt ? (v => def.fmt(v)) : (v => Math.round(v * 100) + '%');
+}
+// Idle text: the step's travel. One-way ramps park at the destination
+// (arrow); triangles and LFOs come back (double arrow).
+function _mwaveIdleText(step) {
+  const op = (step || {}).operation || {};
+  const rng = Array.isArray(op.range) ? op.range.map(Number) : [0, 1];
+  const fmt = _mwaveFmt(step);
+  const arrow = (op.type === 'ramp' && op.curve === 'linear') ? ' → ' : ' ⇄ ';
+  return fmt(rng[0]) + arrow + fmt(rng[1] ?? 1);
+}
+
 function _modulWireWaves() {
   if (document.documentElement.getAttribute('data-skin') !== 'modul' || !window.ModulGraph) return;
   Object.keys(macros).forEach(name => {
@@ -625,8 +645,8 @@ function createMacroCardHTML(name, m) {
         <p class="routing-label text-orange-400/80 text-[11px] font-medium tracking-wide">${_esc(routingLabel)}</p>
         <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     </div>
-    ${_modulWaveStepsOf(m, knobStep).map(({ i }) =>
-      `<div id="mwave-${name}-${i}" class="mwave"></div>`).join('')}
+    ${_modulWaveStepsOf(m, knobStep).map(({ s, i }) =>
+      `<div id="mwave-${name}-${i}" class="mwave"><span id="mwaveval-${name}-${i}" class="mwave-val">${_mwaveIdleText(s)}</span></div>`).join('')}
     <!-- Progress bar -->
     <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3${knobStep ? ' hidden' : ''}">
       <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
@@ -752,7 +772,21 @@ window.addEventListener('resize', equalizeCardHeights);
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
 function animateProgress(name, durationMs) {
-  _modulWaveKeys(name).forEach(k => ModulGraph.waveformRun(k, durationMs));
+  _modulWaveKeys(name).forEach(({ key, i }) => {
+    const step = ((macros[name] || {}).steps || [])[i];
+    const lbl = document.getElementById(`mwaveval-${name}-${i}`);
+    const fmt = _mwaveFmt(step);
+    ModulGraph.waveformRun(key, durationMs, (t, v) => {
+      if (!lbl) return;
+      if (v == null) {
+        lbl.textContent = _mwaveIdleText(step);
+        lbl.classList.remove('live');
+      } else {
+        lbl.textContent = fmt(v);
+        lbl.classList.add('live');
+      }
+    });
+  });
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
   bar.style.transition = 'none';
@@ -763,18 +797,21 @@ function animateProgress(name, durationMs) {
 }
 
 function snapProgressToZero(name) {
-  _modulWaveKeys(name).forEach(k => ModulGraph.waveformStop(k));
+  _modulWaveKeys(name).forEach(({ key }) => ModulGraph.waveformStop(key));
   const bar = document.getElementById(`progress-bar-${name}`);
   if (!bar) return;
   bar.style.transition = 'none';
   bar.style.width = '0%';
 }
 
-// The wave plots on a card, by engine key (empty outside MODUL)
+// The wave plots on a card: engine key + step index (empty outside MODUL)
 function _modulWaveKeys(name) {
   if (!window.ModulGraph) return [];
-  return [...document.querySelectorAll(`[id^="mwave-${name}-"]`)]
-    .map(el => `w:${name}:${el.id.slice(`mwave-${name}-`.length)}`);
+  return [...document.querySelectorAll(`div[id^="mwave-${name}-"]`)]
+    .map(el => {
+      const i = el.id.slice(`mwave-${name}-`.length);
+      return { key: `w:${name}:${i}`, i: parseInt(i, 10) };
+    });
 }
 
 // ── Fire macro ────────────────────────────────────────────────────────────────

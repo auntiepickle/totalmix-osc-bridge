@@ -225,18 +225,24 @@
     if (st) { st.model = op; st.u.setData(opSamples(op)); }
   }
 
-  // Animate the playhead across one run. Reduced-motion: no playhead.
-  function waveformRun(key, durationMs) {
+  // Animate the playhead across one run. onTick(t, value) fires every frame
+  // with the operation's CURRENT value (0..1 param-norm) so the shell can
+  // show a live readout; onTick(null, null) marks the end (or a stop).
+  // Reduced-motion: no playhead, no ticks.
+  function waveformRun(key, durationMs, onTick) {
     const st = plots[key];
     if (!st || !durationMs || durationMs <= 0) return;
     if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     cancelAnimationFrame(st.anim);
+    st.onTick = onTick || null;
+    const shape = opShape(st.model);
     const t0 = performance.now();
     const step = now => {
       const t = (now - t0) / durationMs;
       if (t >= 1 || !plots[key]) { waveformStop(key); return; }
       st.progress = t;
       st.u.redraw();
+      if (st.onTick) st.onTick(t, shape(t));
       st.anim = requestAnimationFrame(step);
     };
     st.anim = requestAnimationFrame(step);
@@ -246,6 +252,7 @@
     if (!st) return;
     cancelAnimationFrame(st.anim);
     if (st.progress != null) { st.progress = null; st.u.redraw(); }
+    if (st.onTick) { st.onTick(null, null); st.onTick = null; }
   }
 
   function destroy(key) {

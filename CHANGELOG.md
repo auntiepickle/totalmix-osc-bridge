@@ -25,6 +25,18 @@
   bars x rate x depth), with a playhead riding the curve in sync with the
   progress bar during a run. MODUL skin only; reduced-motion skips the
   playhead.
+- **Wave readouts**: each ramp/LFO plot shows its travel at rest and the
+  live value (real units when the param is known, percent otherwise) while
+  the playhead runs.
+- **Fixed: knob jumps back after a drag.** Three causes, all ordering:
+  the 10 Hz broadcast throttle dropped a drag's final value (server now
+  arms a trailing-edge flush so the last value always broadcasts); stale
+  echoes of the client's own write stream landed after release (the client
+  now holds its last-sent value until the server echoes it back or an
+  authoritative read supersedes it - value matching, no timers); and the
+  curve display preferred device_value, which is only fresh after the
+  400 ms readback (knob-norm value is now the single display authority,
+  with device-side changes inverse-mapped through the knob range).
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

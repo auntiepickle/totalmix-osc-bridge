@@ -90,6 +90,73 @@ def test_knob_refuses_under_classic(rig, monkeypatch):
     assert b.macro_health["locut"]["status"] == "skipped"
 
 
+def test_knob_stream_never_drops_final_value(rig):
+    """#knob jump-back: rapid ticks inside the 10 Hz throttle window must
+    still end with a broadcast carrying the FINAL value — a trailing-edge
+    flush fires when the window closes, so no client is left showing a
+    value the server has moved past."""
+    import time as _time
+    b, g, _ = rig({"locut": KNOB})
+    b.knob_set("locut", 0.2)              # broadcasts immediately
+    first = [e for e in b.events if (e["event"] or {}).get("type") == "knob_update"]
+    assert first and first[-1]["event"]["value"] == 0.2
+    b.knob_set("locut", 0.4)              # throttled -> trailing timer armed
+    b.knob_set("locut", 0.9)              # still throttled; final value
+    mid = [e for e in b.events if (e["event"] or {}).get("type") == "knob_update"]
+    assert mid[-1]["event"]["value"] == 0.2       # nothing new broadcast yet
+    assert b._knob_trailing_timers.get("locut") is not None
+    deadline = _time.time() + 1.0
+    while _time.time() < deadline:                # wait for the flush timer
+        evs = [e for e in b.events if (e["event"] or {}).get("type") == "knob_update"]
+        if evs[-1]["event"]["value"] == 0.9:
+            break
+        _time.sleep(0.01)
+    evs = [e for e in b.events if (e["event"] or {}).get("type") == "knob_update"]
+    assert evs[-1]["event"]["value"] == 0.9       # trailing edge carried it
+    assert b._knob_trailing_timers.get("locut") is None
+
+
+def test_knob_trailing_flush_cancelled_by_regular_broadcast(rig, monkeypatch):
+    """A write that lands after the throttle window broadcasts normally and
+    disarms the pending trailing flush (no duplicate events)."""
+    b, g, _ = rig({"locut": KNOB})
+    b.knob_set("locut", 0.2)
+    b.knob_set("locut", 0.4)              # throttled -> trailing armed
+    assert b._knob_trailing_timers.get("locut") is not None
+    # next write is outside the window: force the clock forward
+    b._knob_last_broadcast["locut"] -= b.KNOB_BROADCAST_INTERVAL_S + 0.01
+    b.knob_set("locut", 0.7)              # regular broadcast, cancels trailing
+    assert b._knob_trailing_timers.get("locut") is None
+    evs = [e for e in b.events if (e["event"] or {}).get("type") == "knob_update"]
+    assert evs[-1]["event"]["value"] == 0.7
+
+
+def test_knob_trailing_flush_survives_unresolved_status(rig, monkeypatch):
+    """The trailing flush runs in a timer thread: with no Global transport
+    (status knob_needs_global) it must still broadcast the final value —
+    device fields gated to None — instead of dying on a device read."""
+    import time as _time
+    b, g, _ = rig({"locut": KNOB})
+    monkeypatch.setattr(bridge_module, "OSC_TRANSPORT", "classic")
+    b.knob_set("locut", 0.2)              # broadcasts (status unresolved)
+    before = len(b.events)
+    b.knob_set("locut", 0.9)              # throttled -> trailing armed
+    assert b._knob_trailing_timers.get("locut") is not None
+    deadline = _time.time() + 1.0
+    while _time.time() < deadline and len(b.events) == before:
+        _time.sleep(0.01)                 # wait for the flush to fire
+    assert len(b.events) > before         # it fired (did not die in the timer)
+    ev = b.events[-1]["event"]
+    assert ev["type"] == "knob_update"
+    assert ev["status"] == "knob_needs_global"
+    # unresolved: value is untracked (existing knob_set behavior) and every
+    # device field is gated to its empty form
+    assert ev["value"] is None
+    assert ev["device_value"] is None and ev["enable_value"] is None
+    assert ev["companions"] == {}
+    assert b._knob_trailing_timers.get("locut") is None
+
+
 def test_knob_set_rejects_non_knob(rig):
     b, g, _ = rig({"vol": {"steps": [{"osc": "/1/volume1", "value": 1.0}]}})
     assert b.knob_set("vol", 0.5)["status"] == "not_a_knob"

@@ -147,6 +147,7 @@ class TotalMixOSCBridge:
         self.knob_values = {}
         self._knob_last_status = {}     # name -> last resolve status (log on change)
         self._knob_last_broadcast = {}  # name -> ts (UI updates throttled ~10Hz)
+        self._knob_trailing_timers = {}  # name -> Timer (trailing-edge flush)
         self._knob_readback_timers = {} # name -> Timer (settle readback)
         self._knob_last_pushed = {}     # name -> snapshot tuple (device-sync differ)
         self._knob_watch_stop = threading.Event()
@@ -2068,6 +2069,9 @@ class TotalMixOSCBridge:
                 self._record_fire(macro_name, "skipped", status)
         now = time.time()
         if now - self._knob_last_broadcast.get(macro_name, 0) >= self.KNOB_BROADCAST_INTERVAL_S:
+            prev_trailing = self._knob_trailing_timers.pop(macro_name, None)
+            if prev_trailing:
+                prev_trailing.cancel()
             self._knob_last_broadcast[macro_name] = now
             if status == "resolved":
                 self._knob_last_pushed[macro_name] = self._knob_snapshot(step)
@@ -2079,7 +2083,46 @@ class TotalMixOSCBridge:
                 "companions": self.knob_companions(step) if status == "resolved" else {},
                 "source": source,
             })
+        else:
+            # Throttled — but a knob stream must NEVER drop its final value:
+            # the last tick of a drag would otherwise never broadcast, and
+            # every browser (including the dragger, whose stale echo then
+            # lands after release) would show a value the server has already
+            # moved past. Arm a trailing-edge flush that broadcasts CURRENT
+            # state when the throttle window closes. (#user report: knob
+            # jumps back a little after a drag.)
+            self._schedule_knob_trailing(macro_name, step, source)
         return {"status": status, "value": self.knob_values.get(macro_name)}
+
+    def _schedule_knob_trailing(self, name, step, source):
+        if self._knob_trailing_timers.get(name):
+            return   # one armed already; it reads live state when it fires
+        delay = max(0.01, self.KNOB_BROADCAST_INTERVAL_S
+                    - (time.time() - self._knob_last_broadcast.get(name, 0)))
+
+        def _flush():
+            try:
+                self._knob_trailing_timers.pop(name, None)
+                self._knob_last_broadcast[name] = time.time()
+                status = self._knob_last_status.get(name, "resolved")
+                resolved = status == "resolved"
+                if resolved:
+                    self._knob_last_pushed[name] = self._knob_snapshot(step)
+                self.broadcast_state(macro_event={
+                    "type": "knob_update", "name": name, "status": status,
+                    "value": self.knob_values.get(name),
+                    "device_value": self.knob_device_value(step) if resolved else None,
+                    "enable_value": self.knob_enable_state(step) if resolved else None,
+                    "companions": self.knob_companions(step) if resolved else {},
+                    "source": source,
+                })
+            except Exception as e:
+                logger.debug(f"knob trailing flush for {name} failed: {e}")
+
+        t = threading.Timer(delay, _flush)
+        t.daemon = True
+        self._knob_trailing_timers[name] = t
+        t.start()
 
     KNOB_READBACK_DELAY_S = 0.4
 
