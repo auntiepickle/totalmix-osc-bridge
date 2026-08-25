@@ -35,6 +35,31 @@
       const r = f / fc;
       return -10 * Math.log10(Math.max(Math.pow(1 - r * r, 2) + Math.pow(r / q, 2), 1e-9));
     }
+    if (model.kind === 'highpass-q') {           // resonant HP (EQ band type)
+      const q = Math.max(0.1, model.q || 0.7);
+      const r = f / fc;
+      return 10 * Math.log10(Math.max(Math.pow(r, 4) /
+        Math.max(Math.pow(1 - r * r, 2) + Math.pow(r / q, 2), 1e-12), 1e-9));
+    }
+    if (model.kind === 'bell') {                 // RBJ peaking, analog prototype
+      const A = Math.pow(10, (model.gain || 0) / 40);
+      const q = Math.max(0.1, model.q || 0.7);
+      const r = f / fc, w = 1 - r * r;
+      return 10 * Math.log10(
+        (w * w + Math.pow(r * A / q, 2)) /
+        Math.max(w * w + Math.pow(r / (A * q), 2), 1e-12));
+    }
+    if (model.kind === 'shelf-hi' || model.kind === 'shelf-lo') {
+      const A = Math.pow(10, (model.gain || 0) / 40);
+      const q = Math.max(0.3, model.q || 0.7);
+      const r = f / fc, sq = Math.sqrt(A) / q * r;
+      const hi = model.kind === 'shelf-hi';
+      const num = hi ? Math.pow(1 - A * r * r, 2) + sq * sq
+                     : Math.pow(A - r * r, 2) + sq * sq;
+      const den = hi ? Math.pow(A - r * r, 2) + sq * sq
+                     : Math.pow(1 - A * r * r, 2) + sq * sq;
+      return 10 * Math.log10(Math.max(A * A * num / Math.max(den, 1e-12), 1e-9));
+    }
     return 0;
   }
   const ys = (model, mix) => XS.map(f => magDb(model, f) * mix);
@@ -102,15 +127,32 @@
         const f = u.posToVal(Math.max(0, Math.min(r.width, ev.clientX - r.left)), 'x');
         return Math.max(FMIN, Math.min(FMAX, f));
       };
+      const toDb = ev => {
+        const r = over.getBoundingClientRect();
+        return u.posToVal(Math.max(0, Math.min(r.height, ev.clientY - r.top)), 'y');
+      };
+      const applyDrag = ev => {
+        window.knobInput(opts.name, opts.toKnob(toF(ev)));
+        // vertical axis (#user request: the dot moves Q and gain too):
+        // resonant LP/HP -> Q (dot height = resonance peak in dB);
+        // bell/shelf -> band gain (dot height = the gain you place)
+        const st = plots[key], k = st.model && st.model.kind;
+        if ((k === 'lowpass-q' || k === 'highpass-q') && opts.setQ) {
+          const q = Math.pow(10, toDb(ev) / 20);
+          opts.setQ(Math.max(0, Math.min(1, (q - 0.4) / 9.5)));
+        } else if ((k === 'bell' || k === 'shelf-hi' || k === 'shelf-lo') && opts.setGain) {
+          opts.setGain(Math.max(0, Math.min(1, (toDb(ev) + 20) / 40)));
+        }
+      };
       over.style.touchAction = 'none';
       over.addEventListener('pointerdown', ev => {
         dragging = true; over.setPointerCapture(ev.pointerId);
         window._knobDrag = opts.dragKey || key;
-        window.knobInput(opts.name, opts.toKnob(toF(ev)));
+        applyDrag(ev);
         ev.preventDefault();
       });
       over.addEventListener('pointermove', ev => {
-        if (dragging) window.knobInput(opts.name, opts.toKnob(toF(ev)));
+        if (dragging) applyDrag(ev);
       });
       const end = () => {
         dragging = false;

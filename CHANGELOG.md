@@ -75,6 +75,12 @@
   into the +6 dB headroom. Typed entry on volume takes dB ("-12", "0",
   "u"/"unity", "-inf", or "82%"); double-tap resets to unity. Legacy
   /1/volumeN ramp steps read in dB too. Existing knob configs unchanged.
+- **2D curve handle** (user request): dragging the dot on an EQ-band
+  graph now sets frequency (horizontal) AND the vertical axis - Q on
+  resonant low/high-pass (the dot's height IS the resonance peak in dB)
+  or band gain on bell/shelf (place the dot at the dB you want). Bell,
+  shelf (band-correct direction) and resonant high-pass curves now
+  render (RBJ analog prototypes) instead of a flat line.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

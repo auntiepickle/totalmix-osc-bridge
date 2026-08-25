@@ -394,15 +394,15 @@ function _modulModel(name, m, step) {
     const labels = ENUM_LABELS[`eq_type_${band}`] || [];
     const tv = parseFloat(comps[`eq_type_${band}`]);
     const lbl = Number.isFinite(tv) ? labels[Math.round(tv * (labels.length - 1))] : '';
-    if (lbl === 'Low Pass') {
-      model.kind = 'lowpass-q';
-      const q = parseFloat(comps[`eq_q_${band}`]);
-      model.q = 0.4 + (Number.isFinite(q) ? q : 0.03) * 9.5;
-    } else if (lbl === 'High Pass') {
-      model.kind = 'highpass'; model.order = 2;
-    } else {
-      model.kind = null;                          // bell/shelf: flat line + dot
-    }
+    const qn = parseFloat(comps[`eq_q_${band}`]);
+    const gn = parseFloat(comps[`eq_gain_${band}`]);
+    model.q = 0.4 + (Number.isFinite(qn) ? qn : 0.03) * 9.5;
+    model.gain = (Number.isFinite(gn) ? gn : 0.5) * 40 - 20;
+    if (lbl === 'Low Pass')       model.kind = 'lowpass-q';
+    else if (lbl === 'High Pass') model.kind = 'highpass-q';
+    else if (lbl === 'Shelf')     model.kind = band === '1' ? 'shelf-lo' : 'shelf-hi';
+    else if (lbl === 'Bell')      model.kind = 'bell';
+    else                          model.kind = null;
   }
   return model;
 }
@@ -497,8 +497,17 @@ function _modulWire(name) {
   if (gEl && window.ModulGraph && window.uPlot) {
     // phones: a taller plot = a real finger lane for the cutoff drag
     const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
+    const band = param.slice(-1);
+    const _cpWrite = cp => v => {
+      companionInput(name, cp, v);
+      const mdl = _modulModel(name, macros[name], step);
+      if (mdl) ModulGraph.filterUpdate(`f:${name}`, mdl);
+      if (window.ModulKnob) ModulKnob.set(name, v, cp);
+    };
     ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
-                                              height: mobile ? 132 : 96 });
+                                              height: mobile ? 132 : 96,
+                                              setQ: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_q_${band}`) : null,
+                                              setGain: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_gain_${band}`) : null });
     const model = _modulModel(name, m, step);
     if (model) ModulGraph.filterUpdate(`f:${name}`, model);
   }
