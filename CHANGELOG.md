@@ -127,6 +127,10 @@
   rolloff filling the plot; EQ bands keep the full spectrum they can
   reach. Gridlines/labels adapt per window (1-2-5, denser labels on
   narrow windows).
+- **Knob limits drawn on the graphs** (user request): the regions outside
+  a knob's bounds are dimmed with dashed hairlines at the limits - the
+  reachable lane reads bright, the locked zones read dark. Drawn only
+  when the bounds actually bite inside the module's window.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

@@ -520,8 +520,11 @@ function _wireKnobGraph(name) {
     // the module's window = what its parameter can IMPACT (a lo-cut never
     // goes above 500 Hz), plus one octave of shoulder for the flat side
     const taper = _MODUL_TAPER[param] || [20, 20000];
+    const rng = Array.isArray(step.operation && step.operation.range) ? step.operation.range.map(Number) : [0, 1];
+    const toHz = t => taper[0] * Math.pow(taper[1] / taper[0], Math.max(0, Math.min(1, t)));
     ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
                                               frange: [taper[0], Math.min(20000, taper[1] * 2)],
+                                              bounds: [toHz(rng[0]), toHz(rng[1])],
                                               height: mobile ? 132 : 96,
                                               setQ: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_q_${band}`) : null,
                                               setGain: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_gain_${band}`) : null });

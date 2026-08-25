@@ -137,6 +137,30 @@
       hooks: {
         draw: [u => {
           const st = plots[key];
+          // the knob's LIMITS (#user request): dim the unreachable region,
+          // dashed hairlines at the bounds. Drawn over the curve so the
+          // out-of-reach part of the response reads as locked.
+          if (st && Array.isArray(st.bounds)) {
+            const ctx = u.ctx, b = u.bbox;
+            const x0 = u.valToPos(st.bounds[0], 'x', true);
+            const x1 = u.valToPos(st.bounds[1], 'x', true);
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+            if (x0 > b.left + 1) ctx.fillRect(b.left, b.top, x0 - b.left, b.height);
+            if (x1 < b.left + b.width - 1) ctx.fillRect(x1, b.top, b.left + b.width - x1, b.height);
+            ctx.strokeStyle = 'rgba(235, 232, 225, 0.28)';
+            ctx.lineWidth = 1 * devicePixelRatio;
+            ctx.setLineDash([3 * devicePixelRatio, 3 * devicePixelRatio]);
+            for (const x of [x0, x1]) {
+              if (x > b.left + 1 && x < b.left + b.width - 1) {
+                ctx.beginPath();
+                ctx.moveTo(x, b.top);
+                ctx.lineTo(x, b.top + b.height);
+                ctx.stroke();
+              }
+            }
+            ctx.restore();
+          }
           // the 0 dB line is the reference every EQ emphasizes
           {
             const ctx = u.ctx;
@@ -168,6 +192,11 @@
     }, [xs, ys(null, 0, xs)], el);
 
     const st = plots[key] = { u, model: null, mix: 0, anim: 0, xs, flo, fhi };
+    if (Array.isArray(opts.bounds)) {
+      const b0 = Math.max(flo, opts.bounds[0]), b1 = Math.min(fhi, opts.bounds[1]);
+      // draw only when the limits actually bite (inside the window)
+      if (b0 / flo > 1.03 || fhi / b1 > 1.03) st.bounds = [b0, b1];
+    }
 
     // direct manipulation: drag anywhere on the plot = set cutoff
     if (opts.toKnob) {
