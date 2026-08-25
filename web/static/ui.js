@@ -323,10 +323,196 @@ function _knobStripHTML(name, m, step) {
 function _renderKnobSection(names) {
   const row = document.getElementById('knob-row');
   if (!row) return;
+  const modul = document.documentElement.getAttribute('data-skin') === 'modul';
   row.innerHTML = names.length
-    ? names.map(n => _knobStripHTML(n, macros[n], _knobStepOf(macros[n]))).join('')
+    ? names.map(n => (modul ? _knobModuleHTML : _knobStripHTML)(n, macros[n], _knobStepOf(macros[n]))).join('')
     : `<div class="col-span-full text-xs text-zinc-600 italic">no knobs yet — <b>New Knob</b> binds a channel parameter to a MIDI control</div>`;
+  // wire synchronously: innerHTML is parsed already, and rAF never fires
+  // in a hidden tab (graphs would stay empty until the next visible render)
+  if (modul && names.length) names.forEach(n => _modulWire(n));
 }
+
+// ═══ MODUL layout (docs/design-modul.md) ═══════════════════════════
+// A knob renders as an instrument module: silkscreen title plate, LIVE
+// filter-response graph (draggable cutoff), rotary knob, power switch +
+// LED, companion mini-knobs. Same ids as the strip everywhere updaters
+// look, so the data path is identical.
+//
+// PORTABILITY BOUNDARY: _modulModel / _modulToKnob below and
+// ModulGraph.magDb are PURE — no DOM, no globals beyond the verified
+// taper tables. They are the layer that ports to C on an embedded
+// server; everything DOM-flavored stays in the shell functions.
+const _MODUL_TAPER = { lowcut_freq: [20, 500], eq_freq_1: [20, 20000],
+                       eq_freq_2: [20, 20000], eq_freq_3: [20, 20000] };
+
+function _modulModel(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  const taper = _MODUL_TAPER[param];
+  if (!taper) return null;                       // non-frequency knob: no graph
+  // device_value is already param-norm (0..1 across the full taper);
+  // knob_value is knob-norm and must go through the range shaping first
+  const dv = parseFloat(m.device_value), kv = parseFloat(m.knob_value);
+  const t = Number.isFinite(dv) ? dv
+          : _shapeKnob(Number.isFinite(kv) ? kv : 0, step.operation);
+  const f = taper[0] * Math.pow(taper[1] / taper[0], Math.max(0, Math.min(1, t)));
+  const comps = m.companions || {};
+  const model = { f, enabled: m.enable_value !== false };
+  if (param === 'lowcut_freq') {
+    model.kind = 'highpass';
+    model.order = Math.round((parseFloat(comps.lowcut_grade) || 0) * 3) + 1;
+  } else {
+    const band = param.slice(-1);
+    const labels = ENUM_LABELS[`eq_type_${band}`] || [];
+    const tv = parseFloat(comps[`eq_type_${band}`]);
+    const lbl = Number.isFinite(tv) ? labels[Math.round(tv * (labels.length - 1))] : '';
+    if (lbl === 'Low Pass') {
+      model.kind = 'lowpass-q';
+      const q = parseFloat(comps[`eq_q_${band}`]);
+      model.q = 0.4 + (Number.isFinite(q) ? q : 0.03) * 9.5;
+    } else if (lbl === 'High Pass') {
+      model.kind = 'highpass'; model.order = 2;
+    } else {
+      model.kind = null;                          // bell/shelf: flat line + dot
+    }
+  }
+  return model;
+}
+
+function _modulToKnob(step, param) {
+  const taper = _MODUL_TAPER[param];
+  const op = step.operation || {};
+  const rng = Array.isArray(op.range) ? op.range.map(Number) : [0, 1];
+  return (f) => {
+    const t = Math.log(f / taper[0]) / Math.log(taper[1] / taper[0]);
+    const span = (rng[1] - rng[0]) || 1;
+    return Math.max(0, Math.min(1, (t - rng[0]) / span));
+  };
+}
+
+function _knobModuleHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  const midiLabel = getMidiTriggerLabel(m);
+  const issues = macroTargetIssues(m);
+  const shown = _displayName(name, m);
+  const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value)
+          : Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : 0;
+  const hasGraph = !!_MODUL_TAPER[param];
+  const en = m.enable_value;
+  const enumChips = (COMPANION_FOR[param] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
+    const labels = ENUM_LABELS[cp];
+    const cv = parseFloat((m.companions || {})[cp]);
+    const idx = Number.isFinite(cv) ? Math.round(cv * (labels.length - 1)) : null;
+    const pinned = (((step.operation || {}).companions) || {})[cp] != null;
+    return `<button id="knob-cp-${name}-${cp}" onclick="cycleKnobParam('${name}','${cp}',${labels.length})"
+        class="mplate" title="click to cycle${pinned ? ' (pinned)' : ''}">${idx == null ? '\u2014' : _esc(labels[idx])}${pinned ? ' \u26b2' : ''}</button>`;
+  }).join('');
+  const minis = (COMPANION_FOR[param] || []).filter(cp => !ENUM_LABELS[cp]).map(cp => {
+    const def = PARAM_DEFS[cp] || {};
+    const cv = parseFloat((m.companions || {})[cp]);
+    const short = (def.label || cp).replace(/^EQ Band \d /, '').replace(/^Low Cut /, '');
+    return `<div class="mmini" title="${_esc(def.label || cp)} on the device \u2014 live">
+      ${ModulKnob.html(name, { size: 'mini', suffix: cp, label: def.label || cp })}
+      <span class="mmini-lbl">${_esc(short)}</span>
+      <span id="knob-cpv-${name}-${cp}" class="mmini-val">${Number.isFinite(cv) ? (def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%') : '\u2014'}</span>
+    </div>`;
+  }).join('');
+  const hasEnable = !!ENABLE_FOR[param];
+  return `
+<div id="card-${name}" class="card mmodule">
+  <div class="mhead">
+    ${_nameHTML(name)}
+    ${enumChips}
+    <span class="warn-slot">${_warnIconHTML(issues)}</span>
+    ${hasEnable ? `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
+        title="section power"><span class="mled"></span><span class="mpower-txt">${en === true ? 'ON' : en === false ? 'OFF' : '\u2014'}</span></button>` : ''}
+  </div>
+  <div class="msub">
+    <span class="routing-label">${_esc(m.routing_label || '\u2014')}</span>
+    ${midiLabel ? `<span class="mbadge">${midiLabel}</span>` : ''}
+  </div>
+  ${hasGraph ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
+  <div class="mrow">
+    ${ModulKnob.html(name, { label: shown })}
+    <span id="knob-val-${name}" class="mval">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+    <span id="knob-dev-${name}" class="mdev">${Number.isFinite(parseFloat(m.device_value)) ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : ''}</span>
+    <div class="mminis">${minis}</div>
+  </div>
+  <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
+  <button onclick="toggleDetail('${name}')" class="mdetails">
+    DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
+  </button>
+  <div id="detail-${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+</div>`;
+}
+
+function _modulWire(name) {
+  const m = macros[name], step = m && _knobStepOf(m);
+  if (!step) return;
+  const param = (step.target && step.target.param) || 'volume';
+  const getV = () => {
+    const mm = macros[name] || {};
+    const a = parseFloat(mm.knob_value), b = parseFloat(mm.device_value);
+    return Number.isFinite(a) ? a : Number.isFinite(b) ? b : 0;
+  };
+  ModulKnob.set(name, getV());
+  ModulKnob.wire(name, {
+    get: getV,
+    send: val => knobInput(name, val),
+    reset: () => { const d = parseFloat((macros[name] || {}).device_value); return Number.isFinite(d) ? d : null; },
+  });
+  (COMPANION_FOR[param] || []).filter(cp => !ENUM_LABELS[cp]).forEach(cp => {
+    const getC = () => { const x = parseFloat(((macros[name] || {}).companions || {})[cp]); return Number.isFinite(x) ? x : 0.5; };
+    ModulKnob.set(name, getC(), cp);
+    ModulKnob.wire(name, { get: getC, send: val => companionInput(name, cp, val), reset: null }, cp);
+  });
+  const gEl = document.getElementById(`mgraph-${name}`);
+  if (gEl && window.ModulGraph && window.uPlot) {
+    ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name });
+    const model = _modulModel(name, m, step);
+    if (model) ModulGraph.filterUpdate(`f:${name}`, model);
+  }
+}
+
+// One sync entry point, called by updateKnobCard on every knob_update
+// while MODUL is active: knob positions, curve morph, power switch,
+// companion plates and readouts.
+window._modulSync = function (name) {
+  const m = macros[name], step = m && _knobStepOf(m);
+  if (!step || !document.getElementById(`mknob-${name}`)) return;
+  const param = (step.target && step.target.param) || 'volume';
+  if (window._knobDrag !== name) {
+    const a = parseFloat(m.knob_value), b = parseFloat(m.device_value);
+    ModulKnob.set(name, Number.isFinite(a) ? a : Number.isFinite(b) ? b : 0);
+  }
+  (COMPANION_FOR[param] || []).forEach(cp => {
+    const cv = parseFloat((m.companions || {})[cp]);
+    if (!Number.isFinite(cv)) return;
+    if (ENUM_LABELS[cp]) {
+      const plate = document.getElementById(`knob-cp-${name}-${cp}`);
+      if (plate && plate.classList.contains('mplate')) {
+        const labels = ENUM_LABELS[cp];
+        const pinned = (((step.operation || {}).companions) || {})[cp] != null;
+        plate.textContent = (labels[Math.round(cv * (labels.length - 1))] || '\u2014') + (pinned ? ' \u26b2' : '');
+      }
+    } else {
+      if (window._knobDrag !== `${name}:${cp}`) ModulKnob.set(name, cv, cp);
+      const lbl = document.getElementById(`knob-cpv-${name}-${cp}`);
+      const def = PARAM_DEFS[cp] || {};
+      if (lbl && lbl.classList.contains('mmini-val'))
+        lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
+    }
+  });
+  const model = _modulModel(name, m, step);
+  if (model && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, model);
+  const pw = document.getElementById(`knob-en-${name}`);
+  if (pw && pw.classList.contains('mpower')) {
+    pw.classList.toggle('on', m.enable_value === true);
+    pw.classList.toggle('off', m.enable_value === false);
+    pw.classList.toggle('unk', m.enable_value == null);
+    const txt = pw.querySelector('.mpower-txt');
+    if (txt) txt.textContent = m.enable_value === true ? 'ON' : m.enable_value === false ? 'OFF' : '\u2014';
+  }
+};
 
 // Names: every macro has a machine-safe KEY (the mappings key - DOM ids,
 // URLs, the MQTT topic totalmix/macro/<key>) and an optional free-text

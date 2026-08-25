@@ -130,6 +130,15 @@ window.applySkin = function (name) {
   document.querySelectorAll('.skin-btn').forEach(b => {
     b.classList.toggle('text-orange-400', (b.dataset.skinName || '') === (name || ''));
   });
+  // MODUL is the one skin with its OWN LAYOUT (modules, curves, knobs) —
+  // entering or leaving it re-renders the cards
+  const wasModul = window._lastSkinWasModul || false;
+  const isModul = name === 'modul';
+  window._lastSkinWasModul = isModul;
+  if (wasModul !== isModul && typeof renderCards === 'function'
+      && typeof macros === 'object' && Object.keys(macros).length) {
+    renderCards();
+  }
 };
 try { const s = localStorage.getItem('uiSkin'); if (s) applySkin(s); } catch (_) {}
 
@@ -322,8 +331,14 @@ function updateKnobCard(name, moveSlider = true) {
   if (lbl && v != null) lbl.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
   if (dev) dev.textContent = Number.isFinite(parseFloat(m.device_value))
     ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : '';
+  // MODUL layout: rotary knob, live curve, power switch, plates — all
+  // driven from the same knob_update data through one sync entry point
+  if (typeof _modulSync === 'function'
+      && document.documentElement.getAttribute('data-skin') === 'modul') {
+    _modulSync(name);
+  }
   const chip = document.getElementById(`knob-en-${name}`);
-  if (chip) chip.outerHTML = _enableChipHTML(name, m, step);
+  if (chip && !chip.classList.contains('mpower')) chip.outerHTML = _enableChipHTML(name, m, step);
   (COMPANION_FOR[param] || []).forEach(cp => {
     const sl = document.getElementById(`knob-cps-${name}-${cp}`);
     const cv = parseFloat((m.companions || {})[cp]);
@@ -334,7 +349,7 @@ function updateKnobCard(name, moveSlider = true) {
       if (lbl) lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
     }
     const el = document.getElementById(`knob-cp-${name}-${cp}`);
-    if (el) {
+    if (el && !el.classList.contains('mplate')) {
       const tmp = document.createElement('div');
       tmp.innerHTML = _companionChipsHTML(name, m, step);
       const fresh = tmp.querySelector(`#knob-cp-${name}-${cp}`);

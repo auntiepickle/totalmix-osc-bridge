@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — 2026-08-24 · MODUL: the instrument layout
+
+- New **MODUL** design (gear menu → Design → Modul): not a repaint — the one
+  skin with its own layout, from a design sprint over Rams/Braun (ET66), the
+  Ulm school, Teenage Engineering, FabFilter, and Berlin club hardware
+  (docs/design-modul.md — the ten rules).
+- Knob macros render as **instrument modules**: live filter-response curve
+  on a log axis (drag the curve = set the cutoff, clamped to the knob's
+  bounds), 270° rotary knob (vertical drag, shift = fine, wheel, dblclick =
+  snap to device), section power switch with green LED, slope/type plates
+  (click cycles), gain/Q mini-knobs. Everything writes through the existing
+  coalesced knob/companion pipeline; device→browser sync drives the same
+  curves and LEDs.
+- Realtime **graphing engine**: uPlot 1.6.32 vendored (MIT) behind a thin
+  `ModulGraph` wrapper — filter magnitude plots today, LFO/ramp waveform
+  plots ready for wiring. Filter math (Butterworth orders, resonant biquad
+  LP) and macro→model derivation are pure functions, kept DOM-free as the
+  portable core for a future C-compiled server (see design doc).
+- Motion system per the design tokens (140ms operations / 260ms settle,
+  log-space curve morphs); `prefers-reduced-motion` disables all of it.
+- Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
+  targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
+  even when the page loads in a background tab.
+
 ## v0.2.0-alpha — 2026-08-21 · the fixed-table architecture
 
 Everything below is hardware-verified on the UFX II via a four-round

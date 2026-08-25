@@ -8,6 +8,11 @@
     <link href="style.css" rel="stylesheet">
     <!-- Optional skin (pure CSS re-style, scoped by html[data-skin]) -->
     <link id="skin-css" rel="stylesheet" href="" disabled>
+    <!-- MODUL: realtime graphing engine (uPlot, vendored) + components -->
+    <link href="vendor/uplot/uPlot.min.css" rel="stylesheet">
+    <script src="vendor/uplot/uPlot.iife.min.js"></script>
+    <script src="modul/knob.js"></script>
+    <script src="modul/graph.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-zinc-950 text-white">
@@ -122,6 +127,7 @@
                             <button onclick="applySkin('elektron')" class="skin-btn text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" data-skin-name="elektron">Elektron</button>
                             <button onclick="applySkin('ableton')"  class="skin-btn text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" data-skin-name="ableton">Ableton</button>
                             <button onclick="applySkin('roland')"   class="skin-btn text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" data-skin-name="roland">Roland</button>
+                            <button onclick="applySkin('modul')"    class="skin-btn text-xs px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-all" data-skin-name="modul" title="The MODUL instrument layout: live filter curves, rotary knobs, motion">Modul</button>
                         </div>
 
                         <div class="border-t border-zinc-700 my-1"></div>
