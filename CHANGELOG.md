@@ -62,6 +62,10 @@
   knobs (NEUTRAL: hi-cut opens fully, lo-cut parks at its floor) > the
   param default only if it lies inside the bounds > mid-travel. Q minis
   reset to RME-neutral Q0.7.
+- **Fixed: typed frequency guessed the wrong magnitude** (user report:
+  "20" on the 5k-20k hi-cut parked at the floor). A bare number now
+  prefers the reading that lands inside the knob's bounds ("20" -> 20k,
+  "8" -> 8k on a hi-cut); explicit units ("20hz", "12k") stay literal.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

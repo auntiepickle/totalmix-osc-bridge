@@ -1177,17 +1177,24 @@ function _currentRouting(m) {
 // ── Typed value entry + default resets (#user requests) ────────────────
 // _parseParamText: human text -> param-norm 0..1, per unit family.
 // Inverse of the fmt functions; unknown params parse as percent.
-function _parseParamText(param, text) {
+function _parseParamText(param, text, op) {
   const t = String(text).trim().toLowerCase().replace(/\s+/g, '');
   if (!t) return null;
   const num = parseFloat(t.replace(/^\+/, ''));
   if (/^eq_freq_\d$/.test(param) || param === 'lowcut_freq') {
     if (!Number.isFinite(num)) return null;
-    let hz = num;
-    if (/k(hz)?$/.test(t)) hz = num * 1000;
     const lo = 20, hi = param === 'lowcut_freq' ? 500 : 20000;
-    hz = Math.max(lo, Math.min(hi, hz));
-    return Math.log(hz / lo) / Math.log(hi / lo);
+    const toNorm = hz => Math.log(Math.max(lo, Math.min(hi, hz)) / lo) / Math.log(hi / lo);
+    if (/k(hz)?$/.test(t)) return toNorm(num * 1000);   // explicit kHz
+    if (/hz$/.test(t))     return toNorm(num);          // explicit Hz
+    // bare number: prefer the reading that lands INSIDE the knob's bounds
+    // (user report: typing "20" on a 5k-20k hi-cut meant 20k, not 20Hz)
+    const rng = op && Array.isArray(op.range) ? op.range.map(Number) : [0, 1];
+    const inBounds = n => n >= rng[0] - 0.002 && n <= rng[1] + 0.002;
+    for (const hz of [num, num * 1000]) {
+      if (hz >= lo && hz <= hi && inBounds(toNorm(hz))) return toNorm(hz);
+    }
+    return toNorm(num);
   }
   if (/^eq_gain_\d$/.test(param)) {
     if (!Number.isFinite(num)) return null;
@@ -1289,7 +1296,7 @@ window.startKnobValEdit = function (name) {
   _valEditSwap(span, span.textContent, (text) => {
     window._valEdit = null;
     if (text != null) {
-      const p = _parseParamText(param, text);
+      const p = _parseParamText(param, text, step.operation);
       if (p != null) {
         const kn = _knobNormOf({ device_value: p }, step.operation);
         knobInput(name, kn);
