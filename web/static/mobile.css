@@ -1,0 +1,74 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   MOBILE — ergonomics-first base layer, all skins (#22 mobile).
+   ────────────────────────────────────────────────────────────────────────────
+   Design law: this UI is played live with a THUMB. A thumb pad is ~25mm;
+   on a phone that is ~60-72 CSS px. So:
+     · primary performance controls (FIRE keys, knobs)  >= 56px
+     · secondary controls (chips, switches, learn keys) >= 44px
+     · inputs never trigger iOS focus-zoom (16px font)
+   Loaded for every skin; skins layer their own mobile rules on top
+   (html[data-skin] selectors outrank these). Desktop is untouched —
+   everything here is media-scoped.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Layout: the page fits the phone, nothing overflows ────────────────── */
+@media (max-width: 640px) {
+  .max-w-7xl { padding: 0.75rem; }
+
+  /* nav bar wraps into stacked clusters instead of overflowing */
+  .max-w-7xl > .flex.items-center.justify-between.mb-8 {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+  .max-w-7xl > .flex.items-center.justify-between.mb-8 > .flex.items-center.gap-3 {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  #midi-device-selector { min-width: 0; max-width: 100%; }
+}
+
+/* ── Ergonomics: thumb-scale targets for live playback ─────────────────── */
+@media (max-width: 480px) {
+  /* no iOS focus-zoom mid-performance */
+  input, select, textarea { font-size: 16px; }
+  button, select, a { -webkit-tap-highlight-color: transparent; }
+
+  /* THE performance keys: full thumb pad */
+  .fire-btn,
+  .card .grid.grid-cols-3 > button {
+    min-height: 56px;
+    font-size: 13px;
+  }
+
+  /* primary actions + raised keys */
+  button.bg-orange-500,
+  button.bg-amber-500,
+  button.bg-zinc-800 { min-height: 44px; }
+
+  /* knob-strip chips, cyclers, learn/wiggle/pulse keys */
+  button[id^="knob-en-"],
+  button[id^="knob-cp-"],
+  button[id^="wiggle-btn-"],
+  button[id^="pulse-btn-"],
+  button[id^="learn-btn-"] {
+    min-height: 44px;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  /* sliders: a 44px finger lane (native thumbs, larger hit area) */
+  input[type="range"] { height: 44px; }
+
+  /* details toggles stay tappable */
+  button[onclick^="toggleDetail"] { min-height: 44px; }
+
+  /* floating panels fit the viewport (emulator has an inline width) */
+  #midi-emu-panel { width: calc(100vw - 1.5rem) !important; max-width: 100%; }
+  #settings-menu { max-width: calc(100vw - 1.5rem); }
+  #new-macro-modal > div,
+  #editor-modal > div {
+    width: calc(100vw - 1.5rem);
+    max-width: calc(100vw - 1.5rem);
+  }
+}

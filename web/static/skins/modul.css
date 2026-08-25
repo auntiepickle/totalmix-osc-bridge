@@ -661,19 +661,27 @@ html[data-skin="modul"] :is(input, textarea):focus-visible {
     flex-wrap: wrap;
   }
 
-  /* knobs grow to thumb size */
-  html[data-skin="modul"] .mk:not(.mk-mini) { width: 56px; height: 56px; }
-  html[data-skin="modul"] .mk-mini         { width: 34px; height: 34px; }
-  html[data-skin="modul"] .mrow { flex-wrap: wrap; row-gap: 0.4rem; }
-  html[data-skin="modul"] .mminis { margin-left: 0; width: 100%; justify-content: flex-start; gap: 1.1rem; }
+  /* knobs at THUMB-PAD scale (~25mm): the main knob is the instrument */
+  html[data-skin="modul"] .mk:not(.mk-mini) { width: 72px; height: 72px; }
+  html[data-skin="modul"] .mk-mini         { width: 44px; height: 44px; }
+  html[data-skin="modul"] .mrow { flex-wrap: wrap; row-gap: 0.5rem; gap: 0.9rem; }
+  html[data-skin="modul"] .mval { font-size: 17px; min-width: 4.4rem; }
+  html[data-skin="modul"] .mminis {
+    margin-left: 0; width: 100%;
+    justify-content: flex-start; gap: 1.4rem;
+  }
+  html[data-skin="modul"] .mmini-lbl { font-size: 9px; }
+  html[data-skin="modul"] .mmini-val { font-size: 10px; }
+  html[data-skin="modul"] .mwave-val { font-size: 11px; }
 
-  /* plates + switches become finger targets */
+  /* plates + switches: full finger targets */
   html[data-skin="modul"] .mplate,
-  html[data-skin="modul"] .mpower { min-height: 40px; padding: 8px 10px; }
-  html[data-skin="modul"] .mdetails { min-height: 40px; }
+  html[data-skin="modul"] .mpower { min-height: 44px; padding: 8px 12px; }
+  html[data-skin="modul"] .mdetails { min-height: 44px; }
 
+  /* performance keys */
   html[data-skin="modul"] .fire-btn,
-  html[data-skin="modul"] .card .grid.grid-cols-3 > button { min-height: 44px; }
+  html[data-skin="modul"] .card .grid.grid-cols-3 > button { min-height: 56px; }
   html[data-skin="modul"] input[type="range"] { height: 28px; }
   html[data-skin="modul"] input[type="range"]::-webkit-slider-thumb {
     width: 17px; height: 24px; margin-top: -11px;

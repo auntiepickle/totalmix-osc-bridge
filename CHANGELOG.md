@@ -37,6 +37,13 @@
   curve display preferred device_value, which is only fresh after the
   400 ms readback (knob-norm value is now the single display authority,
   with device-side changes inverse-mapped through the knob range).
+- **Mobile ergonomics (#22, ergonomics-first for live playback)**: added the
+  missing viewport meta (real phones were rendering the desktop layout
+  scaled down - tiny controls); new base mobile.css for ALL skins with
+  thumb-scale targets (FIRE keys 56px, chips/switches/sliders 44px, no
+  iOS focus-zoom, nav wraps, panels fit the viewport). MODUL mobile is a
+  performance surface: 72px main knobs (thumb-pad scale), 44px minis,
+  132px curve drag lanes, 17px value readouts.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

@@ -2,10 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- Real phones need this or they render the desktop layout scaled down
+         (tiny controls, media queries never engage). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>TotalMix OSC Bridge</title>
     <!-- Compiled by the Dockerfile tailwind-builder stage; entrypoint restores
          it onto the bind mount. No internet needed to render the UI. -->
     <link href="style.css" rel="stylesheet">
+    <!-- Mobile ergonomics (all skins): thumb-scale targets for live playback -->
+    <link href="mobile.css" rel="stylesheet">
     <!-- Optional skin (pure CSS re-style, scoped by html[data-skin]) -->
     <link id="skin-css" rel="stylesheet" href="" disabled>
     <!-- MODUL: realtime graphing engine (uPlot, vendored) + components -->

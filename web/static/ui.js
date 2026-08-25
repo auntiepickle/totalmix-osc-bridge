@@ -481,7 +481,10 @@ function _modulWire(name) {
   });
   const gEl = document.getElementById(`mgraph-${name}`);
   if (gEl && window.ModulGraph && window.uPlot) {
-    ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name });
+    // phones: a taller plot = a real finger lane for the cutoff drag
+    const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
+    ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
+                                              height: mobile ? 132 : 96 });
     const model = _modulModel(name, m, step);
     if (model) ModulGraph.filterUpdate(`f:${name}`, model);
   }
@@ -617,10 +620,12 @@ function _mwaveIdleText(step) {
 
 function _modulWireWaves() {
   if (document.documentElement.getAttribute('data-skin') !== 'modul' || !window.ModulGraph) return;
+  const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
   Object.keys(macros).forEach(name => {
     _modulWaveStepsOf(macros[name], _knobStepOf(macros[name])).forEach(({ s, i }) => {
       const el = document.getElementById(`mwave-${name}-${i}`);
-      if (el) ModulGraph.waveformInit(`w:${name}:${i}`, el, s.operation);
+      if (el) ModulGraph.waveformInit(`w:${name}:${i}`, el, s.operation,
+                                      { height: mobile ? 56 : 36 });
     });
   });
 }
