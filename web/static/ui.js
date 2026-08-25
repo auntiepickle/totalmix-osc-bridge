@@ -192,8 +192,7 @@ function _shapeKnob(v, op) {
 // follows either way; the small line shows what the DEVICE reports
 function _knobCardHTML(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
-  const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value)
-          : Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : 0;
+  const v = _knobNormOf(m, step.operation);
   const dev = Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : null;
   return `<div class="flex gap-2 items-center mb-1">
       <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
@@ -286,8 +285,7 @@ function _knobStripHTML(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
   const midiLabel = getMidiTriggerLabel(m);
   const issues = macroTargetIssues(m);
-  const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value)
-          : Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : 0;
+  const v = _knobNormOf(m, step.operation);
   const dev = Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : null;
   return `
 <div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-4 rounded-2xl transition-colors duration-200">
@@ -345,6 +343,19 @@ function _renderKnobSection(names) {
 const _MODUL_TAPER = { lowcut_freq: [20, 500], eq_freq_1: [20, 20000],
                        eq_freq_2: [20, 20000], eq_freq_3: [20, 20000] };
 
+// Knob position from macro state: knob_value IS knob-norm; device_value is
+// param-norm and must be inverse-mapped through the knob's range (never
+// re-shaped forward — that's the double-mapping bug).
+function _knobNormOf(m, op) {
+  const kv = parseFloat(m.knob_value);
+  if (Number.isFinite(kv)) return Math.max(0, Math.min(1, kv));
+  const dv = parseFloat(m.device_value);
+  if (!Number.isFinite(dv)) return 0;
+  const rng = Array.isArray((op || {}).range) ? op.range.map(Number) : [0, 1];
+  const span = (rng[1] - rng[0]) || 1;
+  return Math.max(0, Math.min(1, (dv - rng[0]) / span));
+}
+
 function _modulModel(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
   const taper = _MODUL_TAPER[param];
@@ -394,8 +405,7 @@ function _knobModuleHTML(name, m, step) {
   const midiLabel = getMidiTriggerLabel(m);
   const issues = macroTargetIssues(m);
   const shown = _displayName(name, m);
-  const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value)
-          : Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : 0;
+  const v = _knobNormOf(m, step.operation);
   const hasGraph = !!_MODUL_TAPER[param];
   const en = m.enable_value;
   const enumChips = (COMPANION_FOR[param] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
@@ -449,16 +459,16 @@ function _modulWire(name) {
   const m = macros[name], step = m && _knobStepOf(m);
   if (!step) return;
   const param = (step.target && step.target.param) || 'volume';
-  const getV = () => {
-    const mm = macros[name] || {};
-    const a = parseFloat(mm.knob_value), b = parseFloat(mm.device_value);
-    return Number.isFinite(a) ? a : Number.isFinite(b) ? b : 0;
-  };
+  const getV = () => _knobNormOf(macros[name] || {}, step.operation);
   ModulKnob.set(name, getV());
   ModulKnob.wire(name, {
     get: getV,
     send: val => knobInput(name, val),
-    reset: () => { const d = parseFloat((macros[name] || {}).device_value); return Number.isFinite(d) ? d : null; },
+    reset: () => {
+      const mm = macros[name] || {};
+      if (!Number.isFinite(parseFloat(mm.device_value))) return null;
+      return _knobNormOf({ device_value: mm.device_value }, step.operation);
+    },
   });
   (COMPANION_FOR[param] || []).filter(cp => !ENUM_LABELS[cp]).forEach(cp => {
     const getC = () => { const x = parseFloat(((macros[name] || {}).companions || {})[cp]); return Number.isFinite(x) ? x : 0.5; };
@@ -480,10 +490,7 @@ window._modulSync = function (name) {
   const m = macros[name], step = m && _knobStepOf(m);
   if (!step || !document.getElementById(`mknob-${name}`)) return;
   const param = (step.target && step.target.param) || 'volume';
-  if (window._knobDrag !== name) {
-    const a = parseFloat(m.knob_value), b = parseFloat(m.device_value);
-    ModulKnob.set(name, Number.isFinite(a) ? a : Number.isFinite(b) ? b : 0);
-  }
+  if (window._knobDrag !== name) ModulKnob.set(name, _knobNormOf(m, step.operation));
   (COMPANION_FOR[param] || []).forEach(cp => {
     const cv = parseFloat((m.companions || {})[cp]);
     if (!Number.isFinite(cv)) return;
