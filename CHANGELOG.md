@@ -93,6 +93,9 @@
 - **MIN/MAX/gate readouts are typeable** (user request): tap the value
   next to a bounds or gate slider in the editors and type real units
   ("150", "8k", "75%"); the paired slider follows and saves normally.
+- **Tap-to-place on the graphs** (user request): a tap (no movement)
+  places the dot AT the tap point - frequency and Q/gain both, absolute.
+  Drags keep the relative, no-teleport behavior.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

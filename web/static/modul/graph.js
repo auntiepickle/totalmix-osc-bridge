@@ -136,12 +136,18 @@
       // absolute mapping teleported Q/gain to wherever you touched):
       // grabbing changes nothing vertically; moving up/down applies the
       // dB delta to the value you started from.
-      let vStart = null;
+      let vStart = null, moved = false, downXY = null;
+      const kindNow = () => {
+        const st = plots[key], k = st.model && st.model.kind;
+        return {
+          st,
+          resonant: (k === 'lowpass-q' || k === 'highpass-q') && opts.setQ,
+          gained: (k === 'bell' || k === 'shelf-hi' || k === 'shelf-lo') && opts.setGain,
+        };
+      };
       const applyDrag = (ev, isDown) => {
         window.knobInput(opts.name, opts.toKnob(toF(ev)));
-        const st = plots[key], k = st.model && st.model.kind;
-        const resonant = (k === 'lowpass-q' || k === 'highpass-q') && opts.setQ;
-        const gained   = (k === 'bell' || k === 'shelf-hi' || k === 'shelf-lo') && opts.setGain;
+        const { st, resonant, gained } = kindNow();
         if (isDown) {
           vStart = (resonant || gained)
             ? { db: toDb(ev), q: st.model.q || 0.7, gain: st.model.gain || 0 }
@@ -161,17 +167,36 @@
       over.addEventListener('pointerdown', ev => {
         dragging = true; over.setPointerCapture(ev.pointerId);
         window._knobDrag = opts.dragKey || key;
+        moved = false; downXY = [ev.clientX, ev.clientY];
         applyDrag(ev, true);
         ev.preventDefault();
       });
       over.addEventListener('pointermove', ev => {
-        if (dragging) applyDrag(ev, false);
+        if (!dragging) return;
+        if (downXY && Math.hypot(ev.clientX - downXY[0], ev.clientY - downXY[1]) > 4) moved = true;
+        applyDrag(ev, false);
       });
       const end = () => {
         dragging = false;
         if (window._knobDrag === (opts.dragKey || key)) window._knobDrag = null;
       };
-      over.addEventListener('pointerup', end);
+      over.addEventListener('pointerup', ev => {
+        // TAP (no movement) = PLACE the dot at the tap point (#user
+        // request): absolute on both axes. Frequency already landed on
+        // pointerdown; apply the vertical absolutely here. Drags stay
+        // relative (no teleport mid-gesture).
+        if (dragging && !moved) {
+          const { resonant, gained } = kindNow();
+          const db = toDb(ev);
+          if (resonant) {
+            const q = Math.pow(10, db / 20);   // dot height = resonance peak
+            opts.setQ(Math.max(0, Math.min(1, (q - 0.4) / 9.5)));
+          } else if (gained) {
+            opts.setGain(Math.max(0, Math.min(1, (db + 20) / 40)));
+          }
+        }
+        end();
+      });
       over.addEventListener('pointercancel', end);
     }
 
