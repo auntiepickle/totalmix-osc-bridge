@@ -55,6 +55,13 @@
   value ("150", "2.5k", "-6", "Q1.4", "L30", "38%") with unit-aware parsing;
   the type/slope cyclers are now dropdowns with curve glyphs per option
   (bell, shelf, low/high pass shapes).
+- **Fixed: double-tap reset target** (user report: hi-cut reset to its
+  LOWEST value). The generic param default clamped against the knob's
+  bounds. New priority: explicit `operation.default` (settable in DETAILS
+  with real units - "8k", "Q0.7") > the switch-off end for cut-filter
+  knobs (NEUTRAL: hi-cut opens fully, lo-cut parks at its floor) > the
+  param default only if it lies inside the bounds > mid-travel. Q minis
+  reset to RME-neutral Q0.7.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

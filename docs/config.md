@@ -137,6 +137,7 @@ that header creates one.
 | `threshold` | — | Gate point for toggle params (mute): knob past it = on |
 | `auto_enable` | `true` | **Turn on with knob move:** if the parameter lives behind a section switch (low cut, EQ, dynamics, auto-level, reverb, echo) and that switch is off, flip it on before the first write — a lo-cut knob is inaudible otherwise. The strip also shows the switch as an ON/OFF chip you can click (`POST /api/knob/<name>/enable {"on": true}`). |
 | `hold` | `true` | **Snapshot-agnostic:** after every confirmed snapshot or workspace switch, re-assert this knob's last value so a recall can't yank it back to what the snapshot stored |
+| `default` | auto | Where double-tap/double-click parks the knob, as a 0..1 value in the PARAMETER's space (like `range`). Set it in the strip's DETAILS with real units ("8k", "-6", "Q0.7"). Unset = automatic: knobs with `off_at` reset to that end (NEUTRAL - a hi-cut opens fully, a lo-cut parks at its floor, section switches off), otherwise the parameter's default if it lies inside `range`, else mid-travel |
 
 Why knobs are snapshot-agnostic: under Global OSC a target resolves by
 name to a fixed hardware channel in every snapshot, so the same knob works

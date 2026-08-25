@@ -491,7 +491,7 @@ function _modulWire(name) {
     const getC = () => { const x = parseFloat(((macros[name] || {}).companions || {})[cp]); return Number.isFinite(x) ? x : 0.5; };
     ModulKnob.set(name, getC(), cp);
     ModulKnob.wire(name, { get: getC, send: val => companionInput(name, cp, val),
-      reset: () => { const d = (PARAM_DEFS[cp] || {}).default; return Number.isFinite(d) ? d : 0.5; } }, cp);
+      reset: () => _compDefault(cp) }, cp);
   });
   const gEl = document.getElementById(`mgraph-${name}`);
   if (gEl && window.ModulGraph && window.uPlot) {
@@ -1210,14 +1210,36 @@ function _parseParamText(param, text) {
 
 // Default for a knob, in KNOB-norm (PARAM_DEFS default is param-norm and
 // must inverse-map through the knob's range; device value is the fallback)
+// Priority: explicit operation.default (param-norm, set in DETAILS) >
+// the switch-off end for cut-filter knobs (NEUTRAL = no filtering: a
+// hi-cut opens to the top, a lo-cut parks at the bottom) > the param's
+// generic default IF it lands inside the knob's bounds (a clamped
+// default is meaningless - user report) > mid-travel.
 function _knobDefaultNorm(name) {
   const m = macros[name], step = m && _knobStepOf(m);
   if (!step) return null;
   const param = (step.target && step.target.param) || 'volume';
+  const op = step.operation || {};
+  const rng = Array.isArray(op.range) ? op.range.map(Number) : [0, 1];
+  const span = (rng[1] - rng[0]) || 1;
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  const ex = parseFloat(op.default);
+  if (Number.isFinite(ex)) return clamp01((ex - rng[0]) / span);
+  if (op.off_at === 'min' || (!op.off_at && op.off_at_min)) return 0;
+  if (op.off_at === 'max') return 1;
   const d = (PARAM_DEFS[param] || {}).default;
-  const pv = Number.isFinite(d) ? d : parseFloat(m.device_value);
-  if (!Number.isFinite(pv)) return null;
-  return _knobNormOf({ device_value: pv }, step.operation);
+  if (Number.isFinite(d)) {
+    const t = (d - rng[0]) / span;
+    if (t >= -0.001 && t <= 1.001) return clamp01(t);
+  }
+  return 0.5;
+}
+// Companion reset targets: RME-neutral Q is 0.7, not the generic mid
+const RESET_DEFAULTS = { eq_q_1: 0.0316, eq_q_2: 0.0316, eq_q_3: 0.0316 };
+function _compDefault(cp) {
+  if (Number.isFinite(RESET_DEFAULTS[cp])) return RESET_DEFAULTS[cp];
+  const d = (PARAM_DEFS[cp] || {}).default;
+  return Number.isFinite(d) ? d : 0.5;
 }
 window.resetKnobToDefault = function (name) {
   const v = _knobDefaultNorm(name);
@@ -1228,8 +1250,7 @@ window.resetKnobToDefault = function (name) {
   if (window.ModulKnob) ModulKnob.set(name, v);
 };
 window.resetCompToDefault = function (name, cp) {
-  const d = (PARAM_DEFS[cp] || {}).default;
-  const v = Number.isFinite(d) ? d : 0.5;
+  const v = _compDefault(cp);
   companionInput(name, cp, v);
   const sl = document.getElementById(`knob-cps-${name}-${cp}`);
   if (sl) sl.value = v;
@@ -1520,6 +1541,14 @@ function _knobControls(name, i, step, sc) {
         <option value="max"${op.off_at === 'max' ? ' selected' : ''}>highest position (high cut)</option>
       </select>
     </div>` : ''}
+    <div class="flex gap-2 items-center">
+      <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-24 shrink-0"
+          title="Where double-tap/double-click parks the knob. Blank = automatic: the switch-off end for cut filters, else the parameter's default">reset default</span>
+      <input type="text" data-field="steps.${i}.operation.default"
+          data-parse-param="${(step.target && step.target.param) || 'volume'}"
+          value="${Number.isFinite(parseFloat(op.default)) ? fmtParamValue((step.target && step.target.param) || 'volume', parseFloat(op.default)) : ''}"
+          placeholder="auto" class="${sc} w-24">
+    </div>
     ${(COMPANION_FOR[(step.target && step.target.param) || ''] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
       const labels = ENUM_LABELS[cp];
       const pinned = (op.companions || {})[cp];
@@ -2573,6 +2602,12 @@ function _harvestEditor(name) {
     const last = isNaN(lastRaw) ? lastRaw : Number(lastRaw);
     if (el.type === 'checkbox') {
       obj[last] = el.checked;
+    } else if (el.dataset.parseParam !== undefined) {
+      // unit-aware text field ("8k", "-6", "Q0.7"); blank = key absent,
+      // NOT zero (an explicit 0 default and "no default" must differ)
+      const pv = _parseParamText(el.dataset.parseParam, el.value);
+      if (pv == null) delete obj[last];
+      else obj[last] = parseFloat(pv.toFixed(4));
     } else if (el.type === 'number' || el.type === 'range' || el.dataset.numeric !== undefined) {
       // data-numeric: selects whose values are numbers (LFO rate) — harvesting
       // them as strings would break strict-=== consumers and JSON hygiene
