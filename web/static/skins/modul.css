@@ -978,3 +978,16 @@ html[data-skin="modul"] :is(input, textarea):focus-visible {
   html[data-skin="modul"] button:active,
   html[data-skin="modul"] .fire-btn:active { transform: none; }
 }
+
+/* == MIDI MATRIX button, MODUL dress ================================== */
+html[data-skin="modul"] #midi-matrix-btn {
+  background: var(--mo-well);
+  border: 1px solid var(--mo-edge);
+  border-radius: 2px;
+  color: var(--mo-mut);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+html[data-skin="modul"] #midi-matrix-btn:hover { color: var(--mo-ink); border-color: var(--mo-ink); }

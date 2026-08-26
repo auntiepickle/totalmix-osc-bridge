@@ -204,6 +204,17 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **MIDI binding matrix overlay** (user request): header MATRIX button
+  opens a full-screen view - a 128-cell number grid per MIDI channel
+  (CC and note bindings share the number space, knobs in orange, fire
+  triggers pale, notes glyphed), channel tabs with activity dots.
+  Click a bound cell to arm it, click any free cell (any channel) to
+  move it; occupied cells refuse with a flash; unbind from the armed
+  strip. Unbound macros rail: click one, then a cell, to bind it.
+  Below: the complete bindable catalog - every PARAM_DEFS parameter
+  (sends/strip, EQ, low cut, dynamics, auto level, input stage, global
+  reverb/echo) as chips; picking one opens a builder (channel/submix
+  aim, auto name, next-free CC) that creates a ready knob in one step.
 - **Row-level meter presence**: a resolvable channel in any row that
   has streamed at all since boot reads as floor when absent - fixes
   the boot-order gap where a restarted bridge showed no master meter
