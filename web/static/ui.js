@@ -426,6 +426,9 @@ function _modulToKnob(step, param) {
 }
 
 function _knobModuleHTML(name, m, step) {
+  // RACK layout (user-chosen direction, 2026-08-25): every control is a
+  // full-width 1U rack unit - identity flank | hero graph | control flank.
+  // Every id the live updaters touch is unchanged.
   const param = (step.target && step.target.param) || 'volume';
   const midiLabel = getMidiTriggerLabel(m);
   const issues = macroTargetIssues(m);
@@ -433,6 +436,8 @@ function _knobModuleHTML(name, m, step) {
   const v = _knobNormOf(m, step.operation);
   const hasGraph = !!_MODUL_TAPER[param];
   const en = m.enable_value;
+  const rng = Array.isArray(step.operation && step.operation.range) ? step.operation.range.map(Number) : null;
+  const rangeTxt = rng ? `${fmtParamValue(param, rng[0])} \u2013 ${fmtParamValue(param, rng[1] ?? 1)}` : '';
   const enumChips = (COMPANION_FOR[param] || []).filter(cp => ENUM_LABELS[cp]).map(cp => {
     const labels = ENUM_LABELS[cp];
     const cv = parseFloat((m.companions || {})[cp]);
@@ -457,29 +462,29 @@ function _knobModuleHTML(name, m, step) {
   const hasEnable = !!ENABLE_FOR[param];
   return `
 <div id="card-${name}" class="card mmodule">
-  <div class="mhead">
-    ${_nameHTML(name)}
-    ${enumChips}
-    <span class="warn-slot">${_warnIconHTML(issues)}</span>
+  <div class="mrk-head">
+    <div class="mhead">${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
+    <div class="msub"><span class="routing-label">${_esc(m.routing_label || '\u2014')}</span></div>
+    ${enumChips ? `<div class="mrk-plates">${enumChips}</div>` : ''}
     ${hasEnable ? `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
         title="section power"><span class="mled"></span><span class="mpower-txt">${en === true ? 'ON' : en === false ? 'OFF' : '\u2014'}</span></button>` : ''}
   </div>
-  <div class="msub">
-    <span class="routing-label">${_esc(m.routing_label || '\u2014')}</span>
-    ${midiLabel ? `<span class="mbadge">${midiLabel}</span>` : ''}
-  </div>
-  ${hasGraph ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
-  <div class="mrow">
-    ${ModulKnob.html(name, { label: shown })}
+  ${hasGraph ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : `<div class="mrk-nograph"></div>`}
+  <div class="mrk-ctrl">
+    <div class="mrk-knob">${ModulKnob.html(name, { label: shown })}</div>
     <span id="knob-val-${name}" class="mval" onclick="startKnobValEdit('${name}')" title="tap to type a value">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+    ${rangeTxt ? `<span class="mrk-range">RANGE ${rangeTxt}</span>` : ''}
     <span id="knob-dev-${name}" class="mdev">${Number.isFinite(parseFloat(m.device_value)) ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : ''}</span>
+    ${midiLabel ? `<span class="mbadge">${midiLabel}</span>` : ''}
     <div class="mminis">${minis}</div>
+    <button onclick="toggleDetail('${name}')" class="mdetails">
+      DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
+    </button>
   </div>
-  <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
-  <button onclick="toggleDetail('${name}')" class="mdetails">
-    DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
-  </button>
-  <div id="detail-${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+  <div class="mrk-below">
+    <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
+    <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+  </div>
 </div>`;
 }
 
@@ -510,8 +515,10 @@ function _wireKnobGraph(name) {
   const param = (step.target && step.target.param) || 'volume';
   const gEl = document.getElementById(`mgraph-${name}`);
   if (gEl && window.ModulGraph && window.uPlot) {
-    // phones: a taller plot = a real finger lane for the cutoff drag
+    // phones: a taller plot = a real finger lane for the cutoff drag;
+    // the RACK layout gives the graph hero height on desktop too
     const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
+    const rack = document.documentElement.getAttribute('data-skin') === 'modul';
     const band = param.slice(-1);
     const _cpWrite = cp => v => {
       companionInput(name, cp, v);   // refreshes the curve itself (instant)
@@ -525,7 +532,7 @@ function _wireKnobGraph(name) {
     ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
                                               frange: [taper[0], Math.min(20000, taper[1] * 2)],
                                               bounds: [toHz(rng[0]), toHz(rng[1])],
-                                              height: mobile ? 132 : 96,
+                                              height: mobile ? 132 : (rack ? 132 : 96),
                                               setQ: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_q_${band}`) : null,
                                               setGain: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_gain_${band}`) : null });
     const model = _modulModel(name, m, step);

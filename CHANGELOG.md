@@ -134,6 +134,14 @@
 - **MODUL is the default design**: a browser that never chose a skin now
   boots into MODUL; explicit choices (including Default) are respected
   and persist.
+- **RACK layout** (user-chosen from a three-direction design council:
+  RACK / DESK / FOCUS mockups): under MODUL, every control is now a
+  full-width 1U rack unit - identity flank (name, routing, type/slope
+  plates, power switch) | hero graph stretching the page | control
+  flank (56px knob, 20px readout, range, device line, CC badge, minis,
+  DETAILS). Unit addresses (U1, U2...) on the left rail; the nav is a
+  thin machined bar; one vertical scan reads the whole chain. Mobile
+  stacks each unit head/graph/controls.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

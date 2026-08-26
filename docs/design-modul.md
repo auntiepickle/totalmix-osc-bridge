@@ -130,3 +130,16 @@ Verified 2026-08-24 on a local no-OSC boot: modules render desktop + 390px
 iframe, curve drag clamps to knob bounds, rotary drag/wheel write through
 the coalescer, skin round-trip restores the strip layout; hidden-tab wiring
 is synchronous (rAF never fires in background tabs).
+
+## RACK (2026-08-25): the chosen layout evolution
+
+A four-agent design council (review + three direction mockups) ran against
+the shipped MODUL. The user chose **RACK**: the app is a rack - every
+control a full-width 1U unit (identity flank | hero graph | control
+flank), unit addresses on a slim left rail, nav as a thin machined bar,
+macros as a keypad section. FOCUS (OP-1 page model) was rejected; DESK
+(play/fire/config zones) judged confusing. The council's design review
+(scratchpad design-review.md, 23 findings) feeds the follow-up backlog:
+nav hierarchy, MODUL-native macro cards, gesture-affordance pass,
+FontAwesome vendoring, ARIA on the knob component.
+

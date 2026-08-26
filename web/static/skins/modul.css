@@ -123,16 +123,21 @@ html[data-skin="modul"] .uppercase.tracking-widest {
   color: var(--mo-mut);
 }
 
-/* ── Top panel ─────────────────────────────────────────────────────────── */
+/* ── RACK: the page is the rack (user-chosen direction 2026-08-25) ────── */
+html[data-skin="modul"] .max-w-7xl { max-width: none; padding: 0 16px 16px; }
+
+/* ── Top panel: a thin machined rail ───────────────────────────────────── */
 html[data-skin="modul"] .max-w-7xl > .flex.items-center.justify-between.mb-8 {
   background: var(--mo-panel);
   border: 1px solid var(--mo-edge);
-  border-radius: 4px;
+  border-radius: 0 0 4px 4px;
   box-shadow: inset 0 0 0 1px var(--mo-seam), inset 0 1px 0 rgba(255, 255, 255, 0.05),
-              0 6px 24px rgba(0, 0, 0, 0.5);
-  padding: 0.9rem 1.1rem;
+              0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 0.35rem 1rem;
+  margin: 0 -16px 1.25rem;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.6rem;
+  min-height: 44px;
 }
 html[data-skin="modul"] h1.text-2xl {
   font-size: 0.95rem;
@@ -389,14 +394,86 @@ html[data-skin="modul"] .bg-red-900\/20 {
   border-left: 3px solid var(--mo-fail);
 }
 
-/* ═══ THE MODULES (rendered by _knobModuleHTML) ═════════════════════════ */
+/* ═══ THE MODULES: 1U RACK UNITS (rendered by _knobModuleHTML) ══════════ */
+
+html[data-skin="modul"] #knob-row {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch !important;   /* Tailwind items-start shrink-wraps */
+  gap: 2px;
+  counter-reset: unit;
+}
 
 html[data-skin="modul"] .mmodule {
-  padding: 0.9rem 1rem 0.75rem;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 300px;
+  grid-template-areas: "head graph ctrl" "below below below";
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  border-radius: 2px;
+  min-height: 150px;
+  position: relative;
+  counter-increment: unit;
+}
+/* the unit address: position information, not ornament */
+html[data-skin="modul"] .mmodule::before {
+  content: "U" counter(unit);
+  position: absolute;
+  left: 8px; top: 50%;
+  transform: translateY(-50%) rotate(180deg);
+  writing-mode: vertical-rl;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: #4a4d52;
+  pointer-events: none;
+}
+html[data-skin="modul"] .mrk-head {
+  grid-area: head;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  justify-content: center;
+  gap: 9px;
+  padding: 14px 16px 14px 30px;
+  border-right: 1px solid var(--mo-seam);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05);
+  min-width: 0;
 }
+html[data-skin="modul"] .mrk-plates { display: flex; gap: 6px; flex-wrap: wrap; }
+html[data-skin="modul"] .mmodule .mg-wrap,
+html[data-skin="modul"] .mrk-nograph {
+  grid-area: graph;
+  margin: 10px 12px;
+  min-width: 0;
+}
+html[data-skin="modul"] .mrk-ctrl {
+  grid-area: ctrl;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 3px;
+  padding: 12px 16px;
+  border-left: 1px solid var(--mo-seam);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.05);
+  min-width: 0;
+}
+html[data-skin="modul"] .mrk-knob { grid-row: 1 / 4; }
+html[data-skin="modul"] .mrk-knob .mk:not(.mk-mini) { width: 56px; height: 56px; }
+html[data-skin="modul"] .mrk-range {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--mo-mut);
+  white-space: nowrap;
+}
+html[data-skin="modul"] .mrk-ctrl .mbadge { margin-left: 0; justify-self: start; }
+html[data-skin="modul"] .mrk-ctrl .mminis { margin-left: 0; grid-column: 1 / -1; gap: 1rem; }
+html[data-skin="modul"] .mrk-ctrl .mdetails { grid-column: 1 / -1; align-self: end; }
+html[data-skin="modul"] .mrk-below { grid-area: below; padding: 0 16px 6px 30px; }
+html[data-skin="modul"] .mrk-below .health-line-slot:empty { display: none; }
 
 /* title row: engraved plate */
 html[data-skin="modul"] .mhead {
@@ -521,18 +598,14 @@ html[data-skin="modul"] .mg-wrap {
 html[data-skin="modul"] .mg-wrap .u-over { cursor: pointer; }
 
 /* control row: knob · readout · minis */
-html[data-skin="modul"] .mrow {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  min-height: 48px;
-}
+html[data-skin="modul"] .mrow { display: flex; align-items: center; gap: 0.7rem; }
 html[data-skin="modul"] .mval {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: var(--mo-sig);
   min-width: 3.6rem;
+  cursor: text;
 }
 html[data-skin="modul"] .mdev {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
@@ -649,6 +722,10 @@ html[data-skin="modul"] .mg-wrap .u-legend { display: none; }
 html[data-skin="modul"] .mg-wrap .uplot,
 html[data-skin="modul"] .mg-wrap canvas { display: block; }
 
+/* macro cards read as one keypad unit under the rack */
+html[data-skin="modul"] #macro-grid .card { border-radius: 2px; }
+html[data-skin="modul"] #macro-grid { gap: 0.5rem; }
+
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */
 html[data-skin="modul"] ::-webkit-scrollbar { width: 10px; height: 10px; }
 html[data-skin="modul"] ::-webkit-scrollbar-track { background: var(--mo-field); }
@@ -678,8 +755,19 @@ html[data-skin="modul"] :is(input, textarea):focus-visible {
     flex-wrap: wrap;
   }
 
+  /* the rack unit stacks: head / graph / controls */
+  html[data-skin="modul"] .mmodule {
+    grid-template-columns: 1fr;
+    grid-template-areas: "head" "graph" "ctrl" "below";
+  }
+  html[data-skin="modul"] .mmodule::before { display: none; }
+  html[data-skin="modul"] .mrk-head { padding: 12px 14px; border-right: none; box-shadow: none; }
+  html[data-skin="modul"] .mrk-ctrl { border-left: none; box-shadow: none; }
+  html[data-skin="modul"] .mrk-below { padding-left: 14px; }
+
   /* knobs at THUMB-PAD scale (~25mm): the main knob is the instrument */
-  html[data-skin="modul"] .mk:not(.mk-mini) { width: 72px; height: 72px; }
+  html[data-skin="modul"] .mk:not(.mk-mini),
+  html[data-skin="modul"] .mrk-knob .mk:not(.mk-mini) { width: 72px; height: 72px; }
   html[data-skin="modul"] .mk-mini         { width: 44px; height: 44px; }
   html[data-skin="modul"] .mrow { flex-wrap: wrap; row-gap: 0.5rem; gap: 0.9rem; }
   html[data-skin="modul"] .mval { font-size: 17px; min-width: 4.4rem; }
