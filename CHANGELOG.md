@@ -204,6 +204,13 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Master/output meters fixed at the source**: a raw-wire dump (spare
+  TotalMix OSC controller pointed at a local listener) showed the
+  output row streams as `/level/out/<hw>` - the listener only knew
+  `output`, so every output meter was dropped on arrival. Token added.
+  Also drove TotalMix's Global OSC bandwidth limit from 500kByte/s to
+  None: all 30 input + 30 playback + output channels now stream
+  (was 16 inputs + 2 playback under the cap).
 - **Scroll-wheel Q** (user request): mouse wheel over a filter/EQ graph
   narrows or widens the peak (multiplicative per notch - Q reads
   logarithmically); plain 6dB high/low-pass wells ignore it (no Q axis).

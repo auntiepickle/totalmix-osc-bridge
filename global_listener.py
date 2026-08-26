@@ -90,7 +90,9 @@ class GlobalDeviceState:
                 # Last-value-wins, no history. levels_raw keeps a sample of
                 # distinct address shapes for live format inspection.
                 if len(parts) >= 3:
-                    rk = {"in": "inputs", "pb": "playback",
+                    # wire-observed 2026-08-25 (controller-3 dump): the
+                    # output row token is "out" - /level/out/<hw>
+                    rk = {"in": "inputs", "pb": "playback", "out": "outputs",
                           "output": "outputs"}.get(parts[1])
                     if rk is not None:
                         try:
