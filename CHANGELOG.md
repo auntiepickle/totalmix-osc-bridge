@@ -204,6 +204,10 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Row-level meter presence**: a resolvable channel in any row that
+  has streamed at all since boot reads as floor when absent - fixes
+  the boot-order gap where a restarted bridge showed no master meter
+  until Main's first frame (per-channel history was boot-dependent).
 - **Floor tick actually visible + silent channels persist** (user
   report: echo send showed no bar; master vanished when playback
   stopped): the -100dB presence tick drew a sub-pixel sliver - now a

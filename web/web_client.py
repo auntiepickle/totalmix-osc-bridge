@@ -311,6 +311,13 @@ def get_meters():
         return {"available": False, "meters": {}}
     st = lst.state
     now = _time.time()
+    with st._lock:
+        # rows with ANY frame since boot: every channel of a streaming
+        # row has a meter (TotalMix sends nothing for digital silence,
+        # so per-channel history is boot-order-dependent - task61
+        # finding: a restarted bridge showed no master until Main's
+        # first frame)
+        rows_seen = {k[0] for k in st.levels}
     out = {}
     for name, m in bridge.mappings.get("macros", {}).items():
         step = bridge._knob_step(m)
@@ -347,7 +354,7 @@ def get_meters():
                 # seen since boot that went quiet is at the floor, not
                 # meterless (#user report: master vanished when playback
                 # stopped)
-                if not vals and any(ent):
+                if not vals and (any(ent) or r in rows_seen):
                     vals = [-100.0]
             if vals:
                 val = max(vals)
