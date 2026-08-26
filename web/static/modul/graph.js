@@ -498,8 +498,10 @@
             const mx0 = xPos(Math.min(anchor2, st.meter));
             const mx1 = xPos(Math.max(anchor2, st.meter));
             const my = mid - barH / 2 - 6 * devicePixelRatio;
-            ctx.fillStyle = 'rgba(235, 232, 225, 0.35)';
-            ctx.fillRect(mx0, my, Math.max(1, mx1 - mx0), 3 * devicePixelRatio);
+            // floor presence must stay VISIBLE (#user report: echo send
+            // showed no bar - a signal at -100dB drew a sub-pixel sliver)
+            ctx.fillStyle = 'rgba(235, 232, 225, 0.45)';
+            ctx.fillRect(mx0, my, Math.max(2.5 * devicePixelRatio, mx1 - mx0), 3 * devicePixelRatio);
           }
           // the handle dot rides the bar end
           ctx.beginPath();

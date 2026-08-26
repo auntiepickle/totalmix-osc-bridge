@@ -340,9 +340,15 @@ def get_meters():
                 # 8s window (wire-observed: unchanged/floor values resend
                 # only every 2-4s - a 2s window made quiet meters blink;
                 # changing values stream continuously so no decay lag)
-                vals = [v[0] for h in hws
-                        for v in [st.levels.get((r, h))]
-                        if v and now - v[1] < 8.0]
+                ent = [st.levels.get((r, h)) for h in hws]
+                vals = [v[0] for v in ent if v and now - v[1] < 8.0]
+                # digitally-silent channels stop sending entirely (only
+                # analog noise keeps a stream alive) - a channel we HAVE
+                # seen since boot that went quiet is at the floor, not
+                # meterless (#user report: master vanished when playback
+                # stopped)
+                if not vals and any(ent):
+                    vals = [-100.0]
             if vals:
                 val = max(vals)
                 break

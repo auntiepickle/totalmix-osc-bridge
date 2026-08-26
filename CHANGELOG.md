@@ -204,6 +204,12 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Floor tick actually visible + silent channels persist** (user
+  report: echo send showed no bar; master vanished when playback
+  stopped): the -100dB presence tick drew a sub-pixel sliver - now a
+  minimum-width tick at higher ink; and a channel seen once since boot
+  that stops sending (digital silence sends nothing - only analog
+  noise keeps a stream alive) reads as floor, not meterless.
 - **Meter freshness window 2s -> 8s**: TotalMix resends unchanged
   (quiet/floor) levels only every 2-4s, so the 2s window made quiet
   meters blink in and out; changing values stream continuously, so the
