@@ -364,6 +364,36 @@ def get_meters():
     return {"available": True, "meters": out}
 
 
+@app.post("/api/knobs/{name}/group_capture")
+def knob_group_capture(name: str):
+    """Re-capture a send group's balance (#groups): for every member,
+    offset_db = member's CURRENT level minus the primary's - the mixer
+    as it sounds right now becomes the stored balance. Members whose
+    level is unknown (no feedback yet) or at hard bottom keep their
+    stored offset."""
+    import global_units as gu
+    macro = bridge.mappings.get("macros", {}).get(name)
+    step = bridge._knob_step(macro) if macro else None
+    grp = ((step or {}).get("operation") or {}).get("group")
+    if step is None or not isinstance(grp, list):
+        return {"status": "no_group"}
+    primary = bridge.knob_device_value(step)
+    if primary is None or primary <= 0.0005:
+        return {"status": "no_primary_state"}
+    pdb = gu.fader_db(primary)
+    captured = 0
+    for mem in grp:
+        if not isinstance(mem, dict) or not mem.get("channel"):
+            continue
+        tgt = {k: v for k, v in mem.items() if k in ("submix", "channel", "row")}
+        cur = bridge.knob_device_value({"target": tgt})
+        if cur is not None and cur > 0.0005:
+            mem["offset_db"] = round(gu.fader_db(cur) - pdb, 1)
+            captured += 1
+    _persist_mappings()
+    return {"status": "ok", "captured": captured, "group": grp}
+
+
 @app.get("/api/duck")
 def get_duck():
     """Live sidechain state per duck-enabled knob: gain reduction (dB)

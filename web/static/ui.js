@@ -530,6 +530,7 @@ function _knobModuleHTML(name, m, step) {
     </button>
   </div>
   ${_duckHTML(name, m, step)}
+  ${_groupHTML(name, m, step)}
   <div class="mrk-below">
     <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
@@ -593,6 +594,120 @@ function _duckHTML(name, m, step) {
     <span id="duck-gr-${name}" class="mduck-gr" title="live gain reduction"></span>
   </div>`;
 }
+
+// == SEND GROUPS (#user request: 'move multiple faders at once as a
+// group') ====================================================================
+// VCA-style: this knob is the group master; every member send follows at
+// its stored dB offset, so the balance you mixed survives every move.
+// Deliberated vs native TotalMix fader groups first: those are 4 global
+// toggles whose logic lives in the GUI fader layer - direct /mix writes
+// bypass them, and one group programmed across submixes corrupts the
+// others (RME forum). Bridge members are per-knob and unlimited.
+function _groupOf(m) {
+  const step = _knobStepOf(m);
+  const g = step && step.operation ? step.operation.group : null;
+  return Array.isArray(g) ? g : null;
+}
+
+function _groupHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  if (param !== 'volume') return '';
+  const grp = _groupOf(m);
+  const chip = `<button onclick="toggleGroup('${name}')"
+      class="mduck-chip${grp && grp.length ? ' on' : grp ? ' cfg' : ''}"
+      title="send group - this knob moves every member fader at its stored dB offset (VCA-style)">GRP${grp && grp.length ? ' ' + grp.length : ''}</button>`;
+  if (!grp) return `<div class="mduck mgrp">${chip}</div>`;
+  const members = grp.map((mem, i) => {
+    const off = Number(mem.offset_db || 0);
+    const where = mem.row === 3 ? 'OUT' : mem.row === 2 ? 'PB' : (mem.submix || '');
+    return `<span class="mgrp-mem" title="${_esc(mem.channel)}${where ? ' @ ' + _esc(where) : ''} - follows at ${off >= 0 ? '+' : ''}${off.toFixed(1)}dB">
+      ${_esc(mem.channel)}${where ? '<i>' + _esc(where) + '</i>' : ''}
+      <b>${off >= 0 ? '+' : ''}${off.toFixed(1)}</b>
+      <a onclick="groupRemove('${name}',${i})" title="remove from group">&times;</a>
+    </span>`;
+  }).join('');
+  const g = window._pickerGroups;
+  const chOpts = g
+    ? `<optgroup label="Inputs">${[...g.inputs.stereo, ...g.inputs.mono].map(n => `<option value="1|${_esc(n)}">${_esc(n)}</option>`).join('')}</optgroup>`
+      + `<optgroup label="Playback">${[...g.outputs.stereo, ...g.outputs.mono].map(n => `<option value="2|${_esc(n)}">${_esc(n)}</option>`).join('')}</optgroup>`
+      + `<optgroup label="Outputs">${[...g.outputs.stereo, ...g.outputs.mono].map(n => `<option value="3|${_esc(n)}">${_esc(n)}</option>`).join('')}</optgroup>`
+    : ((window._picker || {}).inputs || []).map(c => `<option value="1|${_esc(c.name)}">${_esc(c.name)}</option>`).join('');
+  const subOpts = ((window._picker || {}).outputs || [])
+    .map(o => `<option value="${_esc(o.name)}">${_esc(o.name)}</option>`).join('');
+  return `<div class="mduck mgrp">
+    ${chip}
+    ${members}
+    <select id="grp-ch-${name}" class="mduck-key" title="member channel">${chOpts}</select>
+    <select id="grp-sub-${name}" class="mduck-key" title="member submix (for input/playback sends)">${subOpts}</select>
+    <button class="mgrp-act" onclick="groupAdd('${name}')" title="add this send to the group">+ ADD</button>
+    <button class="mgrp-act" onclick="groupCapture('${name}')"
+        title="capture the balance: each member's offset becomes its CURRENT level relative to this knob">CAPTURE</button>
+  </div>`;
+}
+
+window.toggleGroup = function (name) {
+  const m = macros[name];
+  const step = m && _knobStepOf(m);
+  if (!step || !step.operation) return;
+  const grp = _groupOf(m);
+  if (!grp) step.operation.group = [];
+  else if (!grp.length) delete step.operation.group;
+  else {
+    if (!confirm(`Remove the ${grp.length}-member group from "${name}"?`)) return;
+    delete step.operation.group;
+  }
+  renderCards();
+  _duckSave(name);
+};
+
+window.groupAdd = function (name) {
+  const grp = _groupOf(macros[name]);
+  const chSel = document.getElementById(`grp-ch-${name}`);
+  const subSel = document.getElementById(`grp-sub-${name}`);
+  if (!grp || !chSel || !chSel.value) return;
+  const bar = chSel.value.indexOf('|');
+  const row = parseInt(chSel.value.slice(0, bar), 10) || 1;
+  const channel = chSel.value.slice(bar + 1);
+  const mem = { channel, offset_db: 0 };
+  if (row === 3) mem.row = 3;
+  else { mem.submix = subSel ? subSel.value : ''; if (row === 2) mem.row = 2; }
+  // the knob's own target is already the master - refuse a duplicate
+  const step = _knobStepOf(macros[name]);
+  const t = step.target || {};
+  const dup = grp.some(x => x.channel === mem.channel && x.submix === mem.submix && x.row === mem.row)
+    || (t.channel === mem.channel && t.submix === mem.submix && (t.row || 1) === (mem.row || 1));
+  if (dup) return;
+  grp.push(mem);
+  renderCards();
+  _duckSave(name);
+  // capture the live balance for the new member right away
+  setTimeout(() => groupCapture(name, true), 600);
+};
+
+window.groupRemove = function (name, i) {
+  const grp = _groupOf(macros[name]);
+  if (!grp) return;
+  grp.splice(i, 1);
+  renderCards();
+  _duckSave(name);
+};
+
+window.groupCapture = async function (name, quiet) {
+  try {
+    const r = await fetch(`/api/knobs/${encodeURIComponent(name)}/group_capture`,
+                          { method: 'POST' }).then(x => x.json());
+    if (r.status === 'ok') {
+      const step = _knobStepOf(macros[name]);
+      if (step && step.operation) step.operation.group = r.group;
+      window._lastLocalSave = { name, ts: Date.now() };
+      renderCards();
+    } else if (!quiet) {
+      alert(r.status === 'no_primary_state'
+        ? 'Capture needs the knob\u2019s own send to be up (readback unknown or at -inf).'
+        : 'No group to capture.');
+    }
+  } catch (e) { console.warn('[GRP] capture failed:', e.message); }
+};
 
 let _duckSaveTimers = {};
 function _duckSave(name) {

@@ -204,6 +204,16 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Send groups** (user request: "move multiple faders at once as a
+  group"): a volume knob becomes a VCA-style group master - every
+  member send follows it at a stored dB offset, so the balance you
+  mixed survives every move. GRP chip on volume-knob modules: add
+  members (any input/playback send into any submix, or output faders),
+  CAPTURE stores the live balance as offsets, primary at hard bottom
+  mutes the whole group clean. Native TotalMix fader groups were
+  deliberated first and rejected: 4 global toggles, cross-submix
+  corruption (RME forum), and group logic hooks the GUI fader layer -
+  direct Global-OSC mix writes bypass it entirely.
 - **Q renders true** (user report: the Q param didn't render right):
   the filter curves were sampled at 96 fixed log points, so a high-Q
   bell's lobe fell between samples - a true +12dB Q=9.9 bell drew as

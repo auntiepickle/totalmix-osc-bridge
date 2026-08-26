@@ -2041,6 +2041,43 @@ class TotalMixOSCBridge:
                 self._knob_enable_sent[f"{macro_name}:pins"] = time.time()
                 logger.info(f"knob '{macro_name}' pinned {p} -> {v:.3f}")
 
+    def _write_group_members(self, macro_name, step, primary_norm):
+        """Send groups (#user request: 'move multiple faders at once as a
+        group'). VCA-style: each member carries a stored dB offset from
+        the primary, so the group's internal balance survives every move.
+
+        Native TotalMix fader groups were deliberated first and rejected:
+        only 4 exist, they are GLOBAL (the same group programmed across
+        submixes corrupts the other submixes - RME forum), their OSC
+        exposure is an on/off toggle (/3/faderGroups) not a group fader,
+        and group logic hooks the GUI fader layer - direct Global /mix
+        writes bypass it. Bridge-side members are per-knob, unlimited,
+        and the offsets are stored, visible, and re-capturable."""
+        grp = (step.get("operation") or {}).get("group")
+        if not isinstance(grp, list) or not grp:
+            return
+        if str(step.get("target", {}).get("param", "volume")) != "volume":
+            return                      # groups ride the fader law
+        base_db = gu.fader_db(primary_norm)
+        for mem in grp:
+            if not isinstance(mem, dict) or not mem.get("channel"):
+                continue
+            tgt = {k: v for k, v in mem.items()
+                   if k in ("submix", "channel", "row")}
+            try:
+                off = float(mem.get("offset_db", 0.0))
+            except (TypeError, ValueError):
+                off = 0.0
+            # primary at hard bottom = the whole group mutes clean
+            v = 0.0 if primary_norm <= 0.0005 \
+                else max(0.0, min(1.0, gu.fader_lin(base_db + off)))
+            try:
+                writer, _, status = self.global_transport.resolve_step(tgt)
+                if status == "resolved":
+                    writer.send_message("group", v)
+            except Exception:
+                logger.exception(f"group member write failed for '{macro_name}'")
+
     def knob_set(self, macro_name, value, source="midi"):
         """Write a knob's value (0..1, mapped through its range/threshold).
         Returns {"status": ..., "value": ...}; statuses mirror resolve_step
@@ -2062,7 +2099,9 @@ class TotalMixOSCBridge:
             if not self._off_at_min(macro_name, step, value):
                 self._auto_enable(macro_name, step)
             self._assert_pins(macro_name, step)
-            writer.send_message("knob", shape_value(value, step["operation"]))
+            shaped = shape_value(value, step["operation"])
+            writer.send_message("knob", shaped)
+            self._write_group_members(macro_name, step, shaped)
             self.knob_values[macro_name] = value
             self._schedule_knob_readback(macro_name, step, writer.address)
         if self._knob_last_status.get(macro_name) != status:

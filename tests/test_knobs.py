@@ -413,3 +413,61 @@ def test_device_side_change_pushes_knob_update(rig):
     evs = [e["event"] for e in b.events if e["event"] and e["event"]["type"] == "knob_update"]
     assert len(evs) == n0 + 1
     assert evs[-1]["enable_value"] is False and evs[-1]["source"] == "device"
+
+
+# == Send groups (#user request: one knob moves several faders) ==========
+
+VOL_KNOB = {"steps": [{
+    "target": {"submix": "Main", "channel": "Mic 1"},
+    "value": "{{param}}",
+    "operation": {"type": "knob", "hold": True, "range": [0.0, 1.0],
+                  "group": [{"submix": "Phones", "channel": "Mic 1",
+                             "offset_db": -6.0}]},
+}], "midi_triggers": [{"type": "control_change", "number": 21,
+                       "channel": 1, "use_value_as_param": True}]}
+
+
+def test_group_member_follows_at_offset(rig):
+    b, g, _ = rig({"grp": VOL_KNOB})
+    r = b.knob_set("grp", 0.8172)          # unity on the primary
+    assert r["status"] == "resolved"
+    addrs = [a for a, _ in g.sent]
+    assert len(addrs) >= 2 and addrs[0] != addrs[1]   # primary + member
+    prim = g.sent[0][1]
+    memb = g.sent[1][1]
+    # member sits 6 dB under the primary through the fader law
+    assert gu.fader_db(memb) == pytest.approx(gu.fader_db(prim) - 6.0, abs=0.15)
+
+
+def test_group_mutes_clean_at_bottom(rig):
+    b, g, _ = rig({"grp": VOL_KNOB})
+    b.knob_set("grp", 0.0)
+    # primary at hard bottom -> the member is written to EXACTLY 0,
+    # not fader_lin(-65 - 6)
+    assert g.sent[1][1] == 0.0
+
+
+def test_group_ignored_on_non_volume(rig):
+    macro = {"steps": [{
+        "target": {"channel": "Main", "row": 3, "param": "lowcut_freq"},
+        "value": "{{param}}",
+        "operation": {"type": "knob", "hold": True, "range": [0.0, 1.0],
+                      "group": [{"submix": "Phones", "channel": "Mic 1"}]},
+    }], "midi_triggers": []}
+    b, g, _ = rig({"grp": macro})
+    b.knob_set("grp", 0.5)
+    # low cut writes enable + freq; no group member write follows
+    assert all("/mix/" not in a for a, _ in g.sent)
+
+
+def test_group_unresolvable_member_skips_quietly(rig):
+    macro = {"steps": [{
+        "target": {"submix": "Main", "channel": "Mic 1"},
+        "value": "{{param}}",
+        "operation": {"type": "knob", "hold": True, "range": [0.0, 1.0],
+                      "group": [{"submix": "Nope", "channel": "Ghost"}]},
+    }], "midi_triggers": []}
+    b, g, _ = rig({"grp": macro})
+    r = b.knob_set("grp", 0.5)
+    assert r["status"] == "resolved"       # the primary still lands
+    assert len(g.sent) == 1

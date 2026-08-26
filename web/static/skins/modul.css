@@ -1042,3 +1042,31 @@ html[data-skin="modul"] .mduck-gr.hot { color: var(--mo-ink); }
 /* tiny modules: the duck row would drown a 2/4HP tile */
 html[data-skin="modul"] .mmodule[data-size="2"] .mduck,
 html[data-skin="modul"] .mmodule[data-size="4"] .mduck { display: none; }
+
+/* == SEND GROUP row =================================================== */
+html[data-skin="modul"] .mgrp-mem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--mo-edge);
+  border-radius: 2px;
+  background: var(--mo-well);
+  padding: 2px 7px;
+  color: var(--mo-txt);
+}
+html[data-skin="modul"] .mgrp-mem i { color: var(--mo-mut); font-style: normal; font-size: 8px; }
+html[data-skin="modul"] .mgrp-mem b { color: var(--mo-ink); font-weight: 600; }
+html[data-skin="modul"] .mgrp-mem a { color: #4a4d52; cursor: pointer; }
+html[data-skin="modul"] .mgrp-mem a:hover { color: #e33; }
+html[data-skin="modul"] .mgrp-act {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  padding: 3px 8px;
+  border: 1px solid var(--mo-edge);
+  border-radius: 2px;
+  background: none;
+  color: var(--mo-mut);
+  cursor: pointer;
+  font-family: inherit;
+}
+html[data-skin="modul"] .mgrp-act:hover { color: var(--mo-ink); border-color: var(--mo-ink); }
