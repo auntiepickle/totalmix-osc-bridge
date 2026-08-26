@@ -188,7 +188,9 @@ window.applySkin = function (name) {
   } else {
     root.removeAttribute('data-skin');
     if (link) { link.disabled = true; link.href = ''; }
-    localStorage.removeItem('uiSkin');
+    // '' (deliberate Default) persists explicitly - absence of the key
+    // now means "never chose", which boots into MODUL (#user: default)
+    try { localStorage.setItem('uiSkin', ''); } catch (_) {}
   }
   document.querySelectorAll('.skin-btn').forEach(b => {
     b.classList.toggle('text-orange-400', (b.dataset.skinName || '') === (name || ''));
@@ -203,7 +205,13 @@ window.applySkin = function (name) {
     renderCards();
   }
 };
-try { const s = localStorage.getItem('uiSkin'); if (s) applySkin(s); } catch (_) {}
+// MODUL is the default design (#user: favorite): a browser that never
+// chose a skin boots into it; explicit choices (including Default = '')
+// are respected.
+try {
+  const s = localStorage.getItem('uiSkin');
+  applySkin(s === null ? 'modul' : s);
+} catch (_) { applySkin('modul'); }
 
 // Graphs in every theme (#user request) - default ON, hide via the toggle
 window.toggleGraphs = function () {

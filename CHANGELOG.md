@@ -131,6 +131,9 @@
   a knob's bounds are dimmed with dashed hairlines at the limits - the
   reachable lane reads bright, the locked zones read dark. Drawn only
   when the bounds actually bite inside the module's window.
+- **MODUL is the default design**: a browser that never chose a skin now
+  boots into MODUL; explicit choices (including Default) are respected
+  and persist.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.
