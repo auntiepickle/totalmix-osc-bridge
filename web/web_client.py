@@ -364,6 +364,15 @@ def get_meters():
     return {"available": True, "meters": out}
 
 
+@app.get("/api/duck")
+def get_duck():
+    """Live sidechain state per duck-enabled knob: gain reduction (dB)
+    and the key channel's level - painted onto the modules by the UI."""
+    d = getattr(bridge, "duck", None)
+    return {"available": d is not None,
+            "duck": {k: dict(v) for k, v in (d.status if d else {}).items()}}
+
+
 @app.get("/api/debug/levels")
 def debug_levels():
     """Live meter recon (#meters): the raw /level address shapes the Global

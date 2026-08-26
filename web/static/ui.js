@@ -529,6 +529,7 @@ function _knobModuleHTML(name, m, step) {
       DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
   </div>
+  ${_duckHTML(name, m, step)}
   <div class="mrk-below">
     <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
@@ -536,6 +537,111 @@ function _knobModuleHTML(name, m, step) {
   <div class="mresize" title="drag to resize"></div>
 </div>`;
 }
+
+// == SIDECHAIN DUCK (#user idea: 'using the dynamics module build side
+// chain compression') ========================================================
+// TotalMix has no sidechain input; the bridge sees every channel's live
+// meter, so a KEY channel ducks this knob's own send. The knob stays the
+// send level - the duck rides UNDER it (engine restores on disable).
+const _DUCK_FIELDS = [
+  // [field, label, toReal(v01), toNorm(real), fmt]
+  ['threshold', 'THR', v => -60 + v * 60, r => (r + 60) / 60, r => `${r.toFixed(0)}dB`],
+  ['depth', 'DEPTH', v => v * 24, r => r / 24, r => `-${r.toFixed(0)}dB`],
+  ['attack', 'ATK', v => Math.round(Math.pow(500, Math.max(v, 0.001))), r => Math.log(Math.max(1, r)) / Math.log(500), r => `${Math.round(r)}ms`],
+  ['release', 'REL', v => Math.round(20 * Math.pow(100, v)), r => Math.log(Math.max(20, r) / 20) / Math.log(100), r => `${Math.round(r)}ms`],
+];
+
+function _duckCfg(m) {
+  const step = _knobStepOf(m);
+  return step && step.operation ? step.operation.duck : null;
+}
+
+function _duckHTML(name, m, step) {
+  const param = (step.target && step.target.param) || 'volume';
+  if (param !== 'volume') return '';           // duck rides the fader law
+  const duck = _duckCfg(m);
+  const on = duck && duck.enabled;
+  const chip = `<button id="duck-chip-${name}" onclick="toggleDuck('${name}')"
+      class="mduck-chip${on ? ' on' : duck ? ' cfg' : ''}"
+      title="sidechain duck - a key channel's level pulls this send down (goblin mode)">DUCK</button>`;
+  if (!duck) return `<div class="mduck">${chip}</div>`;
+  const key = duck.key || {};
+  const keyVal = `${key.row || 1}|${key.channel || ''}`;
+  const g = window._pickerGroups;
+  const opt = (v, l) => `<option value="${_esc(v)}"${v === keyVal ? ' selected' : ''}>${_esc(l)}</option>`;
+  const grp = (label, names, row) => names && names.length
+    ? `<optgroup label="${label}">${names.map(n => opt(`${row}|${n}`, n)).join('')}</optgroup>` : '';
+  const keyOpts = g
+    ? grp('Inputs', [...g.inputs.stereo, ...g.inputs.mono], 1)
+      + grp('Playback', [...g.outputs.stereo, ...g.outputs.mono], 2)
+      + grp('Outputs', [...g.outputs.stereo, ...g.outputs.mono], 3)
+    : ((window._picker || {}).inputs || []).map(c => opt(`1|${c.name}`, c.name)).join('');
+  const sliders = _DUCK_FIELDS.map(([f, lbl, toReal, toNorm, fmt]) => {
+    const real = Number(duck[f] ?? { threshold: -30, depth: 12, attack: 20, release: 250 }[f]);
+    return `<label class="mduck-p" title="${f}">
+      <span class="mduck-lbl">${lbl}</span>
+      <input type="range" min="0" max="1" step="any" value="${toNorm(real)}"
+          oninput="_duckSlide('${name}','${f}',this.value)">
+      <span id="duck-v-${name}-${f}" class="mduck-val">${fmt(real)}</span>
+    </label>`;
+  }).join('');
+  return `<div class="mduck">
+    ${chip}
+    <span class="mduck-lbl">KEY</span>
+    <select class="mduck-key" onchange="_duckKey('${name}', this.value)" title="the channel whose level does the ducking">${keyOpts}</select>
+    ${sliders}
+    <span id="duck-gr-${name}" class="mduck-gr" title="live gain reduction"></span>
+  </div>`;
+}
+
+let _duckSaveTimers = {};
+function _duckSave(name) {
+  // claim the local edit IMMEDIATELY - a WS-triggered macros refresh
+  // inside the debounce window would revert the mutation before it saves
+  window._lastLocalSave = { name, ts: Date.now() };
+  clearTimeout(_duckSaveTimers[name]);
+  _duckSaveTimers[name] = setTimeout(async () => {
+    try {
+      await API.saveMacro(name, _cleanMacro(macros[name]));
+      window._lastLocalSave = { name, ts: Date.now() };
+    } catch (e) { console.warn('[DUCK] save failed:', e.message); }
+  }, 350);
+}
+
+window.toggleDuck = function (name) {
+  const m = macros[name];
+  const step = m && _knobStepOf(m);
+  if (!step || !step.operation) return;
+  let duck = step.operation.duck;
+  if (!duck) {
+    const g = window._pickerGroups;
+    const firstIn = g ? (g.inputs.stereo[0] || g.inputs.mono[0] || '')
+      : ((((window._picker || {}).inputs || [])[0]) || {}).name || '';
+    duck = step.operation.duck = { enabled: true, key: { row: 1, channel: firstIn },
+                                   threshold: -30, depth: 12, attack: 20, release: 250 };
+  } else duck.enabled = !duck.enabled;
+  renderCards();
+  _duckSave(name);
+};
+
+window._duckKey = function (name, v) {
+  const duck = _duckCfg(macros[name]);
+  if (!duck) return;
+  const bar = v.indexOf('|');
+  duck.key = { row: parseInt(v.slice(0, bar), 10) || 1, channel: v.slice(bar + 1) };
+  _duckSave(name);
+};
+
+window._duckSlide = function (name, field, v01) {
+  const duck = _duckCfg(macros[name]);
+  const def = _DUCK_FIELDS.find(d => d[0] === field);
+  if (!duck || !def) return;
+  const real = def[2](parseFloat(v01));
+  duck[field] = Math.round(real * 10) / 10;
+  const el = document.getElementById(`duck-v-${name}-${field}`);
+  if (el) el.textContent = def[4](duck[field]);
+  _duckSave(name);
+};
 
 function _modulWire(name) {
   const m = macros[name], step = m && _knobStepOf(m);

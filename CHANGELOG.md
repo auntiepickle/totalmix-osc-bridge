@@ -204,6 +204,15 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Sidechain duck** (user idea: "using the dynamics module build side
+  chain compression"): TotalMix has no sidechain input, but the bridge
+  sees every channel's live meter - so a KEY channel's level now drives
+  gain reduction on a send knob's own target. DUCK chip on every
+  volume-knob module: key picker (any input/playback/output), THR /
+  DEPTH / ATK / REL sliders, live GR readout. 25Hz engine on the
+  bridge: attack/release envelope, RME-fader-law writes of base minus
+  reduction, base re-derives when anyone moves the fader mid-duck, and
+  the send is restored on disable/shutdown. 7 new engine-math tests.
 - **MIDI binding matrix overlay** (user request): header MATRIX button
   opens a full-screen view - a 128-cell number grid per MIDI channel
   (CC and note bindings share the number space, knobs in orange, fire

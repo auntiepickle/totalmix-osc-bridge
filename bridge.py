@@ -162,6 +162,7 @@ class TotalMixOSCBridge:
         self.osc_listener = None            # OSCListener — set by start_osc_listener()
         self.global_listener = None         # GlobalOSCListener (#25) — start_global_osc()
         self.global_transport = None        # GlobalTransport (#25) — active or shadow
+        self.duck = None                    # DuckSupervisor — sidechain engine
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
         self.last_probe = None              # result of the last device liveness probe
         self.sweep_state = {"status": "idle"}      # physical-table sweep job state (#24)
@@ -1746,6 +1747,12 @@ class TotalMixOSCBridge:
         self.global_transport.start()
         self._knob_watch_stop.clear()
         threading.Thread(target=self._knob_watch_loop, daemon=True).start()
+        # Sidechain duck engine (#user idea): key-channel meters drive gain
+        # reduction on duck-enabled knob targets. Shares the knob-watch stop.
+        from duck_engine import DuckSupervisor
+        self.duck = DuckSupervisor(self)
+        threading.Thread(target=self.duck.run,
+                         args=(self._knob_watch_stop,), daemon=True).start()
         mode = ("TRANSPORT ACTIVE" if OSC_TRANSPORT == "global"
                 else "shadow mode (observing only)")
         logger.info(f"Global OSC {mode} → {GLOBAL_OSC_IP}:{GLOBAL_OSC_PORT} "

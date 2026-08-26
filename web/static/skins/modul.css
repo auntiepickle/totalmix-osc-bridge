@@ -991,3 +991,54 @@ html[data-skin="modul"] #midi-matrix-btn {
   text-transform: uppercase;
 }
 html[data-skin="modul"] #midi-matrix-btn:hover { color: var(--mo-ink); border-color: var(--mo-ink); }
+
+/* == SIDECHAIN DUCK row =============================================== */
+html[data-skin="modul"] .mduck {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 5px 14px 7px 24px;
+  border-top: 1px solid var(--mo-seam);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 9px;
+}
+html[data-skin="modul"] .mduck-chip {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  padding: 3px 9px;
+  border: 1px solid var(--mo-edge);
+  border-radius: 2px;
+  background: var(--mo-well);
+  color: #4a4d52;
+  cursor: pointer;
+}
+html[data-skin="modul"] .mduck-chip.cfg { color: var(--mo-mut); }
+html[data-skin="modul"] .mduck-chip.on {
+  color: var(--mo-ink);
+  border-color: var(--mo-ink);
+}
+html[data-skin="modul"] .mduck-lbl { color: var(--mo-mut); letter-spacing: 0.12em; }
+html[data-skin="modul"] .mduck-key {
+  background: var(--mo-well);
+  color: var(--mo-txt);
+  border: 1px solid var(--mo-edge);
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 9px;
+  padding: 2px 5px;
+  max-width: 130px;
+}
+html[data-skin="modul"] .mduck-p { display: flex; align-items: center; gap: 4px; }
+html[data-skin="modul"] .mduck-p input[type="range"] {
+  width: 64px;
+  height: 3px;
+  accent-color: var(--mo-ink);
+}
+html[data-skin="modul"] .mduck-val { color: var(--mo-txt); min-width: 40px; }
+html[data-skin="modul"] .mduck-gr { color: var(--mo-mut); margin-left: auto; }
+html[data-skin="modul"] .mduck-gr.hot { color: var(--mo-ink); }
+/* tiny modules: the duck row would drown a 2/4HP tile */
+html[data-skin="modul"] .mmodule[data-size="2"] .mduck,
+html[data-skin="modul"] .mmodule[data-size="4"] .mduck { display: none; }

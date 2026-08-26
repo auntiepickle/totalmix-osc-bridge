@@ -752,6 +752,19 @@ setInterval(async () => {
                 : Math.max(_faderLin(db), 0.004);
       if (window.ModulGraph) ModulGraph.meterUpdate(`f:${name}`, pos);
     });
+    // sidechain duck: live gain reduction onto the modules (#duck)
+    if (document.querySelector('[id^="duck-gr-"]')) {
+      const dk = await fetch('/api/duck').then(r => r.json()).catch(() => null);
+      if (dk && dk.available) {
+        document.querySelectorAll('[id^="duck-gr-"]').forEach(el => {
+          const name = el.id.slice(8);
+          const st = dk.duck[name];
+          const gr = st && st.gr;
+          el.textContent = gr > 0.2 ? `GR -${gr.toFixed(1)}dB` : '';
+          el.classList.toggle('hot', !!gr && gr > 0.2);
+        });
+      }
+    }
   } catch (_) {}
 }, 160);
 
