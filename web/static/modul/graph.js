@@ -478,6 +478,16 @@
             }
             ctx.setLineDash([]);
           }
+          // live peak meter (#meters): a slim ink bar above the value
+          // lane - the SIGNAL arriving, distinct from the SET level
+          if (st.meter != null) {
+            const anchor2 = opts.fill === 'center' ? 0.5 : 0;
+            const mx0 = xPos(Math.min(anchor2, st.meter));
+            const mx1 = xPos(Math.max(anchor2, st.meter));
+            const my = mid - barH / 2 - 6 * devicePixelRatio;
+            ctx.fillStyle = 'rgba(235, 232, 225, 0.35)';
+            ctx.fillRect(mx0, my, Math.max(1, mx1 - mx0), 3 * devicePixelRatio);
+          }
           // the handle dot rides the bar end
           ctx.beginPath();
           ctx.arc(xPos(v), mid, 4.5 * devicePixelRatio, 0, Math.PI * 2);
@@ -532,10 +542,17 @@
     st.mix = model.enabled === false ? 0 : 1;
     st.u.redraw();
   }
+  // meter-only refresh: does not disturb the set level
+  function meterUpdate(key, pos) {
+    const st = plots[key];
+    if (!st || st.meter === pos) return;
+    st.meter = pos;
+    st.u.redraw();
+  }
 
   function destroy(key) {
     if (plots[key]) { plots[key].u.destroy(); delete plots[key]; }
   }
 
-  window.ModulGraph = { filterInit, filterUpdate, levelInit, levelUpdate, waveformInit, waveformUpdate, waveformRun, waveformStop, destroy, magDb, fmtHz, opShape };
+  window.ModulGraph = { filterInit, filterUpdate, levelInit, levelUpdate, meterUpdate, waveformInit, waveformUpdate, waveformRun, waveformStop, destroy, magDb, fmtHz, opShape };
 })();

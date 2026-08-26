@@ -183,6 +183,16 @@
   every name/link change; the activity poll carries the counter and any
   tick refreshes the picker + validity icons - the old burst threshold
   only caught snapshot switches.
+- **Live peak meters on the level strips** (user request; user enabled
+  Level Meter data in TotalMix): the Global feed's /level frames (dB,
+  wire-observed) flow through the listener into GET /api/meters - each
+  knob reads its meter source (sends: the source channel; row-3 knobs:
+  the output), stereo pairs report the louder member. The strips draw
+  a slim ink peak bar above the value lane, mapped through the same
+  fader law so 0 dB signal sits at the unity tick. ~6 Hz, pauses in
+  hidden tabs.
+- **HP size chip made discoverable** (user missed it): bigger, brighter,
+  with a resize glyph.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

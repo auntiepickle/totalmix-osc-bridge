@@ -731,6 +731,28 @@ async function prefillBridgeState() {
   } catch (_) {}
 }
 
+// ── Meter pump (#meters): live peaks onto the level strips ────────────
+// ~6 Hz pull; skips hidden tabs and knobs without a level plot. The
+// meter maps through the same fader law as the lane's x-axis, so 0 dB
+// signal sits at the unity tick.
+setInterval(async () => {
+  if (document.hidden || typeof macros !== 'object') return;
+  if (!document.querySelector('[data-kind="level"], [data-kind="pan"]')) return;
+  try {
+    const r = await fetch('/api/meters');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.available) return;
+    document.querySelectorAll('[data-kind="level"], [data-kind="pan"]').forEach(card => {
+      const name = card.id.replace('card-', '');
+      const db = d.meters[name];
+      const pos = (db == null || typeof _faderLin !== 'function') ? null
+                : (db <= -64.9 ? null : _faderLin(db));
+      if (window.ModulGraph) ModulGraph.meterUpdate(`f:${name}`, pos);
+    });
+  } catch (_) {}
+}, 160);
+
 // ── Health polling — MQTT and OSC status dots ─────────────────────────────────
 async function pollHealth() {
   try {

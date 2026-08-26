@@ -85,11 +85,19 @@ class GlobalDeviceState:
                 self.last_heartbeat = now
                 return
             if head == "level":
-                # Meters (#user request): last-value-wins, no history - one
-                # tuple per address, cheap enough for the ~channel-count x
-                # rate stream. levels_raw keeps a tiny sample of distinct
-                # address shapes so the wire format can be inspected live.
-                self.levels[address] = (tuple(args), now)
+                # Meters: /level/<row>/<hw> carries ONE float = dB (wire-
+                # observed 2026-08-25: -100.0 floor, e.g. -31.99 live).
+                # Last-value-wins, no history. levels_raw keeps a sample of
+                # distinct address shapes for live format inspection.
+                if len(parts) >= 3:
+                    rk = {"in": "inputs", "pb": "playback",
+                          "output": "outputs"}.get(parts[1])
+                    if rk is not None:
+                        try:
+                            self.levels[(rk, int(parts[2]))] = (
+                                float(arg0) if arg0 is not None else -100.0, now)
+                        except (ValueError, TypeError):
+                            pass
                 if len(self.levels_raw) < 8 and address not in self.levels_raw:
                     self.levels_raw[address] = tuple(args)
                 return

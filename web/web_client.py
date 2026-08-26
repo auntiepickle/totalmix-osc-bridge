@@ -299,6 +299,45 @@ async def delete_macro(macro_name: str):
     return {"status": "success", "macro": macro_name}
 
 
+@app.get("/api/meters")
+def get_meters():
+    """Live peak levels (dB) for every knob macro's meter source (#meters):
+    sends meter their SOURCE channel, row-3 knobs their output. Stereo
+    pairs report the max of both members. Values fresher than 2s only."""
+    import time as _time
+    lst = getattr(bridge, "global_listener", None)
+    gt = getattr(bridge, "global_transport", None)
+    if lst is None or gt is None:
+        return {"available": False, "meters": {}}
+    st = lst.state
+    now = _time.time()
+    out = {}
+    for name, m in bridge.mappings.get("macros", {}).items():
+        step = bridge._knob_step(m)
+        if not step:
+            continue
+        t = step.get("target") or {}
+        ch = t.get("channel")
+        if not ch:
+            continue
+        row = str(t.get("row", 1))
+        rk = {"1": "inputs", "2": "playback", "3": "outputs"}.get(row, "inputs")
+        try:
+            hw = gt._hw_for_name(rk, ch)
+        except Exception:
+            hw = None
+        if hw is None:
+            continue
+        with st._lock:
+            hws = (hw, hw + 1) if st.stereo.get(rk, {}).get(hw) else (hw,)
+            vals = [v[0] for h in hws
+                    for v in [st.levels.get((rk, h))]
+                    if v and now - v[1] < 2.0]
+        if vals:
+            out[name] = round(max(vals), 1)
+    return {"available": True, "meters": out}
+
+
 @app.get("/api/debug/levels")
 def debug_levels():
     """Live meter recon (#meters): the raw /level address shapes the Global
@@ -311,7 +350,7 @@ def debug_levels():
         return {"available": True,
                 "shapes": {k: list(v) for k, v in st.levels_raw.items()},
                 "count": len(st.levels),
-                "sample": {k: [list(v[0]), v[1]] for k, v in list(st.levels.items())[:12]}}
+                "sample": {f"{k[0]}/{k[1]}": [v[0], v[1]] for k, v in list(st.levels.items())[:12]}}
 
 
 @app.post("/api/config/macros-order")

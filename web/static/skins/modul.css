@@ -468,15 +468,17 @@ html[data-skin="modul"] .mmodule[data-kind="pan"] .mrk-range { display: none; }
 
 html[data-skin="modul"] .msize {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.12em;
-  color: #4a4d52;
+  color: var(--mo-mut);
   background: var(--mo-well);
-  border: 1px solid var(--mo-seam);
+  border: 1px solid var(--mo-edge);
   border-radius: 2px;
-  padding: 3px 6px;
+  padding: 4px 8px;
+  cursor: pointer;
 }
-html[data-skin="modul"] .msize:hover { color: var(--mo-mut); }
+html[data-skin="modul"] .msize::after { content: ' 95'; color: #4a4d52; }
+html[data-skin="modul"] .msize:hover { color: var(--mo-ink); border-color: #3a3e43; }
 
 html[data-skin="modul"] .mmodule {
   display: grid;
