@@ -199,7 +199,7 @@
     }
 
     // direct manipulation: drag anywhere on the plot = set cutoff
-    if (opts.toKnob) {
+    if (opts.toKnob || opts.onFreq) {
       const over = u.over;
       let dragging = false;
       const toF = ev => {
@@ -226,7 +226,8 @@
         };
       };
       const applyDrag = (ev, isDown) => {
-        window.knobInput(opts.name, opts.toKnob(toF(ev)));
+        if (opts.onFreq) opts.onFreq(toF(ev));
+        else if (opts.toKnob) window.knobInput(opts.name, opts.toKnob(toF(ev)));
         const { st, resonant, gained } = kindNow();
         if (isDown) {
           vStart = (resonant || gained)
@@ -417,9 +418,124 @@
     if (st.onTick) { st.onTick(null, null); st.onTick = null; }
   }
 
+  // ── level strip: volume/pan knobs — the value on a real axis ──────
+  // x = param-norm 0..1; opts.axis = {splits:[x...], labels:[s...]} lets
+  // the shell speak dB (fader law) or L/C/R; opts.zero marks unity/center;
+  // opts.fill 'left'|'center'; opts.bounds dims the unreachable region;
+  // opts.onX(v01) receives absolute drags/taps.
+  function levelInit(key, el, opts = {}) {
+    if (plots[key]) { plots[key].u.destroy(); delete plots[key]; }
+    const w = el.clientWidth || 280, h = opts.height || 96;
+    const ax = opts.axis || { splits: [0, 0.5, 1], labels: ['0', '', '1'] };
+    const u = new uPlot({
+      width: w, height: h,
+      cursor: { show: false }, legend: { show: false },
+      scales: { x: { time: false, range: [0, 1] }, y: { range: [0, 1] } },
+      axes: [
+        { ...AXIS, splits: () => ax.splits,
+          filter: (u, sp) => sp,
+          values: (u, sp) => sp.map(x => { const i = ax.splits.indexOf(x); return i >= 0 ? ax.labels[i] : ''; }) },
+        { show: false },
+      ],
+      series: [{}, {}],
+      hooks: {
+        draw: [u => {
+          const st = plots[key];
+          if (!st) return;
+          const ctx = u.ctx, b = u.bbox;
+          const xPos = t => u.valToPos(Math.max(0, Math.min(1, t)), 'x', true);
+          ctx.save();
+          // the value: an orange fill from the anchor to the position
+          const v = st.level == null ? 0 : st.level;
+          const anchor = opts.fill === 'center' ? 0.5 : 0;
+          const x0 = xPos(Math.min(anchor, v)), x1 = xPos(Math.max(anchor, v));
+          const mid = b.top + b.height / 2, barH = Math.min(26 * devicePixelRatio, b.height * 0.34);
+          ctx.fillStyle = st.mix > 0.5 ? 'rgba(255,77,0,0.28)' : 'rgba(235,232,225,0.10)';
+          ctx.fillRect(x0, mid - barH / 2, Math.max(1, x1 - x0), barH);
+          ctx.fillStyle = st.mix > 0.5 ? ORANGE : 'rgba(235,232,225,0.35)';
+          ctx.fillRect(xPos(v) - 1.5 * devicePixelRatio, mid - barH / 2, 3 * devicePixelRatio, barH);
+          // zero/unity reference tick, emphasized like the 0 dB line
+          if (opts.zero != null) {
+            ctx.strokeStyle = 'rgba(235,232,225,0.30)';
+            ctx.lineWidth = 1 * devicePixelRatio;
+            ctx.beginPath();
+            ctx.moveTo(xPos(opts.zero), b.top);
+            ctx.lineTo(xPos(opts.zero), b.top + b.height);
+            ctx.stroke();
+          }
+          // knob limits: dim + dashed hairlines (same language as filters)
+          if (Array.isArray(st.bounds)) {
+            const bx0 = xPos(st.bounds[0]), bx1 = xPos(st.bounds[1]);
+            ctx.fillStyle = 'rgba(0,0,0,0.45)';
+            if (bx0 > b.left + 1) ctx.fillRect(b.left, b.top, bx0 - b.left, b.height);
+            if (bx1 < b.left + b.width - 1) ctx.fillRect(bx1, b.top, b.left + b.width - bx1, b.height);
+            ctx.strokeStyle = 'rgba(235,232,225,0.28)';
+            ctx.setLineDash([3 * devicePixelRatio, 3 * devicePixelRatio]);
+            for (const x of [bx0, bx1]) {
+              if (x > b.left + 1 && x < b.left + b.width - 1) {
+                ctx.beginPath(); ctx.moveTo(x, b.top); ctx.lineTo(x, b.top + b.height); ctx.stroke();
+              }
+            }
+            ctx.setLineDash([]);
+          }
+          // the handle dot rides the bar end
+          ctx.beginPath();
+          ctx.arc(xPos(v), mid, 4.5 * devicePixelRatio, 0, Math.PI * 2);
+          ctx.fillStyle = st.mix > 0.5 ? ORANGE : 'rgba(235,232,225,0.35)';
+          ctx.strokeStyle = '#141517';
+          ctx.lineWidth = 2 * devicePixelRatio;
+          ctx.fill(); ctx.stroke();
+          ctx.restore();
+        }],
+      },
+    }, [[0, 1], [null, null]], el);
+
+    const st = plots[key] = { u, level: null, mix: 1, anim: 0 };
+    if (Array.isArray(opts.bounds)) {
+      const b0 = Math.max(0, opts.bounds[0]), b1 = Math.min(1, opts.bounds[1]);
+      if (b0 > 0.005 || b1 < 0.995) st.bounds = [b0, b1];
+    }
+    if (opts.onX) {
+      const over = u.over;
+      let dragging = false;
+      const toV = ev => {
+        const r = over.getBoundingClientRect();
+        return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      };
+      over.style.touchAction = 'none';
+      over.addEventListener('pointerdown', ev => {
+        dragging = true; over.setPointerCapture(ev.pointerId);
+        window._knobDrag = opts.dragKey || key;
+        opts.onX(toV(ev));
+        ev.preventDefault();
+      });
+      over.addEventListener('pointermove', ev => { if (dragging) opts.onX(toV(ev)); });
+      const end = () => {
+        dragging = false;
+        if (window._knobDrag === (opts.dragKey || key)) window._knobDrag = null;
+      };
+      over.addEventListener('pointerup', end);
+      over.addEventListener('pointercancel', end);
+    }
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => {
+        const nw = el.clientWidth;
+        if (nw && Math.abs(nw - u.width) > 4) u.setSize({ width: nw, height: h });
+      }).observe(el);
+    }
+    return u;
+  }
+  function levelUpdate(key, model) {
+    const st = plots[key];
+    if (!st) return;
+    st.level = model.v;
+    st.mix = model.enabled === false ? 0 : 1;
+    st.u.redraw();
+  }
+
   function destroy(key) {
     if (plots[key]) { plots[key].u.destroy(); delete plots[key]; }
   }
 
-  window.ModulGraph = { filterInit, filterUpdate, waveformInit, waveformUpdate, waveformRun, waveformStop, destroy, magDb, fmtHz, opShape };
+  window.ModulGraph = { filterInit, filterUpdate, levelInit, levelUpdate, waveformInit, waveformUpdate, waveformRun, waveformStop, destroy, magDb, fmtHz, opShape };
 })();

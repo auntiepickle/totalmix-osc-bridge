@@ -397,12 +397,33 @@ html[data-skin="modul"] .bg-red-900\/20 {
 /* ═══ THE MODULES: 1U RACK UNITS (rendered by _knobModuleHTML) ══════════ */
 
 html[data-skin="modul"] #knob-row {
-  display: flex !important;
-  flex-direction: column;
-  align-items: stretch !important;   /* Tailwind items-start shrink-wraps */
+  display: grid !important;
+  grid-template-columns: repeat(6, 1fr);
+  align-items: stretch;
   gap: 2px;
   counter-reset: unit;
 }
+/* full-width 1U for graph-hero units; HALF-RACK for simple level/pan
+   knobs (#user report: full rows for single values wasted the page) */
+html[data-skin="modul"] .mmodule { grid-column: 1 / -1; }
+html[data-skin="modul"] .mmodule.mcompact { grid-column: span 2; min-height: 118px; }
+html[data-skin="modul"] .mcompact { grid-template-columns: 132px minmax(0, 1fr); grid-template-areas: "head graph" "head ctrl" "below below"; }
+html[data-skin="modul"] .mcompact .mrk-head { padding: 10px 10px 10px 24px; gap: 6px; }
+html[data-skin="modul"] .mcompact .mg-wrap { margin: 8px 10px 0; }
+html[data-skin="modul"] .mcompact .mrk-ctrl {
+  border-left: none;
+  box-shadow: none;
+  padding: 4px 12px 8px;
+  grid-template-columns: auto auto 1fr;
+  grid-template-rows: auto;
+  align-items: center;
+}
+html[data-skin="modul"] .mcompact .mrk-knob { grid-row: auto; }
+html[data-skin="modul"] .mcompact .mrk-knob .mk:not(.mk-mini) { width: 40px; height: 40px; }
+html[data-skin="modul"] .mcompact .mval { font-size: 15px; }
+html[data-skin="modul"] .mcompact .mrk-range, html[data-skin="modul"] .mcompact .mdev { display: none; }
+html[data-skin="modul"] .mcompact .mdetails { grid-column: auto; justify-self: end; }
+html[data-skin="modul"] .mcompact .mrk-below { padding: 0 12px 4px 24px; }
 
 html[data-skin="modul"] .mmodule {
   display: grid;
@@ -722,6 +743,19 @@ html[data-skin="modul"] .mg-wrap .u-legend { display: none; }
 html[data-skin="modul"] .mg-wrap .uplot,
 html[data-skin="modul"] .mg-wrap canvas { display: block; }
 
+/* reorder grip + drop indicator */
+html[data-skin="modul"] .mgrip {
+  cursor: grab;
+  color: #4a4d52;
+  font-size: 11px;
+  line-height: 1;
+  margin-right: 8px;
+  user-select: none;
+}
+html[data-skin="modul"] .mgrip:hover { color: var(--mo-mut); }
+html[data-skin="modul"] .mmodule.mdragging { opacity: 0.45; }
+html[data-skin="modul"] .mmodule.mdrop { box-shadow: inset 0 2px 0 var(--mo-sig), inset 0 0 0 1px var(--mo-seam); }
+
 /* macro cards read as one keypad unit under the rack */
 html[data-skin="modul"] #macro-grid .card { border-radius: 2px; }
 html[data-skin="modul"] #macro-grid { gap: 0.5rem; }
@@ -756,7 +790,9 @@ html[data-skin="modul"] :is(input, textarea):focus-visible {
   }
 
   /* the rack unit stacks: head / graph / controls */
-  html[data-skin="modul"] .mmodule {
+  html[data-skin="modul"] .mmodule,
+  html[data-skin="modul"] .mmodule.mcompact {
+    grid-column: 1 / -1;
     grid-template-columns: 1fr;
     grid-template-areas: "head" "graph" "ctrl" "below";
   }

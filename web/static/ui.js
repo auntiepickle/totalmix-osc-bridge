@@ -315,7 +315,7 @@ function _knobStripHTML(name, m, step) {
         ${_enableChipHTML(name, m, step)}
         ${_companionChipsHTML(name, m, step)}
     </div>
-    ${_graphsEnabled() && _MODUL_TAPER[param] ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
+    ${_graphsEnabled() && _graphKindOf(param) ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
     <div class="flex gap-2 items-center mb-1 min-w-0">
         <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
             class="flex-1 min-w-0 accent-orange-500" title="Drag to set — MIDI moves it too"
@@ -342,7 +342,7 @@ function _renderKnobSection(names) {
     : `<div class="col-span-full text-xs text-zinc-600 italic">no knobs yet — <b>New Knob</b> binds a channel parameter to a MIDI control</div>`;
   // wire synchronously: innerHTML is parsed already, and rAF never fires
   // in a hidden tab (graphs would stay empty until the next visible render)
-  if (modul && names.length) names.forEach(n => _modulWire(n));
+  if (modul && names.length) { names.forEach(n => _modulWire(n)); _wireKnobReorder(); }
   else if (names.length && _graphsEnabled()) names.forEach(n => _wireKnobGraph(n));
 }
 
@@ -358,6 +358,18 @@ function _renderKnobSection(names) {
 // server; everything DOM-flavored stays in the shell functions.
 const _MODUL_TAPER = { lowcut_freq: [20, 500], eq_freq_1: [20, 20000],
                        eq_freq_2: [20, 20000], eq_freq_3: [20, 20000] };
+
+// Which display a knob's graph well gets (#user request: volume and
+// gain knobs too). 'filter' = response curve; 'gain' = the band's bell/
+// shelf with axes swapped (x = freq companion, y = the knob); 'level' =
+// fader-law strip; 'pan' = center-anchored strip.
+function _graphKindOf(param) {
+  if (_MODUL_TAPER[param]) return 'filter';
+  if (/^eq_gain_\d$/.test(param)) return 'gain';
+  if (param === 'pan') return 'pan';
+  if (param === 'volume') return 'level';
+  return null;
+}
 
 // Graphs in EVERY theme (#user request), gear-menu toggle to hide
 function _graphsEnabled() {
@@ -379,8 +391,38 @@ function _knobNormOf(m, op) {
 
 function _modulModel(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
+  const kind = _graphKindOf(param);
+  if (kind === 'gain') {
+    // the band's curve: freq/Q from companions, GAIN from this knob
+    const comps = m.companions || {};
+    const band = param.slice(-1);
+    const fq = parseFloat(comps[`eq_freq_${band}`]);
+    const qn = parseFloat(comps[`eq_q_${band}`]);
+    const kn = _knobNormOf(m, step.operation);
+    const gDb = _shapeKnob(kn, step.operation) * 40 - 20;
+    const labels = ENUM_LABELS[`eq_type_${band}`] || [];
+    const tv = parseFloat(comps[`eq_type_${band}`]);
+    const lbl = labels.length && Number.isFinite(tv)
+      ? labels[Math.round(tv * (labels.length - 1))] : 'Bell';   // band 2 = Bell
+    const model = {
+      f: 20 * Math.pow(1000, Number.isFinite(fq) ? fq : 0.5),
+      gain: gDb,
+      q: 0.4 + (Number.isFinite(qn) ? qn : 0.03) * 9.5,
+      enabled: m.enable_value !== false,
+    };
+    if (lbl === 'Shelf')          model.kind = band === '1' ? 'shelf-lo' : 'shelf-hi';
+    else if (lbl === 'Low Pass')  model.kind = 'lowpass-q';
+    else if (lbl === 'High Pass') model.kind = 'highpass-q';
+    else                          model.kind = 'bell';
+    return model;
+  }
+  if (kind === 'level' || kind === 'pan') {
+    const kn = _knobNormOf(m, step.operation);
+    return { levelKind: kind, v: _shapeKnob(kn, step.operation),
+             enabled: m.enable_value !== false };
+  }
   const taper = _MODUL_TAPER[param];
-  if (!taper) return null;                       // non-frequency knob: no graph
+  if (!taper) return null;                       // no display for this param
   // knob_value (knob-norm, shaped through the range) is the display
   // authority: it is the commanded state, updated by every write AND by
   // device-side changes (the handler inverse-maps those into knob-norm).
@@ -434,7 +476,7 @@ function _knobModuleHTML(name, m, step) {
   const issues = macroTargetIssues(m);
   const shown = _displayName(name, m);
   const v = _knobNormOf(m, step.operation);
-  const hasGraph = !!_MODUL_TAPER[param];
+  const hasGraph = !!_graphKindOf(param);
   const en = m.enable_value;
   const rng = Array.isArray(step.operation && step.operation.range) ? step.operation.range.map(Number) : null;
   const rangeTxt = rng ? `${fmtParamValue(param, rng[0])} \u2013 ${fmtParamValue(param, rng[1] ?? 1)}` : '';
@@ -460,10 +502,12 @@ function _knobModuleHTML(name, m, step) {
     </div>`;
   }).join('');
   const hasEnable = !!ENABLE_FOR[param];
+  const gk = _graphKindOf(param);
+  const compact = gk === 'level' || gk === 'pan';   // half-rack: simple
   return `
-<div id="card-${name}" class="card mmodule">
+<div id="card-${name}" class="card mmodule${compact ? ' mcompact' : ''}">
   <div class="mrk-head">
-    <div class="mhead">${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
+    <div class="mhead"><span class="mgrip" draggable="true" title="drag to reorder">\u28ff</span>${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
     <div class="msub"><span class="routing-label">${_esc(m.routing_label || '\u2014')}</span></div>
     ${enumChips ? `<div class="mrk-plates">${enumChips}</div>` : ''}
     ${hasEnable ? `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
@@ -519,25 +563,146 @@ function _wireKnobGraph(name) {
     // the RACK layout gives the graph hero height on desktop too
     const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
     const rack = document.documentElement.getAttribute('data-skin') === 'modul';
+    const height = mobile ? 132 : (rack ? 132 : 96);
+    const gkind = _graphKindOf(param);
     const band = param.slice(-1);
+    const rng = Array.isArray(step.operation && step.operation.range) ? step.operation.range.map(Number) : [0, 1];
     const _cpWrite = cp => v => {
       companionInput(name, cp, v);   // refreshes the curve itself (instant)
       if (window.ModulKnob) ModulKnob.set(name, v, cp);
     };
-    // the module's window = what its parameter can IMPACT (a lo-cut never
-    // goes above 500 Hz), plus one octave of shoulder for the flat side
-    const taper = _MODUL_TAPER[param] || [20, 20000];
-    const rng = Array.isArray(step.operation && step.operation.range) ? step.operation.range.map(Number) : [0, 1];
-    const toHz = t => taper[0] * Math.pow(taper[1] / taper[0], Math.max(0, Math.min(1, t)));
-    ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
-                                              frange: [taper[0], Math.min(20000, taper[1] * 2)],
-                                              bounds: [toHz(rng[0]), toHz(rng[1])],
-                                              height: mobile ? 132 : (rack ? 132 : 96),
-                                              setQ: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_q_${band}`) : null,
-                                              setGain: /^eq_freq_\d$/.test(param) ? _cpWrite(`eq_gain_${band}`) : null });
-    const model = _modulModel(name, m, step);
-    if (model) ModulGraph.filterUpdate(`f:${name}`, model);
+    if (gkind === 'filter') {
+      // the module's window = what its parameter can IMPACT, plus one
+      // octave of shoulder for the flat side
+      const taper = _MODUL_TAPER[param];
+      const toHz = t => taper[0] * Math.pow(taper[1] / taper[0], Math.max(0, Math.min(1, t)));
+      ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
+                                                frange: [taper[0], Math.min(20000, taper[1] * 2)],
+                                                bounds: [toHz(rng[0]), toHz(rng[1])],
+                                                height,
+                                                setQ: _cpWrite(`eq_q_${band}`),
+                                                setGain: _cpWrite(`eq_gain_${band}`) });
+    } else if (gkind === 'gain') {
+      // the band's curve with axes swapped: horizontal = the FREQ
+      // companion, vertical (bell/shelf gain) = THIS knob
+      const knobFromGain = gDbNorm => _knobNormOf({ device_value: gDbNorm }, step.operation);
+      ModulGraph.filterInit(`f:${name}`, gEl, { name, dragKey: name,
+        frange: [20, 20000],
+        height,
+        onFreq: f => {
+          const t = Math.log(Math.max(20, Math.min(20000, f)) / 20) / Math.log(1000);
+          _cpWrite(`eq_freq_${band}`)(Math.max(0, Math.min(1, t)));
+        },
+        setGain: v => {
+          const kn = knobFromGain(v);
+          knobInput(name, kn);
+          if (window.ModulKnob) ModulKnob.set(name, kn);
+        },
+        setQ: _cpWrite(`eq_q_${band}`) });
+    } else if (gkind === 'level' || gkind === 'pan') {
+      const opts = { name, dragKey: name, height,
+        bounds: rng,
+        onX: pv => {
+          const kn = _knobNormOf({ device_value: pv }, step.operation);
+          knobInput(name, kn);
+          if (window.ModulKnob) ModulKnob.set(name, kn);
+        } };
+      if (gkind === 'level') {
+        const marks = [-60, -30, -12, -6, 0, 6];
+        opts.axis = { splits: marks.map(db => _faderLin(db)),
+                      labels: marks.map(db => db === 0 ? '0dB' : String(db)) };
+        opts.zero = FADER_UNITY;
+        opts.fill = 'left';
+      } else {
+        opts.axis = { splits: [0, 0.25, 0.5, 0.75, 1],
+                      labels: ['L100', 'L50', 'C', 'R50', 'R100'] };
+        opts.zero = 0.5;
+        opts.fill = 'center';
+      }
+      ModulGraph.levelInit(`f:${name}`, gEl, opts);
+    }
+    _updateKnobGraph(name, m, step, true);
   }
+}
+
+// ── Drag a module to reorder the rack (#user request) ─────────────────
+// HTML5 DnD from the grip; the new knob order splices into the FULL
+// macro key order (non-knob macros keep their positions) and persists
+// via POST /api/config/macros-order. Pointer devices only for now.
+function _wireKnobReorder() {
+  const row = document.getElementById('knob-row');
+  if (!row) return;
+  let dragName = null;
+  row.querySelectorAll('.mgrip').forEach(grip => {
+    const card = grip.closest('.mmodule');
+    grip.addEventListener('dragstart', ev => {
+      dragName = card.id.replace('card-', '');
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', dragName);
+      card.classList.add('mdragging');
+    });
+    grip.addEventListener('dragend', () => {
+      dragName = null;
+      row.querySelectorAll('.mdragging, .mdrop').forEach(el =>
+        el.classList.remove('mdragging', 'mdrop'));
+    });
+  });
+  row.querySelectorAll('.mmodule').forEach(card => {
+    card.addEventListener('dragover', ev => {
+      if (!dragName) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      row.querySelectorAll('.mdrop').forEach(el => el.classList.remove('mdrop'));
+      if (card.id !== `card-${dragName}`) card.classList.add('mdrop');
+    });
+    card.addEventListener('drop', async ev => {
+      ev.preventDefault();
+      const src = dragName; dragName = null;
+      row.querySelectorAll('.mdragging, .mdrop').forEach(el =>
+        el.classList.remove('mdragging', 'mdrop'));
+      const dst = card.id.replace('card-', '');
+      if (!src || src === dst) return;
+      const knobs = [...row.querySelectorAll('.mmodule')].map(c => c.id.replace('card-', ''));
+      knobs.splice(knobs.indexOf(src), 1);
+      knobs.splice(knobs.indexOf(dst) + (ev.offsetY > card.offsetHeight / 2 ? 1 : 0), 0, src);
+      await _persistKnobOrder(knobs);
+    });
+  });
+}
+
+async function _persistKnobOrder(knobOrder) {
+  // splice the reordered knobs back into the full macro key order
+  const all = Object.keys(macros);
+  const isKnob = n => knobOrder.includes(n);
+  let ki = 0;
+  const full = all.map(n => isKnob(n) ? knobOrder[ki++] : n);
+  const reordered = {};
+  full.forEach(n => { reordered[n] = macros[n]; });
+  window.macros = macros = reordered;
+  renderCards();
+  try {
+    const res = await fetch('/api/config/macros-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: full }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    window._lastLocalSave = { name: '__order__', ts: Date.now() };
+  } catch (e) {
+    console.warn('[UI] reorder failed:', e.message);
+    loadMacros();   // re-sync to server truth
+  }
+}
+
+// Route a model refresh to the right plot kind (filter curve vs level strip)
+function _updateKnobGraph(name, m, step, instant) {
+  const param = (step.target && step.target.param) || 'volume';
+  const gkind = _graphKindOf(param);
+  if (!gkind || !window.ModulGraph) return;
+  const model = _modulModel(name, m, step);
+  if (!model) return;
+  if (model.levelKind) ModulGraph.levelUpdate(`f:${name}`, model);
+  else ModulGraph.filterUpdate(`f:${name}`, model, instant ? { instant: true } : undefined);
 }
 
 // Instant curve refresh from LOCAL writes: knobInput and companionInput
@@ -547,8 +712,7 @@ function _wireKnobGraph(name) {
 window.refreshKnobGraph = function (name) {
   const m = macros[name], step = m && _knobStepOf(m);
   if (!step || !document.getElementById(`mgraph-${name}`)) return;
-  const mdl = _modulModel(name, m, step);
-  if (mdl && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, mdl, { instant: true });
+  _updateKnobGraph(name, m, step, true);
 };
 
 // Strip-layout curve follow (updateKnobCard calls this outside MODUL)
@@ -556,8 +720,7 @@ window._syncKnobGraph = function (name) {
   if (window._knobDrag === name) return;   // drag frames own the curve
   const m = macros[name], step = m && _knobStepOf(m);
   if (!step || !document.getElementById(`mgraph-${name}`)) return;
-  const model = _modulModel(name, m, step);
-  if (model && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, model);
+  _updateKnobGraph(name, m, step, false);
 };
 
 // One sync entry point, called by updateKnobCard on every knob_update
@@ -587,10 +750,7 @@ window._modulSync = function (name) {
         lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
     }
   });
-  if (!draggingThis) {
-    const model = _modulModel(name, m, step);
-    if (model && window.ModulGraph) ModulGraph.filterUpdate(`f:${name}`, model);
-  }
+  if (!draggingThis) _updateKnobGraph(name, m, step, false);
   const pw = document.getElementById(`knob-en-${name}`);
   if (pw && pw.classList.contains('mpower')) {
     pw.classList.toggle('on', m.enable_value === true);

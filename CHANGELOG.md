@@ -142,6 +142,18 @@
   DETAILS). Unit addresses (U1, U2...) on the left rail; the nav is a
   thin machined bar; one vertical scan reads the whole chain. Mobile
   stacks each unit head/graph/controls.
+- **Every knob gets a display** (user request): gain knobs draw their
+  band's real bell/shelf curve (freq/Q from the minis, gain from the
+  knob - axes swapped: horizontal drag moves the band freq, vertical
+  the gain); volume knobs get a fader-law level strip (dB axis, unity
+  tick, bounds dimming, drag-to-set); pan knobs a center-anchored
+  strip (L/C/R axis).
+- **Half-rack units** (user report: full rows for single values wasted
+  the page): simple level/pan knobs now sit three-up as compact
+  fractional units; filter/EQ units keep the full-width hero row.
+- **Drag modules to reorder** (user request): grab the grip on any rack
+  unit and drag it to a new slot; the order persists (new
+  POST /api/config/macros-order, in-place reorder like rename).
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

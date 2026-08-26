@@ -299,6 +299,25 @@ async def delete_macro(macro_name: str):
     return {"status": "success", "macro": macro_name}
 
 
+@app.post("/api/config/macros-order")
+async def reorder_macros(request: Request):
+    """Persist a new macro ordering (drag-to-reorder in the rack UI).
+    Body: {"order": [every macro name exactly once]}. Reorders the dict
+    IN PLACE (clear + reinsert) so held references stay valid - the same
+    discipline as rename."""
+    body = await request.json()
+    order = body.get("order") or []
+    macros = bridge.mappings.get("macros", {})
+    if sorted(order) != sorted(macros.keys()):
+        raise HTTPException(status_code=400,
+                            detail="order must list every macro exactly once")
+    snapshot = {k: macros[k] for k in order}
+    macros.clear()
+    macros.update(snapshot)
+    _persist_mappings()
+    return {"ok": True, "order": list(macros)}
+
+
 @app.post("/api/config/macros/{macro_name}/rename")
 async def rename_macro(macro_name: str, body: dict):
     """Rename a macro in place (the name is the mappings key). Keeps its

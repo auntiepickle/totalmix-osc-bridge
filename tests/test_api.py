@@ -239,6 +239,30 @@ def test_map_strip_count_counts_input_row_only(monkeypatch):
 
 
 
+def test_reorder_macros_in_place(monkeypatch):
+    """Drag-to-reorder: new order persists, dict identity survives (held
+    references stay valid), and a partial/wrong list is rejected."""
+    import web.web_client as wc
+    monkeypatch.setattr(wc, "_persist_mappings", lambda: None)
+    b = bridge_module.bridge
+    macros = b.mappings.setdefault("macros", {})
+    saved = dict(macros)
+    macros.clear()
+    macros.update({"aa": {"steps": []}, "bb": {"steps": []}, "cc": {"steps": []}})
+    ident = id(macros)
+    try:
+        r = client.post("/api/config/macros-order", json={"order": ["cc", "aa", "bb"]})
+        assert r.status_code == 200
+        assert list(macros) == ["cc", "aa", "bb"]
+        assert id(b.mappings["macros"]) == ident          # reordered IN PLACE
+        r = client.post("/api/config/macros-order", json={"order": ["cc", "aa"]})
+        assert r.status_code == 400                       # must list all
+        assert list(macros) == ["cc", "aa", "bb"]         # unchanged on error
+    finally:
+        macros.clear()
+        macros.update(saved)
+
+
 def test_rename_macro_moves_key_and_state(monkeypatch):
     """Rename keeps dict order, carries runtime state, rejects collisions."""
     import web.web_client as wc
