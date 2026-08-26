@@ -174,6 +174,15 @@
   become 120px console lanes). Well height now encodes dimensionality
   per size; changing a unit's HP re-inits its display at the right
   scale.
+- **Master fader** (user request, guarded): a Main output fader knob
+  capped at unity (every input path clamps - drag, tap, typed, MIDI),
+  double-tap parks at -12 dB, and it never re-asserts after snapshot
+  recalls. CC89.
+- **Fixed: link/split in TotalMix not picked up** (user report: splitting
+  AN 1/2 to mono left the warn icon stale). The listener now counts
+  every name/link change; the activity poll carries the counter and any
+  tick refreshes the picker + validity icons - the old burst threshold
+  only caught snapshot switches.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

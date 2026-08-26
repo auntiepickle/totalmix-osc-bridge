@@ -618,7 +618,8 @@ def get_device_activity(since: float = 0.0):
             name = names.get(e["hw"] - 1)
         e["name"] = name
     import time as _time
-    return {"now": _time.time(), "channels": channels}
+    return {"now": _time.time(), "channels": channels,
+            "name_ver": getattr(st, "name_change_count", 0)}
 
 
 @app.post("/api/device/pulse")

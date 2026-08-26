@@ -778,6 +778,15 @@ async function pollGlobalTransport() {
       if (window._lastActivityTs !== undefined && distinct >= 6) {
         _scheduleValidityRefresh();
       }
+      // #user bug: a single link/split in TotalMix (AN 1/2 -> mono) never
+      // hit the burst threshold, so the picker + warn icons stayed stale.
+      // The listener counts every name/link change - any tick refreshes.
+      if (act.name_ver !== undefined) {
+        if (window._lastNameVer !== undefined && act.name_ver !== window._lastNameVer) {
+          _scheduleValidityRefresh();
+        }
+        window._lastNameVer = act.name_ver;
+      }
       window._lastActivityTs = act.now;
     } catch (_) {}
     const dot = document.getElementById('osc-health-dot');

@@ -42,6 +42,7 @@ class GlobalDeviceState:
         self.last_heartbeat = 0.0
         self.message_count = 0
         self.pending_name_changes = set()   # (row_key, hw) — drained by the sync
+        self.name_change_count = 0          # monotonic — clients poll for it
         # Human-activity log (#8 wiggle-to-learn): VALUE CHANGES only. Own
         # bridge writes never echo (re-send OFF) and dumps re-reporting an
         # unchanged value don't count, so entries here are almost always a
@@ -107,12 +108,14 @@ class GlobalDeviceState:
                     self.names[row_key][hw] = {"name": name, "ts": now}
                     if name and name != prev:
                         self.pending_name_changes.add((row_key, hw))
+                    self.name_change_count += 1
                     return
                 if path == "stereo":
                     self.stereo.setdefault(row_key, {})[hw] = bool(
                         arg0 is not None and float(arg0) >= 0.5)
                     # a link change re-scopes the pair's alias merge
                     self.pending_name_changes.add((row_key, hw))
+                    self.name_change_count += 1
                     return
                 prev = self.params.get((row_key, hw, path))
                 if prev is not None and prev["value"] != arg0:
