@@ -502,12 +502,12 @@ function _knobModuleHTML(name, m, step) {
     </div>`;
   }).join('');
   const hasEnable = !!ENABLE_FOR[param];
-  const gk = _graphKindOf(param);
-  const compact = gk === 'level' || gk === 'pan';   // half-rack: simple
+  const size = ['s', 'm', 'l'].includes(m.size) ? m.size : 's';
   return `
-<div id="card-${name}" class="card mmodule${compact ? ' mcompact' : ''}">
+<div id="card-${name}" class="card mmodule" data-size="${size}">
   <div class="mrk-head">
     <div class="mhead"><span class="mgrip" draggable="true" title="drag to reorder">\u28ff</span>${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
+    <button class="msize" onclick="cycleUnitSize('${name}')" title="unit width - like Eurorack HP sizes">${({ s: '8HP', m: '12HP', l: '24HP' })[size]}</button>
     <div class="msub"><span class="routing-label">${_esc(m.routing_label || '\u2014')}</span></div>
     ${enumChips ? `<div class="mrk-plates">${enumChips}</div>` : ''}
     ${hasEnable ? `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
@@ -669,6 +669,27 @@ function _wireKnobReorder() {
     });
   });
 }
+
+// Static unit sizes, Eurorack-style (#user request): S=1/3 row (8HP),
+// M=1/2 (12HP), L=full (24HP). Persisted on the macro as `size`.
+window.cycleUnitSize = async function (name) {
+  const m = macros[name];
+  if (!m) return;
+  const order = ['s', 'm', 'l'];
+  const cur = ['s', 'm', 'l'].includes(m.size) ? m.size : 's';
+  const next = order[(order.indexOf(cur) + 1) % 3];
+  m.size = next;
+  const card = document.getElementById(`card-${name}`);
+  if (card) {
+    card.dataset.size = next;
+    const chip = card.querySelector('.msize');
+    if (chip) chip.textContent = ({ s: '8HP', m: '12HP', l: '24HP' })[next];
+  }
+  try {
+    await API.saveMacro(name, _cleanMacro(m));
+    window._lastLocalSave = { name, ts: Date.now() };
+  } catch (e) { console.warn('[UI] size save failed:', e.message); }
+};
 
 async function _persistKnobOrder(knobOrder) {
   // splice the reordered knobs back into the full macro key order

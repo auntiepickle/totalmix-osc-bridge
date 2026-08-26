@@ -154,6 +154,12 @@
 - **Drag modules to reorder** (user request): grab the grip on any rack
   unit and drag it to a new slot; the order persists (new
   POST /api/config/macros-order, in-place reorder like rename).
+- **Uniform modules + Eurorack sizes** (user direction): no more
+  special-casing EQs - every module is the same kind of unit, flowing
+  and packing into rack rows as you drag. Each unit has a STATIC size
+  variant you set with its HP chip - 8HP (1/3 row), 12HP (1/2), 24HP
+  (full) - persisted per module, adaptive breakpoints built against
+  the fixed sizes.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.
