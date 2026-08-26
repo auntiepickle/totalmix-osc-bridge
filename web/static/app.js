@@ -691,6 +691,30 @@ async function loadPicker() {
     console.warn('[UI] Could not load picker:', e);
     window._picker = { inputs: [], outputs: [], source: {} };
   }
+  // #user bug report: the live picker only knows the CURRENT snapshot's
+  // name shapes (ADAT 9 + ADAT 10 mono while TotalMix shows 9/10 paired).
+  // The physical table accumulates every alias a channel has ever worn -
+  // and the bridge resolves by name through it - so the picker offers
+  // ALL of them, grouped stereo-first.
+  try {
+    const t = await fetch('/api/device/physical_table').then(r => r.json());
+    const mk = rowsObj => {
+      const stereo = new Map(), mono = new Map();
+      Object.entries(rowsObj || {}).forEach(([hw, names]) => {
+        (names || []).forEach(n => {
+          const tgt = n.includes('/') ? stereo : mono;
+          const h = parseInt(hw, 10);
+          if (!tgt.has(n) || h < tgt.get(n)) tgt.set(n, h);
+        });
+      });
+      const byHw = m => [...m.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]);
+      return { stereo: byHw(stereo), mono: byHw(mono) };
+    };
+    const rows = (t || {}).rows || {};
+    window._pickerGroups = { inputs: mk(rows.inputs), outputs: mk(rows.outputs) };
+  } catch (e) {
+    window._pickerGroups = null;
+  }
 }
 
 // ── Pre-fill bridge state from REST — no WebSocket wait ──────────────────────

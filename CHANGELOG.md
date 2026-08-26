@@ -160,6 +160,12 @@
   variant you set with its HP chip - 8HP (1/3 row), 12HP (1/2), 24HP
   (full) - persisted per module, adaptive breakpoints built against
   the fixed sizes.
+- **Fixed: routing picker missed known channel names** (user report:
+  only ADAT 9 / ADAT 10 offered while TotalMix showed the 9/10 pair).
+  The picker now builds from the physical table's accumulated aliases -
+  every stereo AND mono form a channel has ever worn - grouped
+  stereo-first (Inputs/Playback/Outputs x stereo/mono). The bridge
+  already resolves any alias at write time.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

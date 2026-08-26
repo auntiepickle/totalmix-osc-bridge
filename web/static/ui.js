@@ -1327,6 +1327,12 @@ function _cleanMacro(m) {
 function _buildSubmixPickerOptions(selected) {
   // #24: live-fed — the outputs ARE the submixes, one per output channel
   const outs = (window._picker || {}).outputs || [];
+  const g = window._pickerGroups;
+  if (g && g.outputs && (g.outputs.stereo.length || g.outputs.mono.length)) {
+    const opt = n => `<option value="${_esc(n)}"${n === selected ? ' selected' : ''}>${_esc(n)}</option>`;
+    return `<optgroup label="Stereo">${g.outputs.stereo.map(opt).join('')}</optgroup>`
+         + `<optgroup label="Mono">${g.outputs.mono.map(opt).join('')}</optgroup>`;
+  }
   return outs
     .map(o => `<option value="${_esc(o.name)}"${o.name === selected ? ' selected' : ''}>${_esc(o.name)}${o.hw != null ? ` (ch ${_esc(o.hw)})` : ''}</option>`)
     .join('');
@@ -1340,31 +1346,39 @@ window.updateSendPickerOptions = function (name, selectedChannel) {
   const outs   = picker.outputs || [];
   const paramSel = document.getElementById(`routing-param-${name}`);
   const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
-  const inOpts = inputs
-    .map(i => `<option value="${_esc(i.name)}"${i.name === selectedChannel ? ' selected' : ''}>${_esc(i.name)}</option>`)
-    .join('');
+  // Alias groups from the physical table (#user bug: the live snapshot
+  // only shows one name-shape - offer every known form, stereo first).
+  // The bridge resolves any alias to its hardware channel at write time.
+  const g = window._pickerGroups;
+  const inStereo = g && g.inputs ? g.inputs.stereo : [];
+  const inMono   = g && g.inputs ? g.inputs.mono
+                 : inputs.map(i => i.name);   // fallback: live names
+  const opt = (val, label, sel) =>
+    `<option value="${_esc(val)}"${val === sel ? ' selected' : ''}>${_esc(label)}</option>`;
+  const grp = (label, names, mkVal, mkLbl) => names.length
+    ? `<optgroup label="${label}">${names.map(n => opt(mkVal(n), mkLbl(n), selectedChannel)).join('')}</optgroup>`
+    : '';
   if (def.channelDetail) {
     // EQ/dynamics exist on hardware INPUTS and OUTPUTS, not software
     // playback. Outputs aim by their measured hw start on the bridge side.
-    const outOpts = outs
-      .map(o => { const v = `__out3__${o.name}`;
-        return `<option value="${_esc(v)}"${v === selectedChannel ? ' selected' : ''}>${_esc(o.name)}</option>`; })
-      .join('');
+    const outStereo = g && g.outputs ? g.outputs.stereo : [];
+    const outMono   = g && g.outputs ? g.outputs.mono : outs.map(o => o.name);
     sendSel.innerHTML =
-      `<optgroup label="Hardware inputs">${inOpts}</optgroup>` +
-      `<optgroup label="Hardware outputs">${outOpts}</optgroup>`;
+      grp('Inputs — stereo', inStereo, n => n, n => n) +
+      grp('Inputs — mono', inMono, n => n, n => n) +
+      grp('Outputs — stereo', outStereo, n => `__out3__${n}`, n => n) +
+      grp('Outputs — mono', outMono, n => `__out3__${n}`, n => n);
     return;
   }
   // The input channel list is the SAME for every submix (page-1 sends are
   // row-relative) — plus the software-playback variants of those channels
-  const pbOpts = inputs
-    .map(i => { const v = `__pb__${i.name}`;
-      return `<option value="${_esc(v)}"${v === selectedChannel ? ' selected' : ''}>${_esc(i.name)} (playback)</option>`; })
-    .join('');
-  sendSel.innerHTML = (inOpts
-    ? `<optgroup label="Hardware inputs">${inOpts}</optgroup>`
-      + `<optgroup label="Software playback">${pbOpts}</optgroup>`
-    : '<option value="">no channels — run the channel measurement</option>');
+  const html =
+    grp('Inputs — stereo', inStereo, n => n, n => n) +
+    grp('Inputs — mono', inMono, n => n, n => n) +
+    grp('Playback — stereo', inStereo, n => `__pb__${n}`, n => `${n} (playback)`) +
+    grp('Playback — mono', inMono, n => `__pb__${n}`, n => `${n} (playback)`);
+  sendSel.innerHTML = html
+    || '<option value="">no channels — run the channel measurement</option>';
 };
 
 // A macro is "simple-representable" when it matches the canonical patch shape:
