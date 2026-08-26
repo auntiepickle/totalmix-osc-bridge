@@ -204,6 +204,10 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Meter freshness window 2s -> 8s**: TotalMix resends unchanged
+  (quiet/floor) levels only every 2-4s, so the 2s window made quiet
+  meters blink in and out; changing values stream continuously, so the
+  wider window adds no decay lag.
 - **Master/output meters fixed at the source**: a raw-wire dump (spare
   TotalMix OSC controller pointed at a local listener) showed the
   output row streams as `/level/out/<hw>` - the listener only knew

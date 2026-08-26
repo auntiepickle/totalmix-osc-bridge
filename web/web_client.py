@@ -337,9 +337,12 @@ def get_meters():
                 continue
             with st._lock:
                 hws = (hw, hw + 1) if st.stereo.get(r, {}).get(hw) else (hw,)
+                # 8s window (wire-observed: unchanged/floor values resend
+                # only every 2-4s - a 2s window made quiet meters blink;
+                # changing values stream continuously so no decay lag)
                 vals = [v[0] for h in hws
                         for v in [st.levels.get((r, h))]
-                        if v and now - v[1] < 2.0]
+                        if v and now - v[1] < 8.0]
             if vals:
                 val = max(vals)
                 break
