@@ -539,9 +539,23 @@ html[data-skin="modul"] .msize {
   border-radius: 2px;
   padding: 4px 8px;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
-html[data-skin="modul"] .msize::after { content: ' 95'; color: #4a4d52; }
+html[data-skin="modul"] .msize option { background: var(--mo-well); color: var(--mo-txt); }
 html[data-skin="modul"] .msize:hover { color: var(--mo-ink); border-color: #3a3e43; }
+/* the resize edge: grab and drag to the next HP stop */
+html[data-skin="modul"] .mresize {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+}
+html[data-skin="modul"] .mresize:hover {
+  box-shadow: inset -2px 0 0 rgba(255, 77, 0, 0.45);
+}
 
 html[data-skin="modul"] .mmodule {
   display: grid;

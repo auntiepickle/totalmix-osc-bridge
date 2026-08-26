@@ -746,8 +746,10 @@ setInterval(async () => {
     document.querySelectorAll('[data-kind="level"], [data-kind="pan"]').forEach(card => {
       const name = card.id.replace('card-', '');
       const db = d.meters[name];
+      // a metered channel at silence shows a presence tick at the floor -
+      // an empty lane must mean NO METER, not no signal (#user report)
       const pos = (db == null || typeof _faderLin !== 'function') ? null
-                : (db <= -64.9 ? null : _faderLin(db));
+                : Math.max(_faderLin(db), 0.004);
       if (window.ModulGraph) ModulGraph.meterUpdate(`f:${name}`, pos);
     });
   } catch (_) {}

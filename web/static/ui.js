@@ -342,7 +342,7 @@ function _renderKnobSection(names) {
     : `<div class="col-span-full text-xs text-zinc-600 italic">no knobs yet — <b>New Knob</b> binds a channel parameter to a MIDI control</div>`;
   // wire synchronously: innerHTML is parsed already, and rAF never fires
   // in a hidden tab (graphs would stay empty until the next visible render)
-  if (modul && names.length) { names.forEach(n => _modulWire(n)); _wireKnobReorder(); }
+  if (modul && names.length) { names.forEach(n => _modulWire(n)); _wireKnobReorder(); _wireKnobResize(); }
   else if (names.length && _graphsEnabled()) names.forEach(n => _wireKnobGraph(n));
 }
 
@@ -509,7 +509,9 @@ function _knobModuleHTML(name, m, step) {
 <div id="card-${name}" class="card mmodule" data-size="${size}" data-kind="${gkind}">
   <div class="mrk-head">
     <div class="mhead"><span class="mgrip" draggable="true" title="drag to reorder">\u28ff</span>${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
-    <button class="msize" onclick="cycleUnitSize('${name}')" title="unit width - Eurorack HP sizes, 2HP to 24HP">${size}HP</button>
+    <select class="msize" onchange="setUnitSize('${name}', this.value)" title="unit width - Eurorack HP sizes (or drag the module's right edge)">
+      ${[2, 4, 6, 8, 12, 16, 24].map(h => `<option value="${h}"${h === size ? ' selected' : ''}>${h}HP</option>`).join('')}
+    </select>
     <div class="msub"><span class="routing-label">${_esc(m.routing_label || '\u2014')}</span></div>
     ${enumChips ? `<div class="mrk-plates">${enumChips}</div>` : ''}
     ${hasEnable ? `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
@@ -531,6 +533,7 @@ function _knobModuleHTML(name, m, step) {
     <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
   </div>
+  <div class="mresize" title="drag to resize"></div>
 </div>`;
 }
 
@@ -694,17 +697,58 @@ function _unitHP(m) {
   const hp = legacy || parseInt(m.size, 10);
   return HP_SIZES.includes(hp) ? hp : 8;
 }
-window.cycleUnitSize = async function (name) {
+window.setUnitSize = async function (name, hp) {
   const m = macros[name];
-  if (!m) return;
-  const next = HP_SIZES[(HP_SIZES.indexOf(_unitHP(m)) + 1) % HP_SIZES.length];
-  m.size = next;
+  hp = parseInt(hp, 10);
+  if (!m || !HP_SIZES.includes(hp) || _unitHP(m) === hp) return;
+  m.size = hp;
   renderCards();   // graph wells re-init at the new size's height
   try {
     await API.saveMacro(name, _cleanMacro(m));
     window._lastLocalSave = { name, ts: Date.now() };
   } catch (e) { console.warn('[UI] size save failed:', e.message); }
 };
+
+// Drag the module's right edge to resize (#user request) - snaps to the
+// static HP stops (12-col grid; span per HP below). Live preview via
+// data-size (pure CSS reflow); commit persists + re-inits the wells.
+const _HP_SPAN = { 2: 1, 4: 2, 6: 3, 8: 4, 12: 6, 16: 8, 24: 12 };
+function _wireKnobResize() {
+  const row = document.getElementById('knob-row');
+  if (!row) return;
+  row.querySelectorAll('.mresize').forEach(h => {
+    const card = h.closest('.mmodule');
+    const name = card.id.replace('card-', '');
+    let startX = 0, startSpan = 0, colW = 0, preview = null;
+    h.addEventListener('pointerdown', ev => {
+      const hp = _unitHP(macros[name] || {});
+      startX = ev.clientX;
+      startSpan = _HP_SPAN[hp];
+      colW = row.getBoundingClientRect().width / 12;
+      preview = hp;
+      h.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    h.addEventListener('pointermove', ev => {
+      if (!preview) return;
+      const want = Math.max(1, Math.min(12, Math.round(startSpan + (ev.clientX - startX) / colW)));
+      // nearest available span at-or-below, else smallest
+      let hp = 2;
+      for (const [k, sp] of Object.entries(_HP_SPAN)) if (sp <= want) hp = parseInt(k, 10);
+      if (hp !== preview) {
+        preview = hp;
+        card.dataset.size = hp;   // live CSS reflow
+        const sel = card.querySelector('.msize');
+        if (sel) sel.value = String(hp);
+      }
+    });
+    const done = () => {
+      if (preview != null) { const hp = preview; preview = null; setUnitSize(name, hp); }
+    };
+    h.addEventListener('pointerup', done);
+    h.addEventListener('pointercancel', done);
+  });
+}
 
 async function _persistKnobOrder(knobOrder) {
   // splice the reordered knobs back into the full macro key order

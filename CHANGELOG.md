@@ -204,6 +204,17 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Drag-to-resize modules + HP dropdown** (user request): grab a
+  module's right edge and drag - it snaps live between the static HP
+  stops and persists on release; the HP chip is now a dropdown for
+  direct picks.
+- **Meter fixes** (user report: no live levels on echo send / master):
+  TotalMix streams only input-row meters with the current option, so
+  send knobs fall back to the playback twin of their source channel;
+  a metered channel at silence now shows a floor presence tick (an
+  empty lane means NO METER, not no signal); /api/debug/levels reports
+  per-row frame counts. Output-row meters (master) need the matching
+  TotalMix option before they can display.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

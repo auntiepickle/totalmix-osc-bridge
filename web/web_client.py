@@ -322,19 +322,29 @@ def get_meters():
             continue
         row = str(t.get("row", 1))
         rk = {"1": "inputs", "2": "playback", "3": "outputs"}.get(row, "inputs")
-        try:
-            hw = gt._hw_for_name(rk, ch)
-        except Exception:
-            hw = None
-        if hw is None:
-            continue
-        with st._lock:
-            hws = (hw, hw + 1) if st.stereo.get(rk, {}).get(hw) else (hw,)
-            vals = [v[0] for h in hws
-                    for v in [st.levels.get((rk, h))]
-                    if v and now - v[1] < 2.0]
-        if vals:
-            out[name] = round(max(vals), 1)
+        # fallback chain: TotalMix may stream only some rows' meters (live-
+        # observed: inputs only unless more level options are enabled) -
+        # a send knob's playback twin carries the same musical signal
+        rks = [rk] + (["playback"] if rk == "inputs" else
+                      ["inputs"] if rk == "playback" else [])
+        val = None
+        for r in rks:
+            try:
+                hw = gt._hw_for_name(r, ch)
+            except Exception:
+                hw = None
+            if hw is None:
+                continue
+            with st._lock:
+                hws = (hw, hw + 1) if st.stereo.get(r, {}).get(hw) else (hw,)
+                vals = [v[0] for h in hws
+                        for v in [st.levels.get((r, h))]
+                        if v and now - v[1] < 2.0]
+            if vals:
+                val = max(vals)
+                break
+        if val is not None:
+            out[name] = round(val, 1)
     return {"available": True, "meters": out}
 
 
@@ -347,8 +357,12 @@ def debug_levels():
     if st is None or not hasattr(st, "levels"):
         return {"available": False}
     with st._lock:
+        rows = {}
+        for (rk2, _hw), _v in st.levels.items():
+            rows[rk2] = rows.get(rk2, 0) + 1
         return {"available": True,
                 "shapes": {k: list(v) for k, v in st.levels_raw.items()},
+                "rows": rows,
                 "count": len(st.levels),
                 "sample": {f"{k[0]}/{k[1]}": [v[0], v[1]] for k, v in list(st.levels.items())[:12]}}
 
