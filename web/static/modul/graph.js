@@ -94,6 +94,25 @@
   }
   const ys = (model, mix, xs) => xs.map(f => magDb(model, f) * mix);
 
+  // Adaptive sampling around the peak (#user report: the Q param didn't
+  // render right - a high-Q bell's lobe is narrower than the 96 fixed
+  // log samples, so the drawn tip fell BETWEEN samples: a true +12dB
+  // Q=9.9 bell drew as low as +8.7dB and its height wobbled as the
+  // frequency swept). Normal EQ renderers sample densely around fc;
+  // we merge a Q-sized cluster into the base grid on every frame.
+  const PEAKED = { bell: 1, 'lowpass-q': 1, 'highpass-q': 1 };
+  function xsFor(st, model) {
+    if (!model || !model.f || !PEAKED[model.kind]) return st.xs;
+    const q = Math.max(0.4, model.q || 0.7);
+    const span = 1 + 2.5 / q;                    // covers the lobe at any Q
+    const lo = Math.max(st.flo, model.f / span);
+    const hi = Math.min(st.fhi, model.f * span);
+    if (!(hi > lo)) return st.xs;
+    const M = 48;
+    const extra = Array.from({ length: M + 1 }, (_, i) => lo * Math.pow(hi / lo, i / M));
+    return [...st.xs, ...extra].sort((a, b) => a - b);
+  }
+
   const fmtHz = f => f >= 9950 ? (f / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
                   : f >= 995 ? (f / 1000).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + 'k'
                   : Math.round(f) + '';
@@ -312,7 +331,10 @@
     const from = { f: (st.model && st.model.f) || model.f, q: (st.model && st.model.q) ?? model.q, mix: st.mix };
     const to = { f: model.f, q: model.q, mix: model.enabled ? 1 : 0 };
     st.model = { ...model };
-    const apply = () => st.u.setData([st.xs, ys(st.model, st.mix, st.xs)]);
+    const apply = () => {
+      const xs2 = xsFor(st, st.model);
+      st.u.setData([xs2, ys(st.model, st.mix, xs2)]);
+    };
     if ((opts && opts.instant) || document.hidden ||
         (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
       st.model.f = to.f; st.model.q = to.q; st.mix = to.mix; apply(); return;

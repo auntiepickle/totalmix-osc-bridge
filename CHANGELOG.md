@@ -204,6 +204,14 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Q renders true** (user report: the Q param didn't render right):
+  the filter curves were sampled at 96 fixed log points, so a high-Q
+  bell's lobe fell between samples - a true +12dB Q=9.9 bell drew as
+  low as +8.7dB and its tip wobbled as the frequency swept. The
+  renderer now merges a Q-sized dense cluster around the corner
+  frequency into the grid every frame (how real EQ displays sample);
+  worst-case drawn peak error is now 0.04dB. Applies to bells and
+  resonant low/high-pass EQ types.
 - **Sidechain duck** (user idea: "using the dynamics module build side
   chain compression"): TotalMix has no sidechain input, but the bridge
   sees every channel's live meter - so a KEY channel's level now drives
