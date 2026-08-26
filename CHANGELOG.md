@@ -204,6 +204,14 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **EQ curves render the DIGITAL filter** (user report: our curves and
+  TotalMix's don't look similar): wire-truthed against the Main EQ
+  panel (LP 12k, Q 9.9) - a digital low-pass biquad has zeros at
+  Nyquist, so past the peak it cliffs toward -inf at fs/2 while our
+  analog prototypes sauntered down at 12dB/oct (measured gap at 20kHz:
+  -22dB vs -5dB). Bell, resonant LP/HP, and shelves now evaluate the
+  bilinear-domain RBJ biquad at 48kHz - identical below ~fs/8, matches
+  TotalMix's own render above it.
 - **Send groups** (user request: "move multiple faders at once as a
   group"): a volume knob becomes a VCA-style group master - every
   member send follows it at a stored dB offset, so the balance you

@@ -60,37 +60,45 @@
       const n = model.order || 2;
       return -10 * Math.log10(1 + Math.pow(f / fc, 2 * n));
     }
+    // EQ band kinds render the DIGITAL biquad at the device rate, not the
+    // analog prototype (#user report: our curves didn't match TotalMix's -
+    // wire-truthed against the Main EQ panel, LP 12k Q9.9: the digital
+    // low pass has ZEROS AT NYQUIST, so past the peak it cliffs toward
+    // -inf at fs/2 while the analog asymptote saunters at 12dB/oct.
+    // Measured gap at 20kHz: digital -22dB vs analog -5dB. Identical
+    // below ~fs/8, which is why fc=1k validation matched both ways).
+    const FS = 48000;
+    const w0 = 2 * Math.PI * Math.min(fc, FS * 0.499) / FS;
+    const cw = Math.cos(w0);
+    const q = Math.max(0.1, model.q || 0.7);
+    const al = Math.sin(w0) / (2 * q);
+    const A = Math.pow(10, (model.gain || 0) / 40);
+    let b = null, a = null;
     if (model.kind === 'lowpass-q') {
-      const q = Math.max(0.1, model.q || 0.7);
-      const r = f / fc;
-      return -10 * Math.log10(Math.max(Math.pow(1 - r * r, 2) + Math.pow(r / q, 2), 1e-9));
-    }
-    if (model.kind === 'highpass-q') {           // resonant HP (EQ band type)
-      const q = Math.max(0.1, model.q || 0.7);
-      const r = f / fc;
-      return 10 * Math.log10(Math.max(Math.pow(r, 4) /
-        Math.max(Math.pow(1 - r * r, 2) + Math.pow(r / q, 2), 1e-12), 1e-9));
-    }
-    if (model.kind === 'bell') {                 // RBJ peaking, analog prototype
-      const A = Math.pow(10, (model.gain || 0) / 40);
-      const q = Math.max(0.1, model.q || 0.7);
-      const r = f / fc, w = 1 - r * r;
-      return 10 * Math.log10(
-        (w * w + Math.pow(r * A / q, 2)) /
-        Math.max(w * w + Math.pow(r / (A * q), 2), 1e-12));
-    }
-    if (model.kind === 'shelf-hi' || model.kind === 'shelf-lo') {
-      const A = Math.pow(10, (model.gain || 0) / 40);
-      const q = Math.max(0.3, model.q || 0.7);
-      const r = f / fc, sq = Math.sqrt(A) / q * r;
-      const hi = model.kind === 'shelf-hi';
-      const num = hi ? Math.pow(1 - A * r * r, 2) + sq * sq
-                     : Math.pow(A - r * r, 2) + sq * sq;
-      const den = hi ? Math.pow(A - r * r, 2) + sq * sq
-                     : Math.pow(1 - A * r * r, 2) + sq * sq;
-      return 10 * Math.log10(Math.max(A * A * num / Math.max(den, 1e-12), 1e-9));
-    }
-    return 0;
+      b = [(1 - cw) / 2, 1 - cw, (1 - cw) / 2];
+      a = [1 + al, -2 * cw, 1 - al];
+    } else if (model.kind === 'highpass-q') {
+      b = [(1 + cw) / 2, -(1 + cw), (1 + cw) / 2];
+      a = [1 + al, -2 * cw, 1 - al];
+    } else if (model.kind === 'bell') {
+      b = [1 + al * A, -2 * cw, 1 - al * A];
+      a = [1 + al / A, -2 * cw, 1 - al / A];
+    } else if (model.kind === 'shelf-lo') {
+      const sA = 2 * Math.sqrt(A) * al;
+      b = [A * ((A + 1) - (A - 1) * cw + sA), 2 * A * ((A - 1) - (A + 1) * cw), A * ((A + 1) - (A - 1) * cw - sA)];
+      a = [(A + 1) + (A - 1) * cw + sA, -2 * ((A - 1) + (A + 1) * cw), (A + 1) + (A - 1) * cw - sA];
+    } else if (model.kind === 'shelf-hi') {
+      const sA = 2 * Math.sqrt(A) * al;
+      b = [A * ((A + 1) + (A - 1) * cw + sA), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - sA)];
+      a = [(A + 1) - (A - 1) * cw + sA, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - sA];
+    } else return 0;
+    const w = 2 * Math.PI * Math.min(f, FS * 0.4999) / FS;
+    const c1 = Math.cos(w), c2 = Math.cos(2 * w);
+    const s1 = Math.sin(w), s2 = Math.sin(2 * w);
+    const nr = b[0] + b[1] * c1 + b[2] * c2, ni = -(b[1] * s1 + b[2] * s2);
+    const dr = a[0] + a[1] * c1 + a[2] * c2, di = -(a[1] * s1 + a[2] * s2);
+    return 10 * Math.log10(Math.max((nr * nr + ni * ni) /
+      Math.max(dr * dr + di * di, 1e-18), 1e-9));
   }
   const ys = (model, mix, xs) => xs.map(f => magDb(model, f) * mix);
 
