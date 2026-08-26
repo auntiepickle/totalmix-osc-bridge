@@ -280,6 +280,18 @@
         end();
       });
       over.addEventListener('pointercancel', end);
+      // WHEEL = Q (#user request): scroll over the plot narrows/widens
+      // the peak without touching frequency or gain. Multiplicative per
+      // notch - Q is perceived logarithmically, like frequency.
+      over.addEventListener('wheel', ev => {
+        if (!opts.setQ) return;
+        const st2 = plots[key], k = st2.model && st2.model.kind;
+        if (!k || k === 'highpass' || k === 'lowpass') return;  // no Q axis
+        ev.preventDefault();
+        const dy = ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaY;
+        const q = (st2.model.q || 0.7) * Math.pow(1.09, -dy / 100);
+        opts.setQ(Math.max(0, Math.min(1, (q - 0.4) / 9.5)));
+      }, { passive: false });
     }
 
     if (window.ResizeObserver) {

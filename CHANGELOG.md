@@ -204,6 +204,9 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Scroll-wheel Q** (user request): mouse wheel over a filter/EQ graph
+  narrows or widens the peak (multiplicative per notch - Q reads
+  logarithmically); plain 6dB high/low-pass wells ignore it (no Q axis).
 - **Drag-to-resize modules + HP dropdown** (user request): grab a
   module's right edge and drag - it snaps live between the static HP
   stops and persists on release; the HP chip is now a dropdown for

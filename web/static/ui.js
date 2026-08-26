@@ -726,7 +726,7 @@ function _wireKnobResize() {
       startSpan = _HP_SPAN[hp];
       colW = row.getBoundingClientRect().width / 12;
       preview = hp;
-      h.setPointerCapture(ev.pointerId);
+      try { h.setPointerCapture(ev.pointerId); } catch (_) {}
       ev.preventDefault();
     });
     h.addEventListener('pointermove', ev => {
