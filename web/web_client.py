@@ -299,6 +299,24 @@ async def delete_macro(macro_name: str):
     return {"status": "success", "macro": macro_name}
 
 
+@app.get("/api/debug/levels")
+def debug_levels():
+    """Live meter recon (#meters): the raw /level address shapes the Global
+    feed delivers plus a snapshot of current values. Read-only."""
+    lst = getattr(bridge, "global_listener", None) or getattr(bridge, "_global_listener", None)
+    # the transport owns the listener in some wirings - probe both
+    if lst is None:
+        gt = getattr(bridge, "global_transport", None)
+        lst = getattr(gt, "listener", None) or getattr(gt, "_listener", None) or getattr(gt, "rx", None)
+    if lst is None or not hasattr(lst, "levels"):
+        return {"available": False}
+    with lst._lock:
+        return {"available": True,
+                "shapes": {k: list(v) for k, v in lst.levels_raw.items()},
+                "count": len(lst.levels),
+                "sample": {k: [list(v[0]), v[1]] for k, v in list(lst.levels.items())[:12]}}
+
+
 @app.post("/api/config/macros-order")
 async def reorder_macros(request: Request):
     """Persist a new macro ordering (drag-to-reorder in the rack UI).

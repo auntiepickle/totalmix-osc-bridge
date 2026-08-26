@@ -36,6 +36,8 @@ class GlobalDeviceState:
         self.stereo = {}      # row_key -> {hw: bool}
         self.mix = {}         # (src 'in'|'pb', in_hw, out_hw, param) -> {"value","ts"}
         self.status = {}      # status name -> value
+        self.levels = {}          # address -> (args, ts) last-value-wins
+        self.levels_raw = {}      # first distinct address shapes (format recon)
         self.snapshots = {}   # snap_num -> feedback value (0 off / 2 active / 3 changed)
         self.last_heartbeat = 0.0
         self.message_count = 0
@@ -82,7 +84,14 @@ class GlobalDeviceState:
                 self.last_heartbeat = now
                 return
             if head == "level":
-                return  # high-rate meters — deliberately not stored
+                # Meters (#user request): last-value-wins, no history - one
+                # tuple per address, cheap enough for the ~channel-count x
+                # rate stream. levels_raw keeps a tiny sample of distinct
+                # address shapes so the wire format can be inspected live.
+                self.levels[address] = (tuple(args), now)
+                if len(self.levels_raw) < 8 and address not in self.levels_raw:
+                    self.levels_raw[address] = tuple(args)
+                return
             if head in ("in", "input", "playback", "output") and head in ROW_KEYS:
                 if len(parts) < 3:
                     return
