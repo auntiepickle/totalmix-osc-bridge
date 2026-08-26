@@ -166,6 +166,14 @@
   every stereo AND mono form a channel has ever worn - grouped
   stereo-first (Inputs/Playback/Outputs x stereo/mono). The bridge
   already resolves any alias at write time.
+- **Per-size module designs** (three-agent size council): 8HP compacts
+  cut everything that duplicates the graph axis or readout (84/40/32px
+  wells, values kept on the gain minis); 12HP is the typographic canon;
+  24HP returns the 3-zone hero frame (236px identity | 180px calibrated
+  plot | 320px control with a 34px readout and 72px knob; level units
+  become 120px console lanes). Well height now encodes dimensionality
+  per size; changing a unit's HP re-inits its display at the right
+  scale.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

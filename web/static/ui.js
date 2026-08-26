@@ -503,8 +503,9 @@ function _knobModuleHTML(name, m, step) {
   }).join('');
   const hasEnable = !!ENABLE_FOR[param];
   const size = ['s', 'm', 'l'].includes(m.size) ? m.size : 's';
+  const gkind = _graphKindOf(param) || 'plain';
   return `
-<div id="card-${name}" class="card mmodule" data-size="${size}">
+<div id="card-${name}" class="card mmodule" data-size="${size}" data-kind="${gkind}">
   <div class="mrk-head">
     <div class="mhead"><span class="mgrip" draggable="true" title="drag to reorder">\u28ff</span>${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
     <button class="msize" onclick="cycleUnitSize('${name}')" title="unit width - like Eurorack HP sizes">${({ s: '8HP', m: '12HP', l: '24HP' })[size]}</button>
@@ -563,8 +564,15 @@ function _wireKnobGraph(name) {
     // the RACK layout gives the graph hero height on desktop too
     const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
     const rack = document.documentElement.getAttribute('data-skin') === 'modul';
-    const height = mobile ? 132 : (rack ? 132 : 96);
     const gkind = _graphKindOf(param);
+    // council spec: well height encodes dimensionality per size
+    const HSIZE = { s: { filter: 84, gain: 84, level: 40, pan: 32 },
+                    m: { filter: 112, gain: 112, level: 44, pan: 36 },
+                    l: { filter: 180, gain: 180, level: 120, pan: 120 } };
+    const msize = rack && ['s', 'm', 'l'].includes(m.size) ? m.size : (rack ? 's' : null);
+    const height = mobile ? (gkind === 'level' || gkind === 'pan' ? 56 : 132)
+                 : msize ? (HSIZE[msize][gkind] || 96)
+                 : 96;
     const band = param.slice(-1);
     const rng = Array.isArray(step.operation && step.operation.range) ? step.operation.range.map(Number) : [0, 1];
     const _cpWrite = cp => v => {
@@ -679,12 +687,7 @@ window.cycleUnitSize = async function (name) {
   const cur = ['s', 'm', 'l'].includes(m.size) ? m.size : 's';
   const next = order[(order.indexOf(cur) + 1) % 3];
   m.size = next;
-  const card = document.getElementById(`card-${name}`);
-  if (card) {
-    card.dataset.size = next;
-    const chip = card.querySelector('.msize');
-    if (chip) chip.textContent = ({ s: '8HP', m: '12HP', l: '24HP' })[next];
-  }
+  renderCards();   // graph wells re-init at the new size's height
   try {
     await API.saveMacro(name, _cleanMacro(m));
     window._lastLocalSave = { name, ts: Date.now() };
