@@ -114,7 +114,7 @@
     const fr = Array.isArray(opts.frange) ? opts.frange : [FMIN, FMAX];
     const flo = Math.max(1, fr[0]), fhi = Math.min(100000, fr[1]);
     const xs = logSpace(flo, fhi);
-    const label = labelFor(flo, fhi);
+    const label = opts.noLabels ? (() => '') : labelFor(flo, fhi);
     const u = new uPlot({
       width: w, height: h,
       cursor: { show: false }, legend: { show: false },
@@ -128,7 +128,8 @@
           filter: (u, splits) => splits,   // we control density; uPlot's
           values: (u, s) => s.map(label) },  // space filter ate 50/500
         { ...AXIS, side: 3, splits: () => [-24, -12, 0, 12, 24],
-          values: (u, s) => s.map(v => (v === 0 ? '0' : v === 24 ? '+24' : v === -24 ? '-24' : '')), size: 22 },
+          values: (u, s) => s.map(v => (opts.noLabels ? '' : (v === 0 ? '0' : v === 24 ? '+24' : v === -24 ? '-24' : ''))),
+          size: opts.noLabels ? 4 : 22 },
       ],
       series: [
         {},
@@ -434,7 +435,7 @@
       axes: [
         { ...AXIS, splits: () => ax.splits,
           filter: (u, sp) => sp,
-          values: (u, sp) => sp.map(x => { const i = ax.splits.indexOf(x); return i >= 0 ? ax.labels[i] : ''; }) },
+          values: (u, sp) => sp.map(x => { if (opts.noLabels) return ''; const i = ax.splits.indexOf(x); return i >= 0 ? ax.labels[i] : ''; }) },
         { show: false },
       ],
       series: [{}, {}],

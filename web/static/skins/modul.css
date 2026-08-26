@@ -398,46 +398,67 @@ html[data-skin="modul"] .bg-red-900\/20 {
 
 html[data-skin="modul"] #knob-row {
   display: grid !important;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(12, 1fr);
   align-items: stretch;
   gap: 2px;
   counter-reset: unit;
 }
-/* STATIC unit sizes, Eurorack-style (#user request): three discrete
-   widths to design against - 8HP = 1/3 row, 12HP = 1/2, 24HP = full.
-   Any module can be any size; drag to pack them into rows. */
-html[data-skin="modul"] .mmodule,
-html[data-skin="modul"] .mmodule[data-size="s"] { grid-column: span 2; }
-html[data-skin="modul"] .mmodule[data-size="m"] { grid-column: span 3; }
-html[data-skin="modul"] .mmodule[data-size="l"] { grid-column: 1 / -1; }
+/* STATIC unit sizes, full Eurorack range (#user: down to 2HP):
+   2/4/6/8/12/16/24HP on a 12-col grid. Any module any size; drag to
+   pack them into rows. */
+html[data-skin="modul"] .mmodule { grid-column: span 4; }
+html[data-skin="modul"] .mmodule[data-size="2"]  { grid-column: span 1; }
+html[data-skin="modul"] .mmodule[data-size="4"]  { grid-column: span 2; }
+html[data-skin="modul"] .mmodule[data-size="6"]  { grid-column: span 3; }
+html[data-skin="modul"] .mmodule[data-size="8"]  { grid-column: span 4; }
+html[data-skin="modul"] .mmodule[data-size="12"] { grid-column: span 6; }
+html[data-skin="modul"] .mmodule[data-size="16"] { grid-column: span 8; }
+html[data-skin="modul"] .mmodule[data-size="24"] { grid-column: 1 / -1; }
 @media (max-width: 1400px) {
-  html[data-skin="modul"] .mmodule,
-  html[data-skin="modul"] .mmodule[data-size="s"] { grid-column: span 3; }
-  html[data-skin="modul"] .mmodule[data-size="m"] { grid-column: 1 / -1; }
+  html[data-skin="modul"] .mmodule[data-size="2"]  { grid-column: span 2; }
+  html[data-skin="modul"] .mmodule[data-size="4"]  { grid-column: span 3; }
+  html[data-skin="modul"] .mmodule[data-size="6"]  { grid-column: span 4; }
+  html[data-skin="modul"] .mmodule[data-size="8"]  { grid-column: span 6; }
+  html[data-skin="modul"] .mmodule[data-size="12"] { grid-column: 1 / -1; }
+  html[data-skin="modul"] .mmodule[data-size="16"] { grid-column: 1 / -1; }
 }
 /* ── SIZE-COUNCIL treatments (sizecouncil specs, 2026-08-26) ─────────── */
 /* 8HP - the compact: cut what duplicates the graph axis or the readout */
-html[data-skin="modul"] .mmodule[data-size="s"] .msub,
-html[data-skin="modul"] .mmodule[data-size="s"] .mrk-range,
-html[data-skin="modul"] .mmodule[data-size="s"] .mdev { display: none; }
-html[data-skin="modul"] .mmodule[data-size="s"] .mdetails { font-size: 0; }
-html[data-skin="modul"] .mmodule[data-size="s"] .mdetails i { font-size: 9px; }
-html[data-skin="modul"] .mmodule[data-size="s"] .mrk-head { padding: 8px 12px 4px 24px; }
-html[data-skin="modul"] .mmodule[data-size="s"] .mrk-ctrl { padding: 6px 12px 8px; }
-html[data-skin="modul"] .mmodule[data-size="s"] .mval { font-size: 15px; }
-html[data-skin="modul"] .mmodule[data-size="s"][data-kind="level"] .mval { font-size: 18px; }
-html[data-skin="modul"] .mmodule[data-size="s"] .mk-mini { width: 20px; height: 20px; }
+html[data-skin="modul"] .mmodule[data-size="2"] .msub,
+html[data-skin="modul"] .mmodule[data-size="4"] .msub,
+html[data-skin="modul"] .mmodule[data-size="6"] .msub,
+html[data-skin="modul"] .mmodule[data-size="8"] .msub,
+html[data-skin="modul"] .mmodule[data-size="4"] .mrk-range,
+html[data-skin="modul"] .mmodule[data-size="6"] .mrk-range,
+html[data-skin="modul"] .mmodule[data-size="8"] .mrk-range,
+html[data-skin="modul"] .mmodule[data-size="4"] .mdev,
+html[data-skin="modul"] .mmodule[data-size="6"] .mdev,
+html[data-skin="modul"] .mmodule[data-size="8"] .mdev { display: none; }
+html[data-skin="modul"] .mmodule[data-size="6"] .mdetails,
+html[data-skin="modul"] .mmodule[data-size="8"] .mdetails { font-size: 0; }
+html[data-skin="modul"] .mmodule[data-size="6"] .mdetails i,
+html[data-skin="modul"] .mmodule[data-size="8"] .mdetails i { font-size: 9px; }
+html[data-skin="modul"] .mmodule[data-size="6"] .mrk-head,
+html[data-skin="modul"] .mmodule[data-size="8"] .mrk-head { padding: 8px 12px 4px 24px; }
+html[data-skin="modul"] .mmodule[data-size="6"] .mrk-ctrl,
+html[data-skin="modul"] .mmodule[data-size="8"] .mrk-ctrl { padding: 6px 12px 8px; }
+html[data-skin="modul"] .mmodule[data-size="6"] .mval,
+html[data-skin="modul"] .mmodule[data-size="8"] .mval { font-size: 15px; }
+html[data-skin="modul"] .mmodule[data-size="8"][data-kind="level"] .mval { font-size: 18px; }
+html[data-skin="modul"] .mmodule[data-size="6"] .mk-mini,
+html[data-skin="modul"] .mmodule[data-size="8"] .mk-mini { width: 20px; height: 20px; }
 
 /* 12HP - the canon: today's stack IS the canon; value-block sub-line */
-html[data-skin="modul"] .mmodule[data-size="m"] .mval { font-size: 20px; }
+html[data-skin="modul"] .mmodule[data-size="12"] .mval,
+html[data-skin="modul"] .mmodule[data-size="16"] .mval { font-size: 20px; }
 
 /* 24HP - the hero: the 3-zone frame returns, with calibration room */
-html[data-skin="modul"] .mmodule[data-size="l"] {
+html[data-skin="modul"] .mmodule[data-size="24"] {
   grid-template-columns: 236px minmax(0, 1fr) 320px;
   grid-template-areas: "head graph ctrl" "below below below";
   min-height: 170px;
 }
-html[data-skin="modul"] .mmodule[data-size="l"] .mrk-head {
+html[data-skin="modul"] .mmodule[data-size="24"] .mrk-head {
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
@@ -446,9 +467,9 @@ html[data-skin="modul"] .mmodule[data-size="l"] .mrk-head {
   border-right: 1px solid var(--mo-seam);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05);
 }
-html[data-skin="modul"] .mmodule[data-size="l"] .mrk-head .mhead { margin-right: 0; }
-html[data-skin="modul"] .mmodule[data-size="l"] .mrk-head .msub { width: auto; order: 0; }
-html[data-skin="modul"] .mmodule[data-size="l"] .mrk-ctrl {
+html[data-skin="modul"] .mmodule[data-size="24"] .mrk-head .mhead { margin-right: 0; }
+html[data-skin="modul"] .mmodule[data-size="24"] .mrk-head .msub { width: auto; order: 0; }
+html[data-skin="modul"] .mmodule[data-size="24"] .mrk-ctrl {
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
@@ -457,11 +478,53 @@ html[data-skin="modul"] .mmodule[data-size="l"] .mrk-ctrl {
   border-left: 1px solid var(--mo-seam);
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.05);
 }
-html[data-skin="modul"] .mmodule[data-size="l"] .mval { font-size: 34px; }
-html[data-skin="modul"] .mmodule[data-size="l"] .mrk-knob .mk:not(.mk-mini) { width: 72px; height: 72px; }
-html[data-skin="modul"] .mmodule[data-size="l"] .mk-mini { width: 36px; height: 36px; }
-html[data-skin="modul"] .mmodule[data-size="l"] .mrk-ctrl .mminis,
-html[data-skin="modul"] .mmodule[data-size="l"] .mrk-ctrl .mdetails { margin-left: 0; }
+html[data-skin="modul"] .mmodule[data-size="24"] .mval { font-size: 34px; }
+html[data-skin="modul"] .mmodule[data-size="24"] .mrk-knob .mk:not(.mk-mini) { width: 72px; height: 72px; }
+html[data-skin="modul"] .mmodule[data-size="24"] .mk-mini { width: 36px; height: 36px; }
+html[data-skin="modul"] .mmodule[data-size="24"] .mrk-ctrl .mminis,
+html[data-skin="modul"] .mmodule[data-size="24"] .mrk-ctrl .mdetails { margin-left: 0; }
+
+/* 6HP: also drop the minis and the CC badge (DETAILS still has all) */
+html[data-skin="modul"] .mmodule[data-size="6"] .mminis,
+html[data-skin="modul"] .mmodule[data-size="6"] .mbadge { display: none; }
+
+/* 4HP: knob + value + tiny sparkline well; plates/power shrink to fit */
+html[data-skin="modul"] .mmodule[data-size="4"] .mminis,
+html[data-skin="modul"] .mmodule[data-size="4"] .mbadge,
+html[data-skin="modul"] .mmodule[data-size="4"] .mrk-plates { display: none; }
+html[data-skin="modul"] .mmodule[data-size="4"] .mdetails { font-size: 0; }
+html[data-skin="modul"] .mmodule[data-size="4"] .mdetails i { font-size: 9px; }
+html[data-skin="modul"] .mmodule[data-size="4"] .mrk-head { padding: 6px 10px 2px 18px; }
+html[data-skin="modul"] .mmodule[data-size="4"] .mrk-ctrl { padding: 4px 10px 6px; gap: 4px 8px; }
+html[data-skin="modul"] .mmodule[data-size="4"] .mval { font-size: 13px; }
+html[data-skin="modul"] .mmodule[data-size="4"] .mpower .mpower-txt { display: none; }
+
+/* 2HP: the one-knob utility tile - name, knob, value, warn LED. Period. */
+html[data-skin="modul"] .mmodule[data-size="2"] .mrk-plates,
+html[data-skin="modul"] .mmodule[data-size="2"] .mpower,
+html[data-skin="modul"] .mmodule[data-size="2"] .mbadge,
+html[data-skin="modul"] .mmodule[data-size="2"] .mminis,
+html[data-skin="modul"] .mmodule[data-size="2"] .mrk-range,
+html[data-skin="modul"] .mmodule[data-size="2"] .mdev,
+html[data-skin="modul"] .mmodule[data-size="2"] .mrk-nograph,
+html[data-skin="modul"] .mmodule[data-size="2"] .msize::after { display: none; }
+html[data-skin="modul"] .mmodule[data-size="2"]::before { display: none; }
+html[data-skin="modul"] .mmodule[data-size="2"] .mrk-head {
+  padding: 8px 8px 0;
+  justify-content: center;
+}
+html[data-skin="modul"] .mmodule[data-size="2"] .mrk-head .mhead { margin: 0 auto; }
+html[data-skin="modul"] .mmodule[data-size="2"] .mhead h3 { font-size: 9px; letter-spacing: 0.12em; }
+html[data-skin="modul"] .mmodule[data-size="2"] .mrk-ctrl {
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 8px;
+}
+html[data-skin="modul"] .mmodule[data-size="2"] .mval { font-size: 12px; }
+html[data-skin="modul"] .mmodule[data-size="2"] .mdetails { font-size: 0; margin: 0 auto; }
+html[data-skin="modul"] .mmodule[data-size="2"] .mdetails i { font-size: 8px; }
+html[data-skin="modul"] .mmodule[data-size="2"] .msize { padding: 2px 4px; font-size: 8px; }
 
 /* kind refinements: pan carries no range (L100-R100 says nothing) */
 html[data-skin="modul"] .mmodule[data-kind="pan"] .mrk-range { display: none; }
@@ -838,8 +901,14 @@ html[data-skin="modul"] :is(input, textarea):focus-visible {
     flex-wrap: wrap;
   }
 
-  /* one module per row on phones */
-  html[data-skin="modul"] .mmodule { grid-column: 1 / -1; }
+  /* one module per row on phones - every size */
+  html[data-skin="modul"] .mmodule,
+  html[data-skin="modul"] .mmodule[data-size="2"],
+  html[data-skin="modul"] .mmodule[data-size="4"],
+  html[data-skin="modul"] .mmodule[data-size="6"],
+  html[data-skin="modul"] .mmodule[data-size="8"],
+  html[data-skin="modul"] .mmodule[data-size="12"],
+  html[data-skin="modul"] .mmodule[data-size="16"] { grid-column: 1 / -1; }
   html[data-skin="modul"] .mmodule::before { display: none; }
   html[data-skin="modul"] .mrk-head { padding: 12px 14px 6px; }
   html[data-skin="modul"] .mrk-below { padding-left: 14px; }

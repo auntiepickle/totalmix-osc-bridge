@@ -502,19 +502,20 @@ function _knobModuleHTML(name, m, step) {
     </div>`;
   }).join('');
   const hasEnable = !!ENABLE_FOR[param];
-  const size = ['s', 'm', 'l'].includes(m.size) ? m.size : 's';
+  const size = _unitHP(m);
   const gkind = _graphKindOf(param) || 'plain';
+  const showGraph = hasGraph && size > 2;   // 2HP: one knob, one value
   return `
 <div id="card-${name}" class="card mmodule" data-size="${size}" data-kind="${gkind}">
   <div class="mrk-head">
     <div class="mhead"><span class="mgrip" draggable="true" title="drag to reorder">\u28ff</span>${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
-    <button class="msize" onclick="cycleUnitSize('${name}')" title="unit width - like Eurorack HP sizes">${({ s: '8HP', m: '12HP', l: '24HP' })[size]}</button>
+    <button class="msize" onclick="cycleUnitSize('${name}')" title="unit width - Eurorack HP sizes, 2HP to 24HP">${size}HP</button>
     <div class="msub"><span class="routing-label">${_esc(m.routing_label || '\u2014')}</span></div>
     ${enumChips ? `<div class="mrk-plates">${enumChips}</div>` : ''}
     ${hasEnable ? `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
         title="section power"><span class="mled"></span><span class="mpower-txt">${en === true ? 'ON' : en === false ? 'OFF' : '\u2014'}</span></button>` : ''}
   </div>
-  ${hasGraph ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : `<div class="mrk-nograph"></div>`}
+  ${showGraph ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : `<div class="mrk-nograph"></div>`}
   <div class="mrk-ctrl">
     <div class="mrk-knob">${ModulKnob.html(name, { label: shown })}</div>
     <span id="knob-val-${name}" class="mval" onclick="startKnobValEdit('${name}')" title="tap to type a value">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
@@ -565,14 +566,20 @@ function _wireKnobGraph(name) {
     const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
     const rack = document.documentElement.getAttribute('data-skin') === 'modul';
     const gkind = _graphKindOf(param);
-    // council spec: well height encodes dimensionality per size
-    const HSIZE = { s: { filter: 84, gain: 84, level: 40, pan: 32 },
-                    m: { filter: 112, gain: 112, level: 44, pan: 36 },
-                    l: { filter: 180, gain: 180, level: 120, pan: 120 } };
-    const msize = rack && ['s', 'm', 'l'].includes(m.size) ? m.size : (rack ? 's' : null);
+    // council spec extended to the full HP range: well height encodes
+    // dimensionality per size; below 8HP the wells lose axis labels
+    const HSIZE = { 4:  { filter: 48, gain: 48, level: 24, pan: 20 },
+                    6:  { filter: 64, gain: 64, level: 28, pan: 24 },
+                    8:  { filter: 84, gain: 84, level: 40, pan: 32 },
+                    12: { filter: 112, gain: 112, level: 44, pan: 36 },
+                    16: { filter: 112, gain: 112, level: 44, pan: 36 },
+                    24: { filter: 180, gain: 180, level: 120, pan: 120 } };
+    const hp = rack ? _unitHP(m) : null;
     const height = mobile ? (gkind === 'level' || gkind === 'pan' ? 56 : 132)
-                 : msize ? (HSIZE[msize][gkind] || 96)
+                 : hp ? ((HSIZE[hp] || HSIZE[8])[gkind] || 96)
                  : 96;
+    const noLabels = !mobile && hp != null && hp < 8;
+    if (hp === 2) return;   // 2HP has no well
     const band = param.slice(-1);
     const rng = Array.isArray(step.operation && step.operation.range) ? step.operation.range.map(Number) : [0, 1];
     const _cpWrite = cp => v => {
@@ -587,7 +594,7 @@ function _wireKnobGraph(name) {
       ModulGraph.filterInit(`f:${name}`, gEl, { name, toKnob: _modulToKnob(step, param), dragKey: name,
                                                 frange: [taper[0], Math.min(20000, taper[1] * 2)],
                                                 bounds: [toHz(rng[0]), toHz(rng[1])],
-                                                height,
+                                                height, noLabels,
                                                 setQ: _cpWrite(`eq_q_${band}`),
                                                 setGain: _cpWrite(`eq_gain_${band}`) });
     } else if (gkind === 'gain') {
@@ -596,7 +603,7 @@ function _wireKnobGraph(name) {
       const knobFromGain = gDbNorm => _knobNormOf({ device_value: gDbNorm }, step.operation);
       ModulGraph.filterInit(`f:${name}`, gEl, { name, dragKey: name,
         frange: [20, 20000],
-        height,
+        height, noLabels,
         onFreq: f => {
           const t = Math.log(Math.max(20, Math.min(20000, f)) / 20) / Math.log(1000);
           _cpWrite(`eq_freq_${band}`)(Math.max(0, Math.min(1, t)));
@@ -608,7 +615,7 @@ function _wireKnobGraph(name) {
         },
         setQ: _cpWrite(`eq_q_${band}`) });
     } else if (gkind === 'level' || gkind === 'pan') {
-      const opts = { name, dragKey: name, height,
+      const opts = { name, dragKey: name, height, noLabels,
         bounds: rng,
         onX: pv => {
           const kn = _knobNormOf({ device_value: pv }, step.operation);
@@ -678,14 +685,19 @@ function _wireKnobReorder() {
   });
 }
 
-// Static unit sizes, Eurorack-style (#user request): S=1/3 row (8HP),
-// M=1/2 (12HP), L=full (24HP). Persisted on the macro as `size`.
+// Static unit sizes, full Eurorack range (#user: adjustable down to
+// 2HP): 2/4/6/8/12/16/24HP on a 12-column grid. Persisted on the macro
+// as `size` (number; legacy 's'/'m'/'l' read as 8/12/24).
+const HP_SIZES = [2, 4, 6, 8, 12, 16, 24];
+function _unitHP(m) {
+  const legacy = { s: 8, m: 12, l: 24 }[m.size];
+  const hp = legacy || parseInt(m.size, 10);
+  return HP_SIZES.includes(hp) ? hp : 8;
+}
 window.cycleUnitSize = async function (name) {
   const m = macros[name];
   if (!m) return;
-  const order = ['s', 'm', 'l'];
-  const cur = ['s', 'm', 'l'].includes(m.size) ? m.size : 's';
-  const next = order[(order.indexOf(cur) + 1) % 3];
+  const next = HP_SIZES[(HP_SIZES.indexOf(_unitHP(m)) + 1) % HP_SIZES.length];
   m.size = next;
   renderCards();   // graph wells re-init at the new size's height
   try {

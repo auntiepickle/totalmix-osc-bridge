@@ -193,6 +193,12 @@
   hidden tabs.
 - **HP size chip made discoverable** (user missed it): bigger, brighter,
   with a resize glyph.
+- **Full Eurorack HP range** (user: adjustable down to 2HP): sizes are
+  now 2/4/6/8/12/16/24HP on a 12-column grid (numeric, legacy s/m/l
+  read as 8/12/24). 2HP is the one-knob utility tile (name, knob,
+  value, warn LED); 4HP keeps a tiny sparkline well; 6HP drops minis
+  and badge; wells below 8HP lose axis labels. Narrow desks bump each
+  size up; phones stack everything.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.
