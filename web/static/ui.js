@@ -568,12 +568,12 @@ function _wireKnobGraph(name) {
     const gkind = _graphKindOf(param);
     // council spec extended to the full HP range: well height encodes
     // dimensionality per size; below 8HP the wells lose axis labels
-    const HSIZE = { 4:  { filter: 48, gain: 48, level: 24, pan: 20 },
-                    6:  { filter: 64, gain: 64, level: 28, pan: 24 },
-                    8:  { filter: 84, gain: 84, level: 40, pan: 32 },
-                    12: { filter: 112, gain: 112, level: 44, pan: 36 },
-                    16: { filter: 112, gain: 112, level: 44, pan: 36 },
-                    24: { filter: 180, gain: 180, level: 120, pan: 120 } };
+    const HSIZE = { 4:  { filter: 48, gain: 48, level: 32, pan: 24 },
+                    6:  { filter: 64, gain: 64, level: 40, pan: 28 },
+                    8:  { filter: 84, gain: 84, level: 56, pan: 44 },
+                    12: { filter: 112, gain: 112, level: 72, pan: 56 },
+                    16: { filter: 112, gain: 112, level: 72, pan: 56 },
+                    24: { filter: 180, gain: 180, level: 120, pan: 96 } };
     const hp = rack ? _unitHP(m) : null;
     const height = mobile ? (gkind === 'level' || gkind === 'pan' ? 56 : 132)
                  : hp ? ((HSIZE[hp] || HSIZE[8])[gkind] || 96)

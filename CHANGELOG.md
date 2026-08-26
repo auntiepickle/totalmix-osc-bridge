@@ -199,6 +199,11 @@
   value, warn LED); 4HP keeps a tiny sparkline well; 6HP drops minis
   and badge; wells below 8HP lose axis labels. Narrow desks bump each
   size up; phones stack everything.
+- **Vertical density pass** (user: "more graph than subtext"): routing
+  rides the same line as the module name instead of burning a grey row;
+  head/ctrl chrome compresses to single lines; the 1-D wells grow to
+  dominate (level strips 56/72/120px by size, pan 44/56/96) - the
+  signal is the module now.
 - Mobile: modules go full-width at ≤480px, knobs grow to thumb size,
   targets ≥44px. Fixed: module wiring is synchronous, so graphs initialize
   even when the page loads in a background tab.

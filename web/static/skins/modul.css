@@ -572,17 +572,25 @@ html[data-skin="modul"] .mrk-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
-  padding: 10px 14px 6px 26px;
+  gap: 4px 10px;
+  padding: 6px 12px 2px 24px;
   min-width: 0;
 }
-html[data-skin="modul"] .mrk-head .mhead { margin-right: auto; }
-html[data-skin="modul"] .mrk-head .msub { width: 100%; order: 3; }
+html[data-skin="modul"] .mrk-head .mhead { margin-right: 0; }
+/* routing rides the SAME line as the name (#user: more graph than
+   subtext - the sub-line was burning a full row of grey) */
+html[data-skin="modul"] .mrk-head .msub { width: auto; order: 0; min-height: 0; }
+html[data-skin="modul"] .mrk-head .mrk-plates,
+html[data-skin="modul"] .mrk-head .mpower,
+html[data-skin="modul"] .mrk-head .msize { margin-left: auto; }
+html[data-skin="modul"] .mrk-head .mrk-plates ~ .mpower,
+html[data-skin="modul"] .mrk-head .mrk-plates ~ .msize,
+html[data-skin="modul"] .mrk-head .mpower ~ .msize { margin-left: 0; }
 html[data-skin="modul"] .mrk-plates { display: flex; gap: 6px; flex-wrap: wrap; }
 html[data-skin="modul"] .mmodule .mg-wrap,
 html[data-skin="modul"] .mrk-nograph {
   grid-area: graph;
-  margin: 10px 12px;
+  margin: 6px 10px;
   min-width: 0;
 }
 html[data-skin="modul"] .mrk-ctrl {
@@ -590,8 +598,8 @@ html[data-skin="modul"] .mrk-ctrl {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  padding: 8px 14px 10px;
+  gap: 2px 12px;
+  padding: 4px 12px 8px;
   min-width: 0;
 }
 html[data-skin="modul"] .mrk-knob .mk:not(.mk-mini) { width: 56px; height: 56px; }
