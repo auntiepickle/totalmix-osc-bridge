@@ -417,22 +417,45 @@ function _flushKnobs() {
     }
   });
 }
+// Timer-free flush pump for hidden/minimized windows (#user: lag returns when
+// the browser is MINIMIZED). MEASURED under true window-minimization: Chrome
+// throttles setTimeout to ~1-3s, but runs MessageChannel TASKS at full speed
+// (538 samples, 38ms max gap over 7s minimized) and network I/O promptly
+// (fetch max 109ms). So while hidden we drive the flush off a MessageChannel
+// loop instead of a timer: it streams pending values at ~KNOB_MIN_MS and
+// self-stops ~800ms after the last move. A running pump also keeps the tab
+// active, which helps input dispatch stay prompt.
+let _knobActivity = 0, _pumpOn = false, _pumpCh = null;
+function _startKnobPump() {
+  if (_pumpOn) return;
+  _pumpOn = true;
+  if (!_pumpCh) _pumpCh = new MessageChannel();
+  _pumpCh.port1.onmessage = () => {
+    const now = performance.now();
+    if (Object.keys(window._knobPending).length && now - _knobLastFlush >= KNOB_MIN_MS) {
+      _flushKnobs();
+    }
+    if (now - _knobActivity < 800) {
+      _pumpCh.port2.postMessage(0);          // keep pumping (task, not throttled)
+    } else {
+      _pumpOn = false;
+      if (Object.keys(window._knobPending).length) _flushKnobs();   // final value out
+    }
+  };
+  _pumpCh.port2.postMessage(0);
+}
 window.sendKnob = function (name, value) {
   window._knobPending[name] = Math.max(0, Math.min(1, parseFloat(value) || 0));
-  const since = performance.now() - _knobLastFlush;
-  // Gate driven by the EVENTS, not a timer (#user: lag returns when the
-  // browser is MINIMIZED). A hidden tab clamps setTimeout to ~1s, which used
-  // to stall device writes to ~1/s during a sweep. Now each value flushes as
-  // soon as KNOB_MIN_MS has elapsed since the last flush, so a continuing
-  // sweep streams at ~80Hz even minimized - the leading edge, without the
-  // timer dependency.
-  if (since >= KNOB_MIN_MS) {
-    _flushKnobs();
-  } else if (!_knobFlushTimer) {
-    // trailing backstop for the FINAL resting value only (a moving sweep
-    // flushes via the branch above). Clamped to ~1s when hidden - fine for
-    // one last value; the sweep itself no longer depends on it.
-    _knobFlushTimer = setTimeout(_flushKnobs, KNOB_MIN_MS - since);
+  _knobActivity = performance.now();
+  if (document.hidden) {
+    // MINIMIZED / background: setTimeout is throttled here, so run the
+    // timer-free MessageChannel pump (measured full-speed when minimized).
+    _startKnobPump();
+  } else {
+    // VISIBLE: timers aren't throttled - the efficient event+timer path.
+    const since = _knobActivity - _knobLastFlush;
+    if (since >= KNOB_MIN_MS) _flushKnobs();
+    else if (!_knobFlushTimer) _knobFlushTimer = setTimeout(_flushKnobs, KNOB_MIN_MS - since);
   }
 };
 

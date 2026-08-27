@@ -204,6 +204,16 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **MIDI knob: timer-free MessageChannel flush pump for minimized windows**
+  (user: lag still returned when minimized). Measured under TRUE window-
+  minimization (not just a hidden tab): Chrome throttles setTimeout to ~1-3s,
+  but runs MessageChannel TASKS at full speed (538 samples, 38ms max gap over
+  7s minimized) and network I/O promptly (fetch max 109ms). The previous fix
+  still had a setTimeout in the path; now, while `document.hidden`, the flush
+  is driven entirely by a MessageChannel loop - streams pending at ~80Hz
+  (verified 88Hz hidden), self-stops ~800ms after the last move, and keeps
+  the tab active so input dispatch stays prompt. Visible windows keep the
+  efficient timer path.
 - **MIDI knob smoothness holds when the browser is minimized** (user
   found the residual: lag returned on minimize). A hidden tab clamps
   `setTimeout` to ~1s, and the device-write coalescer leaned on a
