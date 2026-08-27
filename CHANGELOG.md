@@ -226,6 +226,32 @@
   Also `sendKnob` is now leading-edge (an idle knob writes immediately
   instead of waiting out a 25ms batch; a continuing sweep coalesces to
   ~80Hz).
+- **Critical-review fixes: duck + safety.**
+  - **Duck echo defect fixed** (HIGH-1): the ducker assumed TotalMix echoes
+    our fader writes back; under re-send OFF it doesn't, so the old
+    base-tracking misread every write as a hand-move, collapsed the reduction
+    to <1dB and ratcheted the fader UP each cycle. Now the base is simply the
+    device's freshest EXTERNAL level (which re-bases the duck for free when
+    you ride the fader), never derived from our own writes. Tests rewritten to
+    model the real wire.
+  - **Duck -inf write loop fixed** (HIGH-2): a send parked at -inf (fader_db
+    == -300) no longer floods 25 writes/sec.
+  - **Duck restores on shutdown** (C1): a FastAPI shutdown hook stops the
+    transport so the supervisor's restore-on-exit actually runs - a graceful
+    stop/restart no longer leaves a send ducked. (A hard kill -9 still can't
+    be caught.)
+  - **Send groups can't defeat the cap** (S1/C3): every group member write is
+    ceilinged at unity (0 dBFS), so a group - even one with Main as a member -
+    can never be pushed into the +6dB overgain region past a knob's cap. A
+    member that resolves to the primary's own address (stereo-alias collision)
+    is skipped, not double-written.
+  - **Atomic config writes** (H1): mappings.json and config are now written
+    tmp+fsync+os.replace, so a crash mid-write can't truncate them and boot
+    the rig empty.
+  - **Opt-in token auth** (S2): set `API_TOKEN` on the server and every
+    state-changing request + the WS must carry it (header or ?token=); GETs
+    stay open. OFF by default (unset) = unchanged behavior. The browser picks
+    it up from `localStorage.tmToken`. See docs/security.md.
 - **Knob values over MQTT** (user goal: "control a volume knob on a
   speaker... use my iphone to turn down the volume"): publish 0-1 (or
   0-100, auto-detected) to `totalmix/knob/<name>` and the bridge sets

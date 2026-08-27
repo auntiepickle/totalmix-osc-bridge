@@ -61,20 +61,27 @@ def duck_tick(cfg, rt, key_db, dev_db, dt):
         gr = 0.0
     rt["gr"] = gr
 
-    if dev_db is None:
-        return None
-    if "base" not in rt:
-        # first sighting: where the fader sits IS the base
+    # The un-ducked base IS the target's externally-set level. Under re-send
+    # OFF (the bridge default) our OWN writes never echo back, so dev_db holds
+    # the human's level and moves ONLY when they move it - which re-bases the
+    # duck for free. Deriving base from our own writes (the old code) misread
+    # every write as an external move, ratcheted the fader UP a little each
+    # cycle and collapsed the reduction to <1 dB (critical-review HIGH-1). We
+    # no longer do that: base = the freshest external device level, full stop.
+    if dev_db is not None:
         rt["base"] = dev_db
-        rt["written"] = dev_db
-        rt["applied"] = 0.0
-    elif abs(dev_db - rt.get("written", dev_db)) > EXTERNAL_EPS_DB:
-        # external move happened UNDER the current reduction
-        rt["base"] = dev_db + rt.get("applied", 0.0)
-        rt["written"] = dev_db
-
-    out = max(FLOOR_DB, rt["base"] - gr)
-    if abs(out - rt.get("written", 1e9)) <= WRITE_EPS_DB:
+    base = rt.get("base")
+    if base is None:
+        return None                        # level unknown yet - nothing to write
+    if base <= FLOOR_DB:                    # send already at/below silence
+        rt["written"] = None               # (fader_db(0) == -300) -> no -inf
+        rt["applied"] = 0.0                #  write loop, nothing to duck
+        return None
+    if rt.get("written") is None:
+        rt["written"] = base               # device already sits at base - no
+        rt["applied"] = 0.0                #  redundant write just to establish
+    out = max(FLOOR_DB, base - gr)
+    if abs(out - rt["written"]) <= WRITE_EPS_DB:
         return None
     rt["written"] = out
     rt["applied"] = gr

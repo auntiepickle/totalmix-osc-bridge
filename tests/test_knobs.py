@@ -471,3 +471,36 @@ def test_group_unresolvable_member_skips_quietly(rig):
     r = b.knob_set("grp", 0.5)
     assert r["status"] == "resolved"       # the primary still lands
     assert len(g.sent) == 1
+
+
+def test_group_member_clamped_to_unity(rig):
+    # a member driven above 0 dBFS is capped at unity - a group can never
+    # push a fader into the +6 dB overgain region (critical-review S1/C3).
+    macro = {"steps": [{
+        "target": {"submix": "Main", "channel": "Mic 1"},
+        "value": "{{param}}",
+        "operation": {"type": "knob", "hold": True, "range": [0.0, 1.0],
+                      "group": [{"submix": "Phones", "channel": "Mic 1",
+                                 "offset_db": 30.0}]}}],
+        "midi_triggers": []}
+    b, g, _ = rig({"grp": macro})
+    b.knob_set("grp", 1.0)                 # primary at faderlin 1.0 (+6 dB)
+    assert len(g.sent) >= 2
+    member_v = g.sent[1][1]
+    assert member_v <= gu.fader_lin(0.0) + 1e-6      # ceilinged at unity
+
+
+def test_group_dedup_alias_collision(rig):
+    # a member that resolves to the primary's OWN address is skipped, not
+    # written twice (stereo-alias double-write, H3).
+    macro = {"steps": [{
+        "target": {"submix": "Main", "channel": "Mic 1"},
+        "value": "{{param}}",
+        "operation": {"type": "knob", "hold": True, "range": [0.0, 1.0],
+                      "group": [{"submix": "Main", "channel": "Mic 1",
+                                 "offset_db": -6.0}]}}],
+        "midi_triggers": []}
+    b, g, _ = rig({"grp": macro})
+    b.knob_set("grp", 0.5)
+    # exactly ONE write to the shared address (the primary); member deduped
+    assert len(g.sent) == 1

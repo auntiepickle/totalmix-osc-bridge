@@ -2059,6 +2059,19 @@ class TotalMixOSCBridge:
         if str(step.get("target", {}).get("param", "volume")) != "volume":
             return                      # groups ride the fader law
         base_db = gu.fader_db(primary_norm)
+        # SAFETY (critical-review S1/C3): a group must never drive a member -
+        # least of all an output/Main fader - into the +6 dB overgain region
+        # and blow past a knob's own cap. Every member write is ceilinged at
+        # unity (0 dBFS). And a member that resolves to the primary's own
+        # address (stereo-alias collision, H3) is skipped, not double-written.
+        member_ceil = gu.fader_lin(0.0)
+        seen = set()
+        try:
+            pw, _, pst = self.global_transport.resolve_step(step["target"])
+            if pst == "resolved":
+                seen.add(getattr(pw, "address", None))
+        except Exception:
+            pass
         for mem in grp:
             if not isinstance(mem, dict) or not mem.get("channel"):
                 continue
@@ -2068,13 +2081,22 @@ class TotalMixOSCBridge:
                 off = float(mem.get("offset_db", 0.0))
             except (TypeError, ValueError):
                 off = 0.0
-            # primary at hard bottom = the whole group mutes clean
-            v = 0.0 if primary_norm <= 0.0005 \
-                else max(0.0, min(1.0, gu.fader_lin(base_db + off)))
             try:
                 writer, _, status = self.global_transport.resolve_step(tgt)
-                if status == "resolved":
-                    writer.send_message("group", v)
+            except Exception:
+                logger.exception(f"group member resolve failed for '{macro_name}'")
+                continue
+            if status != "resolved":
+                continue
+            addr = getattr(writer, "address", None)
+            if addr in seen:
+                continue                    # alias collided with primary/member
+            seen.add(addr)
+            # primary at hard bottom = the whole group mutes clean
+            v = 0.0 if primary_norm <= 0.0005 \
+                else max(0.0, min(member_ceil, gu.fader_lin(base_db + off)))
+            try:
+                writer.send_message("group", v)
             except Exception:
                 logger.exception(f"group member write failed for '{macro_name}'")
 

@@ -1,3 +1,22 @@
+// Opt-in auth (#security): if a token is stored, attach it to every request
+// and the WS. No token stored => no header => today's behavior. Set once in
+// the browser console: localStorage.setItem('tmToken','<the API_TOKEN>').
+(function () {
+  const _f = window.fetch;
+  window.fetch = function (input, init) {
+    try {
+      const t = localStorage.getItem('tmToken');
+      if (t) {
+        init = init || {};
+        const h = new Headers(init.headers || {});
+        if (!h.has('X-Api-Token')) h.set('X-Api-Token', t);
+        init.headers = h;
+      }
+    } catch (_) {}
+    return _f.call(this, input, init);
+  };
+  window._tmToken = function () { try { return localStorage.getItem('tmToken') || ''; } catch (_) { return ''; } };
+})();
 /* app.js — global state, WebSocket, macro loading, status updates */
 
 // ── Global state (shared by ui.js and midi.js) ───────────────────────────────
@@ -17,7 +36,8 @@ let _wsRetryMs = 1000;
 // drop silently froze the UI while the REST health dots stayed green
 // (review finding). loadMacros() on open re-syncs whatever was missed.
 function _connectWS() {
-  ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+  const _wsTok = window._tmToken && window._tmToken() ? ('?token=' + encodeURIComponent(window._tmToken())) : '';
+  ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws${_wsTok}`);
   ws.onopen = () => {
     console.log('[WS] Connected to bridge');
     document.title = 'TotalMix OSC Bridge';

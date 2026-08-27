@@ -1,4 +1,5 @@
 import os
+import tempfile
 import re
 import shutil
 import datetime
@@ -6,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel
 import json
 import threading
@@ -28,6 +29,46 @@ print(f"DEBUG: Mounting static files from: {static_dir}")
 print(f"DEBUG: Files found: {list(Path(static_dir).glob('*'))}")
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+def _atomic_write_json(target, data):
+    """Write JSON atomically: temp file + fsync + os.replace, so a crash or
+    power loss mid-write can never truncate the live config (critical-review
+    H1 - a truncated mappings.json boots empty = every knob and macro gone
+    at showtime)."""
+    d = os.path.dirname(target) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+# Opt-in shared-token auth (critical-review S2). OFF by default: when the
+# API_TOKEN env var is unset, this is a pure pass-through and nothing changes.
+# When set, every state-changing request (POST/PUT/PATCH/DELETE) and the /ws
+# socket must carry it (X-Api-Token header or ?token=). GETs - the UI and
+# reads - stay open; the ear-safety risk is the writes. See docs/security.md.
+API_TOKEN = os.environ.get("API_TOKEN", "").strip()
+_AUTH_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next):
+    if API_TOKEN and request.method in _AUTH_METHODS:
+        supplied = (request.headers.get("x-api-token")
+                    or request.query_params.get("token"))
+        if supplied != API_TOKEN:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -249,8 +290,7 @@ def _persist_mappings():
     backup_json_files("mappings.json")
     bridge.mappings = _sanitize_mappings(bridge.mappings)
     target = os.path.join(os.path.dirname(__file__), "../mappings.json")
-    with open(target, "w") as f:
-        json.dump(bridge.mappings, f, indent=2)
+    _atomic_write_json(target, bridge.mappings)
     bridge.mappings_is_example = False
     bridge.mappings_source = "mappings.json"
 
@@ -491,8 +531,7 @@ async def save_config_mappings(request: Request):
         data = _sanitize_mappings(data)
         backup_json_files("mappings.json")
         target = os.path.join(os.path.dirname(__file__), "../mappings.json")
-        with open(target, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(target, data)
         bridge.mappings = data
         bridge.mappings_is_example = False
         bridge.mappings_source = "mappings.json"
@@ -520,8 +559,7 @@ async def save_config_channel_map(request: Request):
             raise HTTPException(status_code=400, detail="Invalid channel_map: needs 'physical_table' (or legacy 'submixes')")
         backup_json_files("ufx2_channel_map.json")
         target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
-        with open(target, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(target, data)
         bridge._load_channel_map()
         bridge.channel_map_is_example = False
         logger.info("✅ channel_map.json saved via live editor")
@@ -848,6 +886,9 @@ async def get_picker():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if API_TOKEN and websocket.query_params.get("token") != API_TOKEN:
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     ws_clients.append(websocket)
     try:
@@ -905,8 +946,7 @@ async def upload_mappings(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Invalid mappings.json format")
         data = _sanitize_mappings(data)
         target = os.path.join(os.path.dirname(__file__), "../mappings.json")
-        with open(target, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(target, data)
         bridge.mappings = data
         bridge.mappings_is_example = False
         bridge.mappings_source = "mappings.json"
@@ -930,8 +970,7 @@ async def upload_channel_map(file: UploadFile = File(...)):
         if "submixes" not in data and "physical_table" not in data:
             raise HTTPException(status_code=400, detail="Invalid ufx2_channel_map.json format")
         target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
-        with open(target, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(target, data)
         bridge._load_channel_map()
         logger.info("✅ ufx2_channel_map.json uploaded + reloaded")
         return {"status": "success", "message": "channel map updated and reloaded"}
@@ -1012,6 +1051,18 @@ def _keepalive():
     import time
     while True:
         time.sleep(60)
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    # Graceful stop (docker stop/restart = SIGTERM fires this) tears down the
+    # global transport, which sets _knob_watch_stop and lets the duck
+    # supervisor run its restore-on-exit so no send is left ducked
+    # (critical-review C1). A hard kill -9 / power loss cannot be caught.
+    try:
+        bridge.stop_global_osc()
+    except Exception:
+        logger.exception("shutdown: stop_global_osc failed")
 
 
 @app.on_event("startup")

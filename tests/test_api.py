@@ -171,10 +171,8 @@ def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
     import web.web_client as wc
     monkeypatch.setattr(wc, "backup_json_files", lambda *a, **k: None)
     out = tmp_path / "mappings.json"
-    real_open = open
-    monkeypatch.setattr(wc, "open",
-                        lambda path, mode="r": real_open(out, mode),
-                        raising=False)
+    monkeypatch.setattr(wc, "_atomic_write_json",
+                        lambda path, data: out.write_text(_json.dumps(data, indent=2)))
     saved = bridge_module.bridge.mappings
     try:
         bridge_module.bridge.mappings = {"macros": {
@@ -283,3 +281,27 @@ def test_rename_macro_moves_key_and_state(monkeypatch):
     finally:
         macros.pop("zz_new", None); macros.pop("zz_old", None)
         b.macro_health.pop("zz_new", None); b.macro_health.pop("zz_old", None)
+
+
+def test_auth_off_by_default_allows_writes():
+    # API_TOKEN unset (default) -> the gate is a pass-through
+    import web.web_client as wc
+    assert wc.API_TOKEN == ""
+    r = client.post("/api/trigger/does_not_exist")
+    assert r.status_code in (404, 409, 503)   # reached the handler, not 401
+
+
+def test_auth_blocks_unauthenticated_write_when_set(monkeypatch):
+    import web.web_client as wc
+    monkeypatch.setattr(wc, "API_TOKEN", "s3cret")
+    # a mutating request WITHOUT the token is refused before the handler
+    r = client.post("/api/trigger/whatever")
+    assert r.status_code == 401
+    # GETs stay open
+    assert client.get("/api/macros").status_code == 200
+    # with the token it passes the gate (handler then decides)
+    r2 = client.post("/api/trigger/whatever", headers={"X-Api-Token": "s3cret"})
+    assert r2.status_code != 401
+    # ?token= also works
+    r3 = client.post("/api/trigger/whatever?token=s3cret")
+    assert r3.status_code != 401
