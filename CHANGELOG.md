@@ -204,6 +204,15 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **Knob values over MQTT** (user goal: "control a volume knob on a
+  speaker... use my iphone to turn down the volume"): publish 0-1 (or
+  0-100, auto-detected) to `totalmix/knob/<name>` and the bridge sets
+  the knob through its range guard and the RME fader law; the bridge
+  publishes `totalmix/knob/<name>/state` (retained) on every change
+  from any source, riding the knob broadcast throttle + trailing
+  flush, so a Home Assistant slider tracks reality. Retained commands
+  are ignored (no boot-time volume yanks). docs/home-assistant.md has
+  the copy-paste `mqtt: number:` recipe.
 - **EQ curves render the DIGITAL filter** (user report: our curves and
   TotalMix's don't look similar): wire-truthed against the Main EQ
   panel (LP 12k, Q 9.9) - a digital low-pass biquad has zeros at

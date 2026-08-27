@@ -241,3 +241,47 @@ def test_ws_and_snap_echo_markers_are_independent(handler):
     client.on_message(client, None, msg("totalmix/workspace", "2"))
     client.on_message(client, None, msg("totalmix/snapshot", "3"))
     assert sent_osc == osc_after_commands
+
+
+# == Knob values over MQTT (#mqtt-knob: HA slider -> bridge.knob_set) ====
+
+def test_knob_topic_sets_value(handler):
+    client, bridge, _ = handler
+    calls = []
+    bridge.knob_set = lambda name, v, source=None: (calls.append((name, v, source))
+                                                    or {"status": "resolved"})
+    client.on_message(client, None, msg("totalmix/knob/speaker_vol", "0.42"))
+    assert calls == [("speaker_vol", 0.42, "mqtt")]
+
+
+def test_knob_topic_percent_autodetect(handler):
+    client, bridge, _ = handler
+    calls = []
+    bridge.knob_set = lambda name, v, source=None: (calls.append(v)
+                                                    or {"status": "resolved"})
+    client.on_message(client, None, msg("totalmix/knob/vol", "73"))
+    assert calls == [0.73]
+
+
+def test_knob_topic_retained_ignored(handler):
+    client, bridge, _ = handler
+    calls = []
+    bridge.knob_set = lambda *a, **k: calls.append(a) or {"status": "resolved"}
+    client.on_message(client, None, msg("totalmix/knob/vol", "0.9", retain=True))
+    assert calls == []
+
+
+def test_knob_state_echo_not_reprocessed(handler):
+    client, bridge, _ = handler
+    calls = []
+    bridge.knob_set = lambda *a, **k: calls.append(a) or {"status": "resolved"}
+    client.on_message(client, None, msg("totalmix/knob/vol/state", "0.5000"))
+    assert calls == []
+
+
+def test_knob_topic_bad_payload_ignored(handler):
+    client, bridge, _ = handler
+    calls = []
+    bridge.knob_set = lambda *a, **k: calls.append(a) or {"status": "resolved"}
+    client.on_message(client, None, msg("totalmix/knob/vol", "loud please"))
+    assert calls == []

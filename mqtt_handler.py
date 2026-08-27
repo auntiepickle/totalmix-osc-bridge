@@ -165,6 +165,35 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         # state and reverting per-workspace settings like the OSC bank
         # width). Absorb them as bridge belief only; never drive the device
         # from a retained message.
+        # == KNOB VALUES over MQTT (#user: 'control a volume knob on a
+        # speaker... use my iphone to turn down the volume') ==============
+        # Command: totalmix/knob/<name>  payload = 0..1 float (or 0..100,
+        # auto-detected). State echoes back RETAINED on
+        # totalmix/knob/<name>/state so a Home Assistant slider tracks
+        # reality (including MIDI/UI moves - published from knob_set).
+        if msg.topic.startswith("totalmix/knob/"):
+            rest = msg.topic[len("totalmix/knob/"):]
+            if rest.endswith("/state") or "/" in rest:
+                return          # our own state echo (we subscribe totalmix/#)
+            if msg.retain:
+                # a retained command replayed at (re)connect would yank the
+                # volume at boot - same policy as retained macro triggers
+                logger.info(f"Retained knob command {msg.topic} ignored "
+                            f"(retained values only replay stale state)")
+                return
+            try:
+                v = float(payload)
+            except ValueError:
+                logger.warning(f"Non-numeric knob payload ignored: {payload!r}")
+                return
+            if v > 1.0:
+                v = v / 100.0   # HA sliders often speak percent
+            v = max(0.0, min(1.0, v))
+            r = getattr(bridge, "knob_set", lambda *a, **k: {"status": "no_knobs"})(
+                rest, v, source="mqtt")
+            logger.info(f"MQTT knob '{rest}' <- {v:.3f} ({r.get('status')})")
+            return
+
         if msg.retain and msg.topic.startswith("totalmix/macro/"):
             logger.info(f"Retained macro trigger {msg.topic} ignored "
                         f"(replays would fire macros on every restart)")

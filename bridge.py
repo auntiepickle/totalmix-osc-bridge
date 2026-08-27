@@ -2121,6 +2121,7 @@ class TotalMixOSCBridge:
             self._knob_last_broadcast[macro_name] = now
             if status == "resolved":
                 self._knob_last_pushed[macro_name] = self._knob_snapshot(step)
+                self._mqtt_knob_state(macro_name)
             self.broadcast_state(macro_event={
                 "type": "knob_update", "name": macro_name, "status": status,
                 "value": self.knob_values.get(macro_name),
@@ -2140,6 +2141,21 @@ class TotalMixOSCBridge:
             self._schedule_knob_trailing(macro_name, step, source)
         return {"status": status, "value": self.knob_values.get(macro_name)}
 
+    def _mqtt_knob_state(self, name):
+        """Retained knob state for Home Assistant (#mqtt-knob): rides the
+        same throttle as the WS broadcast, so an MQTT slider tracks every
+        source of change (iPhone, MIDI, UI, snapshot re-assert)."""
+        if not self.mqtt_client:
+            return
+        v = self.knob_values.get(name)
+        if v is None:
+            return
+        try:
+            self.mqtt_client.publish(f"totalmix/knob/{name}/state",
+                                     f"{float(v):.4f}", retain=True)
+        except Exception:
+            pass
+
     def _schedule_knob_trailing(self, name, step, source):
         if self._knob_trailing_timers.get(name):
             return   # one armed already; it reads live state when it fires
@@ -2154,6 +2170,7 @@ class TotalMixOSCBridge:
                 resolved = status == "resolved"
                 if resolved:
                     self._knob_last_pushed[name] = self._knob_snapshot(step)
+                    self._mqtt_knob_state(name)   # HA gets the FINAL value
                 self.broadcast_state(macro_event={
                     "type": "knob_update", "name": name, "status": status,
                     "value": self.knob_values.get(name),
