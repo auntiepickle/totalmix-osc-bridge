@@ -381,11 +381,14 @@ window._knobPending = {};
 window._knobEcho = {};   // name -> last value THIS client sent (echo guard)
 let _knobFlushTimer = null;
 
+let _knobLastFlush = 0;
+const KNOB_MIN_MS = 12;   // min interval between device writes per burst (~80Hz)
 window.sendKnob = function (name, value) {
   window._knobPending[name] = Math.max(0, Math.min(1, parseFloat(value) || 0));
   if (_knobFlushTimer) return;
-  _knobFlushTimer = setTimeout(() => {
+  const flush = () => {
     _knobFlushTimer = null;
+    _knobLastFlush = performance.now();
     const pending = window._knobPending;
     window._knobPending = {};
     Object.entries(pending).forEach(([n, v]) => {
@@ -396,7 +399,37 @@ window.sendKnob = function (name, value) {
         API.setKnob(n, v).catch(() => {});
       }
     });
-  }, 25);
+  };
+  // LEADING edge: an idle knob writes IMMEDIATELY (no batch wait) so the first
+  // move of a fader lands in single-digit ms; a continuing sweep coalesces to
+  // KNOB_MIN_MS. (#user report: MIDI felt laggy - the fixed 25ms trailing batch
+  // delayed even the first value.)
+  const since = performance.now() - _knobLastFlush;
+  if (since >= KNOB_MIN_MS) flush();
+  else _knobFlushTimer = setTimeout(flush, KNOB_MIN_MS - since);
+};
+
+// Physical MIDI drives the on-screen knob LOCALLY and instantly (#user report:
+// "when i move the fader on my midi device i can definitely tell there is a lag
+// and the knob seems jumpy"). Root cause: MIDI called sendKnob only, so the
+// visual updated ONLY from the server's throttled (10Hz) round-trip echo
+// (~300ms measured) - which the echo-guard then dropped mid-sweep, so the knob
+// barely tracked then SNAPPED at the end. Now MIDI renders like a hand-drag:
+// widget + model update on the spot, device write still streams underneath.
+// (The RME write itself is ~3ms - never the bottleneck; this was all in our
+// own feedback loop.)
+window.knobFromMidi = function (name, value) {
+  const m = macros[name];
+  if (!m) return;
+  const v = Math.max(0, Math.min(1, parseFloat(value) || 0));
+  if (window._knobDrag === name) return;          // a hand owns the widget
+  // drive the visible control immediately
+  if (window.ModulKnob && document.documentElement.getAttribute('data-skin') === 'modul') {
+    ModulKnob.set(name, v);
+  }
+  const slider = document.getElementById(`knob-${name}`);
+  if (slider) slider.value = v;
+  knobInput(name, v);   // model + graph + label, then sendKnob(device)
 };
 
 // Card slider dragged by hand: readout immediately, device via the stream

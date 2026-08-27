@@ -76,9 +76,11 @@ function _fireTriggers(match, value, logLabel) {
   Object.keys(macros).forEach(name => {
     for (const trigger of macros[name].midi_triggers || []) {
       if (match(trigger)) {
-        // KNOB macro + value-carrying trigger: stream the value, don't fire
+        // KNOB macro + value-carrying trigger: render locally + stream the
+        // value (NOT fire). knobFromMidi paints the on-screen knob on the spot
+        // so it never waits for the server echo (#user: MIDI lag/jumpiness).
         if (_knobStepOf(macros[name]) && trigger.use_value_as_param) {
-          sendKnob(name, value);
+          (window.knobFromMidi || window.sendKnob)(name, value);
           return;
         }
         console.log(`[MIDI] ${logLabel} → ${name}`);

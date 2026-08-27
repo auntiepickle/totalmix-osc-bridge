@@ -204,6 +204,19 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **MIDI knob lag + jumpiness fixed** (user report: "when i move the
+  fader on my midi device i can definitely tell there is a lag and the
+  knob seems jumpy"). Measured the whole path: the RME write is ~3ms
+  (p90 3.9ms) - never the bottleneck. The lag was entirely our own
+  visual loop: physical MIDI updated the on-screen knob ONLY via the
+  server's 10Hz round-trip echo (~300ms measured), which the echo-guard
+  then dropped mid-sweep, so the knob barely tracked then snapped.
+  Fix: `knobFromMidi` renders the knob locally and instantly (like a
+  hand-drag - widget + model + graph on the spot), device write still
+  streams underneath; visual latency ~300ms -> ~0ms, tracks every value.
+  Also `sendKnob` is now leading-edge (an idle knob writes immediately
+  instead of waiting out a 25ms batch; a continuing sweep coalesces to
+  ~80Hz).
 - **Knob values over MQTT** (user goal: "control a volume knob on a
   speaker... use my iphone to turn down the volume"): publish 0-1 (or
   0-100, auto-detected) to `totalmix/knob/<name>` and the bridge sets
