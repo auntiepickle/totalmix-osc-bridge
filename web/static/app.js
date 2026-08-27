@@ -383,30 +383,37 @@ let _knobFlushTimer = null;
 
 let _knobLastFlush = 0;
 const KNOB_MIN_MS = 12;   // min interval between device writes per burst (~80Hz)
+function _flushKnobs() {
+  if (_knobFlushTimer) { clearTimeout(_knobFlushTimer); _knobFlushTimer = null; }
+  _knobLastFlush = performance.now();
+  const pending = window._knobPending;
+  window._knobPending = {};
+  Object.entries(pending).forEach(([n, v]) => {
+    window._knobEcho[n] = v;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'knob', name: n, value: v }));
+    } else {
+      API.setKnob(n, v).catch(() => {});
+    }
+  });
+}
 window.sendKnob = function (name, value) {
   window._knobPending[name] = Math.max(0, Math.min(1, parseFloat(value) || 0));
-  if (_knobFlushTimer) return;
-  const flush = () => {
-    _knobFlushTimer = null;
-    _knobLastFlush = performance.now();
-    const pending = window._knobPending;
-    window._knobPending = {};
-    Object.entries(pending).forEach(([n, v]) => {
-      window._knobEcho[n] = v;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'knob', name: n, value: v }));
-      } else {
-        API.setKnob(n, v).catch(() => {});
-      }
-    });
-  };
-  // LEADING edge: an idle knob writes IMMEDIATELY (no batch wait) so the first
-  // move of a fader lands in single-digit ms; a continuing sweep coalesces to
-  // KNOB_MIN_MS. (#user report: MIDI felt laggy - the fixed 25ms trailing batch
-  // delayed even the first value.)
   const since = performance.now() - _knobLastFlush;
-  if (since >= KNOB_MIN_MS) flush();
-  else _knobFlushTimer = setTimeout(flush, KNOB_MIN_MS - since);
+  // Gate driven by the EVENTS, not a timer (#user: lag returns when the
+  // browser is MINIMIZED). A hidden tab clamps setTimeout to ~1s, which used
+  // to stall device writes to ~1/s during a sweep. Now each value flushes as
+  // soon as KNOB_MIN_MS has elapsed since the last flush, so a continuing
+  // sweep streams at ~80Hz even minimized - the leading edge, without the
+  // timer dependency.
+  if (since >= KNOB_MIN_MS) {
+    _flushKnobs();
+  } else if (!_knobFlushTimer) {
+    // trailing backstop for the FINAL resting value only (a moving sweep
+    // flushes via the branch above). Clamped to ~1s when hidden - fine for
+    // one last value; the sweep itself no longer depends on it.
+    _knobFlushTimer = setTimeout(_flushKnobs, KNOB_MIN_MS - since);
+  }
 };
 
 // Physical MIDI drives the on-screen knob LOCALLY and instantly (#user report:
@@ -423,6 +430,7 @@ window.knobFromMidi = function (name, value) {
   if (!m) return;
   const v = Math.max(0, Math.min(1, parseFloat(value) || 0));
   if (window._knobDrag === name) return;          // a hand owns the widget
+  if (document.hidden) { m.knob_value = v; sendKnob(name, v); return; }  // not visible: stream only
   // drive the visible control immediately
   if (window.ModulKnob && document.documentElement.getAttribute('data-skin') === 'modul') {
     ModulKnob.set(name, v);

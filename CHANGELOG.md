@@ -204,6 +204,15 @@
   head/ctrl chrome compresses to single lines; the 1-D wells grow to
   dominate (level strips 56/72/120px by size, pan 44/56/96) - the
   signal is the module now.
+- **MIDI knob smoothness holds when the browser is minimized** (user
+  found the residual: lag returned on minimize). A hidden tab clamps
+  `setTimeout` to ~1s, and the device-write coalescer leaned on a
+  timer - so a minimized sweep dropped to ~1 device write/sec. Rewrote
+  the flush to be driven by the event timing itself (flush once
+  KNOB_MIN_MS has elapsed since the last flush), so a sweep streams at
+  ~80Hz even minimized - verified 84Hz in a hidden tab. A timer now
+  only backstops the final resting value (≤1s settle when minimized).
+  Visual work is skipped entirely while hidden.
 - **MIDI knob lag + jumpiness fixed** (user report: "when i move the
   fader on my midi device i can definitely tell there is a lag and the
   knob seems jumpy"). Measured the whole path: the RME write is ~3ms
