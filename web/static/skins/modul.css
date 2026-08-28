@@ -397,23 +397,25 @@ html[data-skin="modul"] .bg-red-900\/20 {
 /* ═══ THE MODULES: 1U RACK UNITS (rendered by _knobModuleHTML) ══════════ */
 
 html[data-skin="modul"] #knob-row {
-  display: grid !important;
-  grid-template-columns: repeat(12, 1fr);
+  display: flex !important;
+  flex-wrap: wrap;
   align-items: stretch;
   gap: 2px;
   counter-reset: unit;
+  width: 100%;
+  min-width: 0;
 }
-/* STATIC unit sizes, full Eurorack range (#user: down to 2HP):
-   2/4/6/8/12/16/24HP on a 12-col grid. Any module any size; drag to
-   pack them into rows. */
-html[data-skin="modul"] .mmodule { grid-column: span 4; }
-html[data-skin="modul"] .mmodule[data-size="2"]  { grid-column: span 1; }
-html[data-skin="modul"] .mmodule[data-size="4"]  { grid-column: span 2; }
-html[data-skin="modul"] .mmodule[data-size="6"]  { grid-column: span 3; }
-html[data-skin="modul"] .mmodule[data-size="8"]  { grid-column: span 4; }
-html[data-skin="modul"] .mmodule[data-size="12"] { grid-column: span 6; }
-html[data-skin="modul"] .mmodule[data-size="16"] { grid-column: span 8; }
-html[data-skin="modul"] .mmodule[data-size="24"] { grid-column: 1 / -1; }
+/* HP sizes as flex proportions (#user: dont cap a row at 3 - auto-resize to
+   fit). flex-grow == HP weight so modules keep relative width AND stretch to
+   fill each row (no trailing gap); flex-basis is the min before wrapping. */
+html[data-skin="modul"] .mmodule { flex: 4 0 320px; min-width: 0; }
+html[data-skin="modul"] .mmodule[data-size="2"]  { flex: 1 0 120px; }
+html[data-skin="modul"] .mmodule[data-size="4"]  { flex: 2 0 180px; }
+html[data-skin="modul"] .mmodule[data-size="6"]  { flex: 3 0 250px; }
+html[data-skin="modul"] .mmodule[data-size="8"]  { flex: 4 0 320px; }
+html[data-skin="modul"] .mmodule[data-size="12"] { flex: 6 0 460px; }
+html[data-skin="modul"] .mmodule[data-size="16"] { flex: 8 0 620px; }
+html[data-skin="modul"] .mmodule[data-size="24"] { flex: 1 0 100%; }
 @media (max-width: 1400px) {
   html[data-skin="modul"] .mmodule[data-size="2"]  { grid-column: span 2; }
   html[data-skin="modul"] .mmodule[data-size="4"]  { grid-column: span 3; }
@@ -993,17 +995,27 @@ html[data-skin="modul"] #midi-matrix-btn {
 html[data-skin="modul"] #midi-matrix-btn:hover { color: var(--mo-ink); border-color: var(--mo-ink); }
 
 /* == SIDECHAIN DUCK row =============================================== */
-html[data-skin="modul"] .mduck {
+html[data-skin="modul"] .mdg {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 5px 14px 7px 24px;
+  padding: 2px 14px 3px 24px;
   border-top: 1px solid var(--mo-seam);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 9px;
 }
+html[data-skin="modul"] .mdg-sec {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+html[data-skin="modul"] .mdg-sec.on { flex: 1 1 auto; }
+/* tiny modules never show the bar - no room */
+html[data-skin="modul"] .mmodule[data-size="2"] .mdg,
+html[data-skin="modul"] .mmodule[data-size="4"] .mdg { display: none; }
 html[data-skin="modul"] .mduck-chip {
   font-size: 9px;
   letter-spacing: 0.16em;
@@ -1040,8 +1052,6 @@ html[data-skin="modul"] .mduck-val { color: var(--mo-txt); min-width: 40px; }
 html[data-skin="modul"] .mduck-gr { color: var(--mo-mut); margin-left: auto; }
 html[data-skin="modul"] .mduck-gr.hot { color: var(--mo-ink); }
 /* tiny modules: the duck row would drown a 2/4HP tile */
-html[data-skin="modul"] .mmodule[data-size="2"] .mduck,
-html[data-skin="modul"] .mmodule[data-size="4"] .mduck { display: none; }
 
 /* == SEND GROUP row =================================================== */
 html[data-skin="modul"] .mgrp-mem {

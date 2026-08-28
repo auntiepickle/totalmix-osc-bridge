@@ -236,6 +236,15 @@
   Also `sendKnob` is now leading-edge (an idle knob writes immediately
   instead of waiting out a 25ms batch; a continuing sweep coalesces to
   ~80Hz).
+- **Layout: modules auto-fill the row + compact duck/group bar** (user:
+  "dont limit a row to 3, auto resize the items to fit" / "the new group
+  and duck options are stupidly placed, waste tons of real estate"). The
+  MODUL rack row is now flexbox instead of a fixed 12-col grid: HP sizes
+  are flex proportions (grow to fill each row, wrap gracefully, min-width:0
+  so they never force horizontal overflow) - no artificial 3-per-row cap,
+  no trailing empty space. And the DUCK + GRP controls, which each took a
+  full empty row per volume module, are now one compact line that only
+  expands when a feature is enabled.
 - **Critical-review fixes: duck + safety.**
   - **Duck echo defect fixed** (HIGH-1): the ducker assumed TotalMix echoes
     our fader writes back; under re-send OFF it doesn't, so the old

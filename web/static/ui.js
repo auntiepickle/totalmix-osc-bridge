@@ -529,8 +529,7 @@ function _knobModuleHTML(name, m, step) {
       DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
   </div>
-  ${_duckHTML(name, m, step)}
-  ${_groupHTML(name, m, step)}
+  ${_dgBarHTML(name, m, step)}
   <div class="mrk-below">
     <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
@@ -557,6 +556,15 @@ function _duckCfg(m) {
   return step && step.operation ? step.operation.duck : null;
 }
 
+function _dgBarHTML(name, m, step) {
+  // ONE compact bar (#user: duck/group were two dead full-width rows each
+  // wasting real estate). Idle = two tiny chips on a single line; only the
+  // enabled feature expands its controls inline.
+  const param = (step.target && step.target.param) || 'volume';
+  if (param !== 'volume') return '';
+  return `<div class="mdg">${_duckHTML(name, m, step)}${_groupHTML(name, m, step)}</div>`;
+}
+
 function _duckHTML(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
   if (param !== 'volume') return '';           // duck rides the fader law
@@ -565,7 +573,7 @@ function _duckHTML(name, m, step) {
   const chip = `<button id="duck-chip-${name}" onclick="toggleDuck('${name}')"
       class="mduck-chip${on ? ' on' : duck ? ' cfg' : ''}"
       title="sidechain duck - a key channel's level pulls this send down (goblin mode)">DUCK</button>`;
-  if (!duck) return `<div class="mduck">${chip}</div>`;
+  if (!duck) return `<span class="mdg-sec">${chip}</span>`;
   const key = duck.key || {};
   const keyVal = `${key.row || 1}|${key.channel || ''}`;
   const g = window._pickerGroups;
@@ -586,13 +594,13 @@ function _duckHTML(name, m, step) {
       <span id="duck-v-${name}-${f}" class="mduck-val">${fmt(real)}</span>
     </label>`;
   }).join('');
-  return `<div class="mduck">
+  return `<span class="mdg-sec on">
     ${chip}
     <span class="mduck-lbl">KEY</span>
     <select class="mduck-key" onchange="_duckKey('${name}', this.value)" title="the channel whose level does the ducking">${keyOpts}</select>
     ${sliders}
     <span id="duck-gr-${name}" class="mduck-gr" title="live gain reduction"></span>
-  </div>`;
+  </span>`;
 }
 
 // == SEND GROUPS (#user request: 'move multiple faders at once as a
@@ -616,7 +624,7 @@ function _groupHTML(name, m, step) {
   const chip = `<button onclick="toggleGroup('${name}')"
       class="mduck-chip${grp && grp.length ? ' on' : grp ? ' cfg' : ''}"
       title="send group - this knob moves every member fader at its stored dB offset (VCA-style)">GRP${grp && grp.length ? ' ' + grp.length : ''}</button>`;
-  if (!grp) return `<div class="mduck mgrp">${chip}</div>`;
+  if (!grp) return `<span class="mdg-sec">${chip}</span>`;
   const members = grp.map((mem, i) => {
     const off = Number(mem.offset_db || 0);
     const where = mem.row === 3 ? 'OUT' : mem.row === 2 ? 'PB' : (mem.submix || '');
@@ -634,7 +642,7 @@ function _groupHTML(name, m, step) {
     : ((window._picker || {}).inputs || []).map(c => `<option value="1|${_esc(c.name)}">${_esc(c.name)}</option>`).join('');
   const subOpts = ((window._picker || {}).outputs || [])
     .map(o => `<option value="${_esc(o.name)}">${_esc(o.name)}</option>`).join('');
-  return `<div class="mduck mgrp">
+  return `<span class="mdg-sec on mgrp">
     ${chip}
     ${members}
     <select id="grp-ch-${name}" class="mduck-key" title="member channel">${chOpts}</select>
@@ -642,7 +650,7 @@ function _groupHTML(name, m, step) {
     <button class="mgrp-act" onclick="groupAdd('${name}')" title="add this send to the group">+ ADD</button>
     <button class="mgrp-act" onclick="groupCapture('${name}')"
         title="capture the balance: each member's offset becomes its CURRENT level relative to this knob">CAPTURE</button>
-  </div>`;
+  </span>`;
 }
 
 window.toggleGroup = function (name) {
