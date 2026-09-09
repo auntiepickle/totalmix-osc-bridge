@@ -25,6 +25,11 @@ jobs:
         run: cmake --build agent/build
       - name: Test
         run: ctest --test-dir agent/build --output-on-failure
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmosc-agent-linux
+          path: agent/build/tmosc-agent
 
   build-test-windows:
     name: windows (MSVC + WinMM)
@@ -37,3 +42,10 @@ jobs:
         run: cmake --build agent/build --config Release
       - name: Test
         run: ctest --test-dir agent/build -C Release --output-on-failure
+      - name: Upload Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmosc-agent-windows
+          path: |
+            agent/build/Release/tmosc-agent.exe
+            agent/build/Release/tmosc-agent-tray.exe
