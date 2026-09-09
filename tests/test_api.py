@@ -362,3 +362,11 @@ def test_midi_owner_ttl_expiry(monkeypatch):
     assert b.midi_owner_state() is None
     assert client.get("/api/health").json()["midi_owner"] is None
     b._midi_owner = None
+
+
+def test_midi_activity_relay_contract():
+    # valid relay (P2): the agent forwards a raw MIDI message for the browser
+    assert client.post("/api/midi/activity", json={"m": [176, 82, 64]}).json() == {"ok": True}
+    # pure best-effort fan-out: malformed payloads are ignored, never error
+    for bad in [{}, {"m": []}, {"m": "x"}, {"m": [1, 2, 3, 4]}, {"m": [1, "x"]}]:
+        assert client.post("/api/midi/activity", json=bad).status_code == 200

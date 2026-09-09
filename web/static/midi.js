@@ -101,6 +101,62 @@ function flashMIDIActivity() {
 }
 
 // ── MIDI message handler ──────────────────────────────────────────────────────
+// Consume one message for an armed MIDI-learn (#7, #23), returning true if it
+// was taken. 14-bit CC auto-detects: an MSB CC (0-31) is held 80ms, and if its
+// LSB partner (N+32) lands in that window the capture upgrades to
+// control_change_14. Shared by live Web MIDI and tray-relayed MIDI.
+function _consumeLearn(status, data1, data2) {
+  const t = status & 0xF0;
+  const ch = (status & 0x0F) + 1;
+  const _finish = (captured) => {
+    clearTimeout(window._learnHoldTimer);
+    window._learnHold = null;
+    const cb = window._midiLearn;
+    window._midiLearn = null;
+    if (cb) cb(captured);
+  };
+  if (t === 0xB0) {
+    if (window._learnHold && data1 === window._learnHold.number + 32
+        && ch === window._learnHold.channel) {
+      _finish({ type: 'control_change_14',
+                number: window._learnHold.number, channel: ch });
+      return true;
+    }
+    if (data1 < 32) {
+      clearTimeout(window._learnHoldTimer);
+      window._learnHold = { number: data1, channel: ch };
+      window._learnHoldTimer = setTimeout(() =>
+        _finish({ type: 'control_change', number: data1, channel: ch }), 80);
+      return true;
+    }
+    _finish({ type: 'control_change', number: data1, channel: ch });
+    return true;
+  }
+  if (t === 0x90 || t === 0x80) {
+    _finish({ type: (t === 0x90 && data2 > 0) ? 'note_on' : 'note_off',
+              note: data1, channel: ch });
+    return true;
+  }
+  if (t === 0xC0) { _finish({ type: 'program_change', number: data1, channel: ch }); return true; }
+  if (t === 0xE0) { _finish({ type: 'pitch_bend', channel: ch }); return true; }
+  if (t === 0xD0) { _finish({ type: 'aftertouch', channel: ch }); return true; }
+  return false;
+}
+
+// P2 relay: the tray agent forwards each raw MIDI message it reads so the
+// browser can run MIDI-learn and show live activity even though it has yielded
+// the physical port. MONITOR + LEARN ONLY — never fires macros (the tray
+// already did; firing here would double-trigger).
+window.injectRelayedMidi = (m) => {
+  if (!Array.isArray(m) || !m.length) return;
+  const status = m[0] | 0, data1 = (m[1] | 0), data2 = (m[2] | 0);
+  const t = status & 0xF0;
+  if (window._midiLearn) _consumeLearn(status, data1, data2);
+  if (t === 0xB0) { flashMIDIActivity(); _trackCC(data1, (status & 0x0F) + 1, data2); }
+  else if (t === 0x90 || t === 0x80) { flashMIDIActivity(); _trackActivity(`note ${data1} ch${(status & 0x0F) + 1}`); }
+  else if (t === 0xC0) { flashMIDIActivity(); _trackActivity(`PC${data1} ch${(status & 0x0F) + 1}`); }
+};
+
 function handleMIDIMessage(message) {
   const [status, data1, data2] = message.data;
 
@@ -112,42 +168,10 @@ function handleMIDIMessage(message) {
   // devices and the emulator. 14-bit CC auto-detects: an MSB CC (0-31) is
   // held for 80ms, and if its LSB partner (N+32) lands in that window the
   // capture upgrades to control_change_14.
-  if (window._midiLearn) {
-    const t = status & 0xF0;
-    const ch = (status & 0x0F) + 1;
-    const _finish = (captured) => {
-      clearTimeout(window._learnHoldTimer);
-      window._learnHold = null;
-      const cb = window._midiLearn;
-      window._midiLearn = null;
-      if (cb) cb(captured);
-    };
-    if (t === 0xB0) {
-      if (window._learnHold && data1 === window._learnHold.number + 32
-          && ch === window._learnHold.channel) {
-        _finish({ type: 'control_change_14',
-                  number: window._learnHold.number, channel: ch });
-        return;
-      }
-      if (data1 < 32) {
-        clearTimeout(window._learnHoldTimer);
-        window._learnHold = { number: data1, channel: ch };
-        window._learnHoldTimer = setTimeout(() =>
-          _finish({ type: 'control_change', number: data1, channel: ch }), 80);
-        return;
-      }
-      _finish({ type: 'control_change', number: data1, channel: ch });
-      return;
-    }
-    if (t === 0x90 || t === 0x80) {
-      _finish({ type: (t === 0x90 && data2 > 0) ? 'note_on' : 'note_off',
-                note: data1, channel: ch });
-      return;
-    }
-    if (t === 0xC0) { _finish({ type: 'program_change', number: data1, channel: ch }); return; }
-    if (t === 0xE0) { _finish({ type: 'pitch_bend', channel: ch }); return; }
-    if (t === 0xD0) { _finish({ type: 'aftertouch', channel: ch }); return; }
-  }
+  // MIDI-learn: an armed learn callback consumes the next message (see
+  // _consumeLearn) instead of firing macros. Works with real devices, the
+  // emulator, and (via injectRelayedMidi) MIDI relayed from the tray agent.
+  if (window._midiLearn && _consumeLearn(status, data1, data2)) return;
 
   const msgType = status & 0xF0;
   const channel = (status & 0x0F) + 1;

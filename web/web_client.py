@@ -201,6 +201,21 @@ async def midi_owner_release(body: MidiOwnerBody):
     return {"released": bridge.midi_owner_release(body.id)}
 
 
+@app.post("/api/midi/activity")
+async def midi_activity(body: dict):
+    """A tray/agent relays each raw MIDI message it reads (throttled) so a
+    browser that has yielded the port can still run MIDI-learn and show live
+    activity. Pure fan-out: broadcast to WS clients, store nothing. The browser
+    uses this for monitor + learn ONLY — it never fires macros from it (the
+    agent already did), so there's no double-trigger."""
+    m = body.get("m")
+    if (isinstance(m, (list, tuple)) and 1 <= len(m) <= 3
+            and all(isinstance(x, int) for x in m)):
+        await bridge._do_broadcast_event(
+            {"type": "midi_activity", "m": list(m), "src": "agent"})
+    return {"ok": True}
+
+
 @app.get("/api/test")
 async def test_api():
     return {

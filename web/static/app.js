@@ -78,6 +78,12 @@ function _onWSMessage(event) {
   // Coexistence: a tray/agent claimed or released the MIDI port. Yield/reclaim
   // Web MIDI promptly (poll-based expiry in pollHealth is the crash-safety net).
   if (data.type === 'midi_owner') { applyMidiOwner(data.owner); return; }
+  // P2 relay: raw MIDI the tray agent read — feed the monitor + any armed
+  // learn (never fires macros; the agent already did that).
+  if (data.type === 'midi_activity') {
+    if (typeof window.injectRelayedMidi === 'function') window.injectRelayedMidi(data.m);
+    return;
+  }
   const layoutChanged =
     (data.current_workspace && data.current_workspace !== currentWorkspace) ||
     (data.current_snapshot && data.current_snapshot !== currentSnapshot);

@@ -19,6 +19,7 @@
 #define REFRESH_MS    5000
 #define RECONNECT_MS  1000
 #define HEARTBEAT_MS  2000   /* announce MIDI ownership so browsers yield Web MIDI */
+#define ACTIVITY_MIN_MS 40   /* max ~25/s relayed to the browser (learn + live monitor) */
 
 static volatile int g_stop = 0;
 static int g_verbose = 0;
@@ -30,6 +31,9 @@ static int   g_dirty[TM_MAX_MACROS];
 
 static char g_agent_id[96];    /* stable per-run identity: "<host>-tmosc-agent" */
 static char g_agent_host[64];
+
+static tm_midi_msg g_act;      /* latest raw message pending relay to the browser */
+static int         g_act_have = 0;
 
 void tm_runner_stop(void) { g_stop = 1; }
 
@@ -167,6 +171,17 @@ static int post_owner(tm_net *net, const char *path)
     return rc;
 }
 
+/* Relay one raw MIDI message so a browser that yielded the port can still run
+ * MIDI-learn and show live activity. Coalesced (latest wins per flush). */
+static int post_activity(tm_net *net, const tm_midi_msg *m)
+{
+    char body[48], resp[128];
+    int rlen, status = 0;
+    snprintf(body, sizeof(body), "{\"m\":[%d,%d,%d]}",
+             m->status & 0xFF, m->data1 & 0xFF, m->data2 & 0xFF);
+    return tm_net_request(net, "POST", "/api/midi/activity", body, resp, sizeof(resp), &rlen, &status);
+}
+
 int tm_runner_dryrun(const char *host, int port)
 {
     tm_net dn; dn.fd = -1;
@@ -184,7 +199,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
 {
     tm_net net; net.fd = -1;
     tm_clock clock;
-    double last_flush = 0, last_refresh = 0, last_reconnect = 0, last_heartbeat = 0;
+    double last_flush = 0, last_refresh = 0, last_reconnect = 0, last_heartbeat = 0, last_act_flush = 0;
     int connected = 0;
 
     g_verbose = verbose;
@@ -224,6 +239,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
             tm_action acts[16];
             int m, na;
             if ((msg.status & 0xFF) == 0xF8) { tm_clock_tick(&clock, now_ms()); continue; }
+            if ((msg.status & 0xFF) < 0xF8) { g_act = msg; g_act_have = 1; }  /* relay latest raw msg */
             na = tm_match(&g_mstate, &g_bind.mapping, msg, acts, 16);
             for (m = 0; m < na; m++) {
                 int idx = acts[m].macro_index;
@@ -248,6 +264,10 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
         if (connected && t - last_heartbeat >= HEARTBEAT_MS) {
             last_heartbeat = t;
             if (post_owner(&net, "/api/midi/owner/heartbeat") != 0) connected = 0;
+        }
+        if (connected && g_act_have && t - last_act_flush >= ACTIVITY_MIN_MS) {
+            last_act_flush = t; g_act_have = 0;
+            if (post_activity(&net, &g_act) != 0) connected = 0;
         }
         if (!connected) tm_net_close(&net);
     }
