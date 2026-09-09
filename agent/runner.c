@@ -136,8 +136,21 @@ static void init_agent_id(void)
 {
     char host[64];
     if (g_agent_id[0]) return;
-    if (gethostname(host, (int)sizeof(host)) != 0 || !host[0])
+#ifdef _WIN32
+    /* gethostname needs Winsock up; net.c only starts it on connect (later),
+     * so do a balanced startup/cleanup here or the host falls back to "agent"
+     * and every machine collides on the same owner id. */
+    {
+        WSADATA wsa;
+        int wsa_ok = (WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
+        if (gethostname(host, (int)sizeof(host)) != 0 || !host[0])
+            strcpy(host, "agent");
+        if (wsa_ok) WSACleanup();
+    }
+#else
+    if (gethostname(host, sizeof(host)) != 0 || !host[0])
         strcpy(host, "agent");
+#endif
     host[sizeof(host) - 1] = '\0';
     snprintf(g_agent_host, sizeof(g_agent_host), "%s", host);
     snprintf(g_agent_id, sizeof(g_agent_id), "%s-tmosc-agent", host);
