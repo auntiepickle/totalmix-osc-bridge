@@ -884,10 +884,16 @@ function _scheduleValidityRefresh() {
 // heartbeat age from the cyclic status stream (light read, no probe
 // traffic) instead of "an IP is configured". Classic-only deployments keep
 // the old dot untouched.
+function _hideGlobalOscBanner() {
+  window._globalNotReadyStreak = 0;
+  const b = document.getElementById('global-osc-not-ready-banner');
+  if (b) b.classList.add('hidden');
+}
+
 async function pollGlobalTransport() {
   try {
     const g = await API.getGlobalStatus();
-    if (!g.running) return;               // classic-only — leave the dot be
+    if (!g.running) { _hideGlobalOscBanner(); return; }  // classic-only — leave the dot be
     // Snapshot switched ON THE DEVICE (any source — TotalMix GUI, another
     // remote, even a raw OSC recall): the slot-state feed proved unreliable
     // in 2.1 b5 (live-verified: classic recalls didn't move it), but a
@@ -911,16 +917,41 @@ async function pollGlobalTransport() {
       window._lastActivityTs = act.now;
     } catch (_) {}
     const dot = document.getElementById('osc-health-dot');
-    if (!dot) return;
     const age = g.alive ? g.alive.age_s : g.heartbeat_age_s;
-    const fresh = age != null && age < 5;
-    const staleish = age != null && age < 30;
-    dot.classList.remove('bg-green-400', 'bg-amber-400', 'bg-red-500', 'bg-zinc-700');
-    dot.classList.add(fresh ? 'bg-green-400' : staleish ? 'bg-amber-400' : 'bg-red-500');
-    dot.title = `Global OSC (${g.transport} transport) — device heartbeat ` +
-      (age != null ? `${age.toFixed(1)}s ago` : 'never received') +
-      (g.status && g.status.device ? ` · ${g.status.device}` : '');
-  } catch (_) { /* endpoint absent/older bridge — classic dot stands */ }
+    if (dot) {
+      const fresh = age != null && age < 5;
+      const staleish = age != null && age < 30;
+      dot.classList.remove('bg-green-400', 'bg-amber-400', 'bg-red-500', 'bg-zinc-700');
+      dot.classList.add(fresh ? 'bg-green-400' : staleish ? 'bg-amber-400' : 'bg-red-500');
+      dot.title = `Global OSC (${g.transport} transport) — device heartbeat ` +
+        (age != null ? `${age.toFixed(1)}s ago` : 'never received') +
+        (g.status && g.status.device ? ` · ${g.status.device}` : '');
+    }
+
+    // Silent-no-op guard: on the Global transport, macro writes aim by
+    // channel NAME, so if the listener has learned zero names, every fire
+    // resolves to nothing and no fader moves — with only the dot to show for
+    // it. Surface that explicitly (a real setup gotcha: TotalMix's OSC remote
+    // controller not sending its state stream). Two consecutive misses before
+    // showing, so a fresh page load doesn't flash it before the first learn.
+    const names = g.names || {};
+    const namesTotal = Object.keys(names).reduce(
+      (n, row) => n + Object.keys(names[row] || {}).length, 0);
+    const heartbeatDead = age == null || age >= 30;
+    const banner = document.getElementById('global-osc-not-ready-banner');
+    if (banner) {
+      const notReady = namesTotal === 0;
+      window._globalNotReadyStreak = notReady ? (window._globalNotReadyStreak || 0) + 1 : 0;
+      const show = window._globalNotReadyStreak >= 2;
+      if (show) {
+        const cnt = document.getElementById('global-osc-names-count');
+        if (cnt) cnt.textContent = namesTotal;
+        const hb = document.getElementById('global-osc-hb-note');
+        if (hb) hb.textContent = heartbeatDead ? ' and no device heartbeat has arrived' : '';
+      }
+      banner.classList.toggle('hidden', !show);
+    }
+  } catch (_) { _hideGlobalOscBanner(); /* endpoint absent/older bridge — classic dot stands */ }
 }
 
 // ── Bank-width warning ────────────────────────────────────────────────────────

@@ -205,6 +205,15 @@
             On the TotalMix machine check Options → Settings → OSC → <i>In Use</i> (still ticked = OSC thread wedged, restart TotalMix; unticked = re-tick it), then run the check again from the gear menu.</span>
         </div>
 
+        <!-- Global OSC transport active but the device link never learned channel names / heartbeat:
+             macros resolve targets by NAME, so with no names learned every fire silently no-ops the
+             faders. This is a TotalMix OSC setting, NOT a reason to drop to classic. -->
+        <div id="global-osc-not-ready-banner" class="hidden mb-4 flex items-center gap-3 bg-red-900/20 border border-red-800/40 text-red-400 px-5 py-3 rounded-2xl text-sm">
+            <i class="fas fa-triangle-exclamation shrink-0"></i>
+            <span class="flex-1"><b>OSC is connected but TotalMix isn't sending its channel list</b> — the bridge has learned <b id="global-osc-names-count">0</b> channel names<span id="global-osc-hb-note"></span>. On the Global OSC transport, macros aim by channel name, so until the names arrive <b>every macro fires but nothing moves on the mixer</b>.
+            On the TotalMix machine: Options → Settings → OSC → select the Remote Controller pointed at this bridge and make sure it's <i>In Use</i>, then toggle it off/on (or restart TotalMix) so it re-sends its state. It settles within a few seconds.</span>
+        </div>
+
         <!-- Layout-drift warning: the device's OUTPUT layout no longer matches the walked map (field report: looked like a dead server) -->
         <div id="sweep-needed-banner" class="hidden mb-4 flex items-center gap-3 bg-amber-950/60 border border-amber-700/60 text-amber-300 px-5 py-3 rounded-2xl text-sm">
             <i class="fas fa-triangle-exclamation text-amber-400 shrink-0"></i>
