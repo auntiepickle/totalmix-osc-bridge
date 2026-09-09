@@ -34,6 +34,10 @@ jobs:
   build-test-windows:
     name: windows (MSVC + WinMM)
     runs-on: windows-latest
+    env:
+      # Surfaced so the sign step can gate on env.AZURE_CLIENT_ID != ''
+      # (secrets can't be referenced directly in a step `if:`).
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
       - name: Configure
@@ -42,10 +46,40 @@ jobs:
         run: cmake --build agent/build --config Release
       - name: Test
         run: ctest --test-dir agent/build -C Release --output-on-failure
+      - name: Stage exes
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path agent/out | Out-Null
+          Copy-Item agent/build/Release/tmosc-agent.exe      agent/out/
+          Copy-Item agent/build/Release/tmosc-agent-tray.exe agent/out/
+      - name: Code sign (Windows, Azure Trusted Signing)
+        # Authenticode-sign the tray + console exe so they pass Windows
+        # SmartScreen / Smart App Control. Opt-in and reuses the SAME Azure
+        # Trusted Signing account + secret names as Analogue3DDesktop. Runs only
+        # on main and only when the secrets are present. Required repo (or org)
+        # secrets:
+        #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+        #   AZURE_CODE_SIGNING_ENDPOINT, AZURE_CODE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE
+        # The service principal needs the "Trusted Signing Certificate Profile
+        # Signer" role on the account.
+        if: env.AZURE_CLIENT_ID != '' && github.ref == 'refs/heads/main'
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\agent\out
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
       - name: Upload Windows binaries
         uses: actions/upload-artifact@v4
         with:
           name: tmosc-agent-windows
           path: |
-            agent/build/Release/tmosc-agent.exe
-            agent/build/Release/tmosc-agent-tray.exe
+            agent/out/tmosc-agent.exe
+            agent/out/tmosc-agent-tray.exe
