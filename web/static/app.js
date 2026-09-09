@@ -310,25 +310,63 @@ function updateStatusHeader() {
 
   const pill  = document.getElementById('midi-status');
   const dot   = document.getElementById('midi-status-dot');
+  const icon  = document.getElementById('midi-status-icon');
   const label = document.getElementById('midi-status-text');
-  if (!pill || !dot || !label) return;
+  const sub   = document.getElementById('midi-status-sub');
+  if (!pill || !dot || !icon || !label || !sub) return;
 
-  if (midiConnectedDevice) {
-    label.textContent = midiConnectedDevice;
-    dot.classList.remove('bg-zinc-600');
+  // Wipe every state-specific token first so states never accumulate styles.
+  pill.classList.remove(
+    'bg-zinc-800', 'bg-indigo-950/60', 'bg-amber-950/60',
+    'border-zinc-700', 'border-green-700', 'border-indigo-700/60', 'border-amber-700/60',
+    'text-zinc-400', 'text-white', 'text-indigo-300', 'text-amber-300');
+  dot.classList.remove(
+    'bg-zinc-600', 'bg-green-400', 'bg-amber-400',
+    'shadow-[0_0_6px_#4ade80]', 'shadow-[0_0_8px_#fbbf24]');
+  icon.classList.remove(
+    'fa-plug', 'fa-satellite-dish', 'fa-triangle-exclamation',
+    'text-zinc-400', 'text-green-400', 'text-indigo-400', 'text-amber-400');
+  sub.classList.add('hidden');
+  sub.textContent = '';
+
+  const owner = window._midiOwner;   // {id, host, age_s} while a tray/agent holds the port
+
+  // PRECEDENCE: an agent owning the exclusive OS MIDI port ALWAYS wins. When the
+  // tray is active the browser has already yielded Web MIDI (midiConnectedDevice
+  // is '' anyway) — checking owner first guarantees the tray state can never fall
+  // through to "No MIDI"/"needs HTTPS". Order: TRAY > BROWSER > HTTPS > NONE.
+  if (owner) {
+    // MIDI ACTIVE, handled by the tray agent — a GOOD state (green health dot).
+    pill.classList.add('bg-indigo-950/60', 'border-indigo-700/60', 'text-indigo-300');
     dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
-    pill.classList.remove('text-zinc-400', 'border-zinc-700');
-    pill.classList.add('text-white', 'border-green-700');
+    icon.classList.add('fa-satellite-dish', 'text-indigo-400');
+    label.textContent = 'MIDI via tray';
+    sub.textContent = owner.host ? '· ' + owner.host : '· active';
+    sub.classList.remove('hidden');
+    pill.title = 'MIDI is live via the tray agent'
+      + (owner.host ? ' on ' + owner.host : '')
+      + ' — this browser is monitoring (Web MIDI yielded to the exclusive OS port).';
+  } else if (midiConnectedDevice) {
+    // This browser is reading MIDI directly.
+    pill.classList.add('bg-zinc-800', 'border-green-700', 'text-white');
+    dot.classList.add('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    icon.classList.add('fa-plug', 'text-green-400');
+    label.textContent = midiConnectedDevice;
+    pill.title = 'This browser is reading MIDI directly: ' + midiConnectedDevice;
+  } else if (!navigator.requestMIDIAccess && !window.isSecureContext) {
+    // No Web MIDI (insecure context) AND no tray.
+    pill.classList.add('bg-amber-950/60', 'border-amber-700/60', 'text-amber-300');
+    dot.classList.add('bg-amber-400', 'shadow-[0_0_8px_#fbbf24]');
+    icon.classList.add('fa-triangle-exclamation', 'text-amber-400');
+    label.textContent = 'MIDI needs HTTPS';
+    pill.title = 'Web MIDI needs a secure context — open the https:// URL (see docs/setup.md), or start the tray agent.';
   } else {
-    // Web MIDI needs a secure context — say so instead of a bare 'No MIDI'
-    // (midi.js sets this once at init, but this function runs on every WS
-    // message and would clobber it)
-    label.textContent = (!navigator.requestMIDIAccess && !window.isSecureContext)
-      ? 'MIDI needs HTTPS' : 'No MIDI';
-    dot.classList.remove('bg-green-400', 'shadow-[0_0_6px_#4ade80]');
+    // Genuinely nothing handling MIDI.
+    pill.classList.add('bg-zinc-800', 'border-zinc-700', 'text-zinc-400');
     dot.classList.add('bg-zinc-600');
-    pill.classList.remove('text-white', 'border-green-700');
-    pill.classList.add('text-zinc-400', 'border-zinc-700');
+    icon.classList.add('fa-plug', 'text-zinc-400');
+    label.textContent = 'No MIDI';
+    pill.title = 'No MIDI input — pick a device above, or start the tray agent.';
   }
 }
 
@@ -875,15 +913,7 @@ function applyMidiOwner(owner) {
     window.reclaimMidi();
   }
   window._midiOwner = owner || null;
-  const chip = document.getElementById('midi-owner-chip');
-  if (chip) {
-    chip.classList.toggle('hidden', !active);
-    if (active) {
-      chip.title = 'MIDI is handled by the tray agent'
-        + (owner.host ? ' on ' + owner.host : '')
-        + ' — this browser is monitoring (Web MIDI yielded)';
-    }
-  }
+  updateStatusHeader();   // unified pill renders the tray/browser/none/https state
 }
 
 // ── Health polling — MQTT and OSC status dots ─────────────────────────────────

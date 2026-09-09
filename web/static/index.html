@@ -61,9 +61,12 @@
                     class="flex items-center gap-2 bg-zinc-800 text-zinc-400 hover:text-white px-4 py-2 rounded-2xl text-sm font-medium whitespace-nowrap border border-zinc-700 transition-all duration-200">
                     <i class="fas fa-table-cells"></i><span class="hidden md:inline">Matrix</span>
                 </button>
-                <div id="midi-status" class="flex items-center gap-2 bg-zinc-800 text-zinc-400 px-4 py-2 rounded-2xl text-sm font-medium whitespace-nowrap border border-zinc-700 transition-all duration-200">
-                    <span id="midi-status-dot" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200"></span>
+                <!-- Unified MIDI status: icon = WHO (browser/tray/misconfig), dot = live health LED -->
+                <div id="midi-status" class="flex items-center gap-2 bg-zinc-800 text-zinc-400 px-4 py-2 rounded-2xl text-sm font-medium whitespace-nowrap border border-zinc-700 transition-all duration-200" title="MIDI input status">
+                    <i id="midi-status-icon" class="fas fa-plug text-zinc-400 text-xs transition-all duration-200"></i>
                     <span id="midi-status-text">No MIDI</span>
+                    <span id="midi-status-sub" class="hidden text-xs font-normal text-indigo-400"></span>
+                    <span id="midi-status-dot" class="w-2 h-2 rounded-full bg-zinc-600 transition-all duration-200"></span>
                 </div>
 
                 <!-- MIDI activity badge — shows last CC + recency, hidden until connected -->
@@ -86,12 +89,6 @@
                     <span class="text-zinc-800 mx-0.5">·</span>
                     <span id="osc-health-dot"  class="w-2 h-2 rounded-full bg-zinc-700 transition-all duration-300" title="OSC: unknown"></span>
                     <span class="text-[9px] text-zinc-600 font-mono">OSC</span>
-                </div>
-
-                <!-- MIDI owner chip: shown only while a tray/agent holds the MIDI port -->
-                <div id="midi-owner-chip" class="hidden flex items-center gap-1.5 px-3 py-2 bg-indigo-950/60 border border-indigo-700/60 rounded-2xl" title="MIDI handled by the tray agent">
-                    <i class="fas fa-satellite-dish text-indigo-400 text-[10px]"></i>
-                    <span class="text-[9px] text-indigo-300 font-mono">MIDI: TRAY</span>
                 </div>
 
                 <!-- New Macro -->
