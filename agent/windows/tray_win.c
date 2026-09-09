@@ -18,10 +18,14 @@
 #include "midi_win.h"
 #include "resource.h"
 
-#define WM_TRAY    (WM_APP + 1)
+#define WM_TRAY      (WM_APP + 1)
+#define WM_SETSTATUS (WM_APP + 2)   /* worker -> UI thread; wParam = ST_* */
 #define ID_OPEN    1001
 #define ID_QUIT    1002
 #define ID_STARTUP 1003
+
+#define ST_OK      0   /* MIDI open + running (indigo icon) */
+#define ST_NO_MIDI 1   /* cannot open the MIDI device — busy/held elsewhere (orange icon) */
 
 #define STARTUP_KEY  "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define STARTUP_NAME "TmoscAgent"
@@ -60,6 +64,8 @@ static char   g_host[128] = "127.0.0.1";
 static int    g_port = 8088;
 static char   g_midi[80] = "";
 static char   g_url[192];
+static volatile int g_quit = 0;     /* tray shutting down: stop the worker retry loop */
+static HICON  g_ico_ok, g_ico_err;  /* preloaded small icons for the two states */
 
 static void set_str(char *dst, size_t cap, const char *src)
 {
@@ -107,18 +113,29 @@ static void win_wait(void *ctx, int ms) { tm_midi_win_wait((tm_midi_win *)ctx, m
 
 static DWORD WINAPI worker(LPVOID arg)
 {
-    char resolved[64];
-    const char *q = g_midi[0] ? g_midi : NULL;
-    tm_midi_win *m;
-    tm_midi_src src;
     (void)arg;
-    if (tm_midi_win_resolve(q, resolved, sizeof(resolved)) != 0) return 1;
-    m = tm_midi_win_open(resolved);
-    if (!m) return 1;
-    src.read = win_read;
-    src.wait = win_wait;
-    tm_runner(g_host, g_port, &src, m, 0);
-    tm_midi_win_close(m);
+    /* MIDI inputs are exclusive: another app (DAW, browser Web MIDI, RME
+     * tools) can hold the device. Instead of giving up silently, retry every
+     * ~3s and reflect the state in the tray icon so the user can see it. */
+    while (!g_quit) {
+        char resolved[64];
+        const char *q = g_midi[0] ? g_midi : NULL;
+        tm_midi_win *m = NULL;
+        tm_midi_src src;
+        int i;
+        if (tm_midi_win_resolve(q, resolved, sizeof(resolved)) != 0
+            || (m = tm_midi_win_open(resolved)) == NULL) {
+            PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);
+            for (i = 0; i < 30 && !g_quit; i++) Sleep(100);  /* ~3s, wake fast on quit */
+            continue;
+        }
+        PostMessage(g_hwnd, WM_SETSTATUS, ST_OK, 0);
+        src.read = win_read;
+        src.wait = win_wait;
+        tm_runner(g_host, g_port, &src, m, 0);   /* blocks until Quit or device error */
+        tm_midi_win_close(m);
+        if (!g_quit) PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);  /* device dropped -> retry */
+    }
     return 0;
 }
 
@@ -147,12 +164,26 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if (lp == WM_RBUTTONUP || lp == WM_CONTEXTMENU) show_menu(hwnd);
             else if (lp == WM_LBUTTONDBLCLK) ShellExecuteA(NULL, "open", g_url, NULL, NULL, SW_SHOWNORMAL);
             return 0;
+        case WM_SETSTATUS: {
+            int busy = (wp == ST_NO_MIDI);
+            g_nid.hIcon = busy ? g_ico_err : g_ico_ok;
+            if (busy)
+                snprintf(g_nid.szTip, sizeof(g_nid.szTip),
+                         "TotalMix OSC Agent - MIDI device busy (held by another app), retrying");
+            else
+                snprintf(g_nid.szTip, sizeof(g_nid.szTip),
+                         "TotalMix OSC Agent - running - %s", g_url);
+            Shell_NotifyIconA(NIM_MODIFY, &g_nid);
+            return 0;
+        }
         case WM_COMMAND:
             if (LOWORD(wp) == ID_OPEN) ShellExecuteA(NULL, "open", g_url, NULL, NULL, SW_SHOWNORMAL);
             else if (LOWORD(wp) == ID_STARTUP) startup_toggle();
-            else if (LOWORD(wp) == ID_QUIT) { tm_runner_stop(); DestroyWindow(hwnd); }
+            else if (LOWORD(wp) == ID_QUIT) DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
+            g_quit = 1;            /* stop the worker's retry loop */
+            tm_runner_stop();      /* break tm_runner if it's currently running */
             Shell_NotifyIconA(NIM_DELETE, &g_nid);
             PostQuitMessage(0);
             return 0;
@@ -183,10 +214,14 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdline, int show)
     g_nid.uID = 1;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
-    g_nid.hIcon = (HICON)LoadImageA(hInst, MAKEINTRESOURCEA(IDI_TRAY), IMAGE_ICON,
-                                    GetSystemMetrics(SM_CXSMICON),
-                                    GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-    if (!g_nid.hIcon) g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    {
+        int cx = GetSystemMetrics(SM_CXSMICON), cy = GetSystemMetrics(SM_CYSMICON);
+        g_ico_ok  = (HICON)LoadImageA(hInst, MAKEINTRESOURCEA(IDI_TRAY),     IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
+        g_ico_err = (HICON)LoadImageA(hInst, MAKEINTRESOURCEA(IDI_TRAY_ERR), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
+        if (!g_ico_ok)  g_ico_ok  = LoadIcon(NULL, IDI_APPLICATION);
+        if (!g_ico_err) g_ico_err = g_ico_ok;
+    }
+    g_nid.hIcon = g_ico_ok;   /* the worker posts the real state within moments */
     snprintf(g_nid.szTip, sizeof(g_nid.szTip), "TotalMix OSC Agent - %s", g_url);
     Shell_NotifyIconA(NIM_ADD, &g_nid);
 

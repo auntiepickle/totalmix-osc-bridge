@@ -7,14 +7,15 @@ Run: python make_icon.py   (writes tray.ico next to this file)
 import math, struct, os
 
 # app accent palette
-BODY   = (79, 70, 229)     # indigo #4F46E5
-RIM    = (30, 27, 75)      # deep indigo rim
+BODY   = (79, 70, 229)     # indigo #4F46E5 — normal / running
+BODY_ERR = (234, 88, 12)   # orange #EA580C — MIDI unavailable / retrying
 POINT  = (240, 244, 255)   # near-white pointer
 SS     = 4                 # supersample factor
 ANGLE  = math.radians(30)  # pointer at ~1 o'clock (30deg right of up)
 
 
-def render(size):
+def render(size, body=BODY):
+    rim = tuple(int(c * 0.38) for c in body)   # darker shade of the body
     S = size * SS
     cx = cy = (S - 1) / 2.0
     R = S * 0.46
@@ -30,7 +31,7 @@ def render(size):
             d = math.hypot(dx, dy)
             col = None
             if d <= R:
-                col = RIM if d >= R - rim_w else BODY
+                col = rim if d >= R - rim_w else body
             # pointer segment (project onto the pointer direction)
             t = dx * dirx + dy * diry
             if p0 <= t <= p1:
@@ -83,15 +84,12 @@ def bmp_image(rows, size):
     return hdr + bytes(xor) + bytes(andmask)
 
 
-def main():
-    sizes = [16, 24, 32, 48, 256 // 8 * 8]      # 16,24,32,48,32? keep small set
+def write_ico(path, body):
     sizes = [16, 24, 32, 48]
-    images = [(s, bmp_image(render(s), s)) for s in sizes]
-    here = os.path.dirname(os.path.abspath(__file__))
-    out = os.path.join(here, 'tray.ico')
+    images = [(s, bmp_image(render(s, body), s)) for s in sizes]
     n = len(images)
     dirsz = 6 + 16 * n
-    with open(out, 'wb') as f:
+    with open(path, 'wb') as f:
         f.write(struct.pack('<HHH', 0, 1, n))   # ICONDIR
         offset = dirsz
         for s, data in images:
@@ -100,7 +98,13 @@ def main():
             offset += len(data)
         for _, data in images:
             f.write(data)
-    print(f"wrote {out} ({os.path.getsize(out)} bytes, sizes {sizes})")
+    print(f"wrote {path} ({os.path.getsize(path)} bytes, sizes {sizes})")
+
+
+def main():
+    here = os.path.dirname(os.path.abspath(__file__))
+    write_ico(os.path.join(here, 'tray.ico'), BODY)          # normal / running
+    write_ico(os.path.join(here, 'tray_err.ico'), BODY_ERR)  # MIDI unavailable / retrying
 
 
 if __name__ == '__main__':
