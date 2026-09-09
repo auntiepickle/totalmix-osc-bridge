@@ -1,4 +1,10 @@
 import os
+import app_paths as _app_paths
+
+# Frozen exe: create the per-user data dir (%APPDATA%/tmosc-bridge on Windows),
+# load its config.env, chdir into it. From source / Docker this is a no-op
+# (see app_paths.py).
+_app_paths.prepare()
 
 OSC_IP = os.getenv('OSC_IP')
 OSC_PORT = int(os.getenv('OSC_PORT', 7001))
@@ -44,8 +50,8 @@ ENABLE_GLOBAL_OSC_LISTENER = (
 GLOBAL_HEARTBEAT_TIMEOUT_S = float(os.getenv('GLOBAL_HEARTBEAT_TIMEOUT_S', '5'))
 
 # === LOGGING SETTINGS (100 KB limit per file) ===
-BRIDGE_LOG_FILE = os.getenv('BRIDGE_LOG_FILE', 'bridge.log')
-OSC_MONITOR_LOG_FILE = os.getenv('OSC_MONITOR_LOG_FILE', 'osc_monitor.log')
+BRIDGE_LOG_FILE = os.getenv('BRIDGE_LOG_FILE') or _app_paths.data_path('bridge.log')
+OSC_MONITOR_LOG_FILE = os.getenv('OSC_MONITOR_LOG_FILE') or _app_paths.data_path('osc_monitor.log')
 LOG_MAX_BYTES = 100 * 1024          # 100 KB
 LOG_BACKUP_COUNT = 1                # Keep 1 old file
 OSC_MONITOR_VERBOSE = os.getenv('OSC_MONITOR_VERBOSE', 'True').lower() == 'true'

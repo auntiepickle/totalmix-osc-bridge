@@ -17,6 +17,7 @@ import asyncio
 
 from bridge import bridge, ws_clients, MAPPINGS, SNAPSHOT_MAP
 import physical_table as pt
+import app_paths
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ app = FastAPI(title="TotalMix OSC Bridge Web Client")
 
 WEB_PORT = int(os.getenv("WEB_PORT", 8088))
 
-static_dir = str(Path(__file__).parent / "static")
+static_dir = app_paths.static_dir()
 print(f"DEBUG: Mounting static files from: {static_dir}")
 print(f"DEBUG: Files found: {list(Path(static_dir).glob('*'))}")
 
@@ -326,7 +327,7 @@ def _persist_mappings():
     per-macro save forever (server smoke finding, 2026-08-20)."""
     backup_json_files("mappings.json")
     bridge.mappings = _sanitize_mappings(bridge.mappings)
-    target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+    target = app_paths.data_path("mappings.json")
     _atomic_write_json(target, bridge.mappings)
     bridge.mappings_is_example = False
     bridge.mappings_source = "mappings.json"
@@ -594,7 +595,7 @@ async def save_config_mappings(request: Request):
             raise HTTPException(status_code=400, detail="Invalid mappings.json: missing 'macros' key")
         data = _sanitize_mappings(data)
         backup_json_files("mappings.json")
-        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        target = app_paths.data_path("mappings.json")
         _atomic_write_json(target, data)
         bridge.mappings = data
         bridge.mappings_is_example = False
@@ -622,7 +623,7 @@ async def save_config_channel_map(request: Request):
         if "submixes" not in data and "physical_table" not in data:
             raise HTTPException(status_code=400, detail="Invalid channel_map: needs 'physical_table' (or legacy 'submixes')")
         backup_json_files("ufx2_channel_map.json")
-        target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
+        target = app_paths.data_path("ufx2_channel_map.json")
         _atomic_write_json(target, data)
         bridge._load_channel_map()
         bridge.channel_map_is_example = False
@@ -653,7 +654,7 @@ async def save_config_snapshot_map(request: Request):
         # new map in memory AFTER the disk write succeeds — assigning first
         # left memory and disk divergent on a failed write (review finding)
         backup_json_files("ufx2_snapshot_map.json")
-        local_target = os.path.join(os.path.dirname(__file__), "../ufx2_snapshot_map.json")
+        local_target = app_paths.data_path("ufx2_snapshot_map.json")
         with open(local_target, "w") as f:
             json.dump(data, f, indent=2)
         bridge.snapshot_map = data
@@ -989,10 +990,10 @@ def backup_json_files(files=("mappings.json", "ufx2_channel_map.json")):
     # Millisecond precision — two writes in the same second (easy with the
     # macro editor) were overwriting each other's backup (observed live)
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
-    backup_dir = os.path.join(os.path.dirname(__file__), "../backups")
+    backup_dir = app_paths.data_path("backups")
     os.makedirs(backup_dir, exist_ok=True)
     for fn in files:
-        src = os.path.join(os.path.dirname(__file__), "../" + fn)
+        src = app_paths.data_path(fn)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(backup_dir, f"{fn}.{timestamp}"))
             logger.info(f"✅ Auto-backup: {fn}.{timestamp}")
@@ -1009,7 +1010,7 @@ async def upload_mappings(file: UploadFile = File(...)):
         if "macros" not in data:
             raise HTTPException(status_code=400, detail="Invalid mappings.json format")
         data = _sanitize_mappings(data)
-        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        target = app_paths.data_path("mappings.json")
         _atomic_write_json(target, data)
         bridge.mappings = data
         bridge.mappings_is_example = False
@@ -1033,7 +1034,7 @@ async def upload_channel_map(file: UploadFile = File(...)):
         data = json.loads(contents)
         if "submixes" not in data and "physical_table" not in data:
             raise HTTPException(status_code=400, detail="Invalid ufx2_channel_map.json format")
-        target = os.path.join(os.path.dirname(__file__), "../ufx2_channel_map.json")
+        target = app_paths.data_path("ufx2_channel_map.json")
         _atomic_write_json(target, data)
         bridge._load_channel_map()
         logger.info("✅ ufx2_channel_map.json uploaded + reloaded")
@@ -1048,9 +1049,8 @@ async def upload_channel_map(file: UploadFile = File(...)):
 @app.post("/api/config/channel_map/init-from-example")
 async def init_channel_map_from_example():
     """Copy ufx2_channel_map.example.json → ufx2_channel_map.json and reload."""
-    base = os.path.dirname(__file__)
-    example = os.path.join(base, "../ufx2_channel_map.example.json")
-    target  = os.path.join(base, "../ufx2_channel_map.json")
+    example = app_paths.example_path("ufx2_channel_map.example.json")
+    target  = app_paths.data_path("ufx2_channel_map.json")
     try:
         if not os.path.exists(example):
             raise HTTPException(status_code=404, detail="ufx2_channel_map.example.json not found")
@@ -1071,9 +1071,8 @@ async def init_channel_map_from_example():
 async def init_mappings_from_example():
     """Copy mappings.example.json → mappings.json and reload into the bridge.
     Called from the UI when no mappings.json exists on the server."""
-    base = os.path.dirname(__file__)
-    example = os.path.join(base, "../mappings.example.json")
-    target  = os.path.join(base, "../mappings.json")
+    example = app_paths.example_path("mappings.example.json")
+    target  = app_paths.data_path("mappings.json")
     try:
         if not os.path.exists(example):
             raise HTTPException(status_code=404, detail="mappings.example.json not found")
@@ -1096,7 +1095,7 @@ async def init_mappings_from_example():
 async def reload_bridge():
     """Reload mappings.json from disk into the running bridge."""
     try:
-        target = os.path.join(os.path.dirname(__file__), "../mappings.json")
+        target = app_paths.data_path("mappings.json")
         with open(target, "r") as f:
             data = json.load(f)
         bridge.mappings = data

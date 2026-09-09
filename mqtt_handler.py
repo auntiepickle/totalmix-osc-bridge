@@ -7,6 +7,7 @@ from pathlib import Path
 
 from osc import send_osc
 from config import snapshot_num_to_osc_index
+import app_paths
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,10 @@ logger = logging.getLogger(__name__)
 # a git pull. The map_watcher thread checks every 5 seconds for file changes.
 SNAPSHOT_MAP: dict = {}
 MAP_PATH = Path("/app/config/ufx2_snapshot_map.json")
+if not MAP_PATH.parent.is_dir():
+    # No SMB mount (source checkout, frozen Windows exe): watch the local
+    # copy in the app data dir instead - the same file bridge.py loads.
+    MAP_PATH = Path(app_paths.data_path("ufx2_snapshot_map.json"))
 LAST_MTIME: float = 0
 
 

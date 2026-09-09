@@ -8,6 +8,7 @@ import paho.mqtt.client as mqtt
 import re
 import asyncio
 from config import *
+import app_paths
 from osc import get_client
 from mqtt_handler import setup_mqtt
 from osc_monitor import osc_monitor
@@ -37,8 +38,8 @@ logger = logging.getLogger(__name__)
 # Load snapshot map — prefer the SMB-mounted path (same source as mqtt_handler.py),
 # fall back to local file for dev environments without the mount.
 _SNAPSHOT_MAP_PATHS = [
-    "/app/config/ufx2_snapshot_map.json",  # Docker: SMB mount (authoritative)
-    "ufx2_snapshot_map.json",              # Local dev fallback
+    "/app/config/ufx2_snapshot_map.json",           # Docker: SMB mount (authoritative)
+    app_paths.data_path("ufx2_snapshot_map.json"),  # local copy (repo root; %APPDATA% when frozen)
 ]
 SNAPSHOT_MAP = {}
 for _p in _SNAPSHOT_MAP_PATHS:
@@ -56,7 +57,8 @@ if not SNAPSHOT_MAP:
     logger.warning("No snapshot map loaded — WS/SS switching will be disabled until map is available")
 
 # Load mappings — prefer mappings.json (user config), fall back to example
-_MAPPINGS_PATHS = ["mappings.json", "mappings.example.json"]
+_MAPPINGS_PATHS = [app_paths.data_path("mappings.json"),
+                   app_paths.example_path("mappings.example.json")]
 MAPPINGS = {"macros": {}}
 MAPPINGS_SOURCE = None
 MAPPINGS_IS_EXAMPLE = False
@@ -65,8 +67,8 @@ for _mp in _MAPPINGS_PATHS:
     try:
         with open(_mp, "r", encoding="utf-8") as f:
             MAPPINGS = json.load(f)
-        MAPPINGS_SOURCE = _mp
-        MAPPINGS_IS_EXAMPLE = _mp != "mappings.json"
+        MAPPINGS_SOURCE = os.path.basename(_mp)
+        MAPPINGS_IS_EXAMPLE = MAPPINGS_SOURCE != "mappings.json"
         if MAPPINGS_IS_EXAMPLE:
             logger.warning(
                 f"mappings.json not found — loaded fallback {_mp}. "
@@ -289,7 +291,8 @@ class TotalMixOSCBridge:
         Sets self.channel_map_is_example = True when the fallback is used so the
         web UI can surface a setup prompt to the user.
         """
-        for path in ("ufx2_channel_map.json", "ufx2_channel_map.example.json"):
+        for path in (app_paths.data_path("ufx2_channel_map.json"),
+                     app_paths.example_path("ufx2_channel_map.example.json")):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     self.channel_map = json.load(f)
@@ -1458,8 +1461,7 @@ class TotalMixOSCBridge:
     def _persist_channel_map_file(self, cm):
         """Atomic write of the channel map (temp + replace — a crash mid-
         write must not corrupt the only copy of the layout library)."""
-        target = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "ufx2_channel_map.json")
+        target = app_paths.data_path("ufx2_channel_map.json")
         tmp = target + ".tmp"
         with open(tmp, "w") as f:
             json.dump(cm, f, indent=2)
