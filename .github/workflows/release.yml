@@ -1,0 +1,246 @@
+name: release
+
+# One signed Windows installer for everything: the tray MIDI agent (client),
+# the frozen bridge (server), or both. See installer/tmosc-setup.iss.
+#   tag  v1.2.3      -> build + sign + smoke, GitHub Release with tmosc-setup-1.2.3.exe (+ bridge zip)
+#   manual dispatch  -> same build, artifacts only (no Release)
+#   push to main     -> only when the freeze/installer inputs change (CI for the frozen build)
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'bridge_main.py'
+      - 'tmosc-bridge.spec'
+      - 'requirements-frozen.txt'
+      - 'app_paths.py'
+      - 'tools/smoke_frozen.ps1'
+      - 'installer/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, e.g. 0.3.0'
+        required: true
+        default: '0.3.0'
+
+permissions:
+  contents: write   # gh release create
+
+env:
+  # surfaced so the sign steps can gate on env.AZURE_CLIENT_ID != ''
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then v="${{ inputs.version }}"
+          else v="0.0.0-ci.${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "version $v"
+
+  # ---------------------------------------------------------------- server --
+  bridge:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-frozen.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Tailwind CSS (same as the Dockerfile builder stage)
+        shell: pwsh
+        run: |
+          npm init -y | Out-Null
+          npm install -D tailwindcss@latest @tailwindcss/cli
+          npx @tailwindcss/cli -i ./web/static/input.css -o ./web/static/style.css --minify --config ./tailwind.config.js
+          "style.css: $((Get-Item web/static/style.css).Length) bytes"
+
+      - name: Install Python deps (trimmed set for the freeze)
+        run: pip install -r requirements-frozen.txt
+
+      - name: Freeze (PyInstaller onedir)
+        shell: pwsh
+        run: |
+          Set-Content -Path VERSION -Value "${{ needs.version.outputs.version }}" -NoNewline
+          pyinstaller --noconfirm --log-level WARN tmosc-bridge.spec
+          "dist size: {0:N1} MB" -f ((Get-ChildItem dist/tmosc-bridge -Recurse | Measure-Object Length -Sum).Sum / 1MB)
+
+      - name: Smoke test the frozen exe
+        shell: pwsh
+        run: ./tools/smoke_frozen.ps1 -Port 8098
+
+      - name: Stage the unsigned binaries (leave Microsoft/PSF-signed ones alone)
+        if: env.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        run: |
+          $dist = (Resolve-Path dist/tmosc-bridge).Path
+          $n = 0
+          Get-ChildItem $dist -Recurse -Include *.exe,*.dll,*.pyd | ForEach-Object {
+            if ((Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid') {
+              $rel = $_.FullName.Substring($dist.Length + 1)
+              $dst = Join-Path sign-stage $rel
+              New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
+              Copy-Item $_.FullName $dst
+              $rel; $n++
+            }
+          }
+          "staged $n unsigned binaries"
+
+      - name: Sign them (Azure Trusted Signing)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\sign-stage
+          files-folder-filter: exe,dll,pyd
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Put the signed binaries back and verify every binary is signed
+        if: env.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        run: |
+          Copy-Item sign-stage/* dist/tmosc-bridge -Recurse -Force
+          $bad = Get-ChildItem dist/tmosc-bridge -Recurse -Include *.exe,*.dll,*.pyd |
+                 Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' }
+          if ($bad) { $bad | ForEach-Object { $_.FullName }; throw "unsigned binaries remain" }
+          "all binaries carry a valid signature"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tmosc-bridge-dist
+          path: dist/tmosc-bridge
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- client --
+  agent:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (static CRT) + test
+        run: |
+          cmake -S agent -B agent/build
+          cmake --build agent/build --config Release
+          ctest --test-dir agent/build -C Release --output-on-failure
+
+      - name: Stage the exes next to the installer inputs
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force agent/stage | Out-Null
+          Copy-Item agent/build/Release/tmosc-agent.exe      agent/stage/ -Force
+          Copy-Item agent/build/Release/tmosc-agent-tray.exe agent/stage/ -Force
+
+      - name: Sign the exes (Azure Trusted Signing)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\agent\stage
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tmosc-agent-exes
+          path: agent/stage/*.exe
+          if-no-files-found: error
+
+  # ------------------------------------------------------------- installer --
+  installer:
+    needs: [version, bridge, agent]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tmosc-bridge-dist
+          path: dist/tmosc-bridge
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tmosc-agent-exes
+          path: agent/windows
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the unified installer
+        working-directory: installer
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.version }} tmosc-setup.iss'
+
+      - name: Sign the installer (Azure Trusted Signing)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\installer\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Name the outputs with their version
+        id: pkg
+        shell: pwsh
+        run: |
+          $v = "${{ needs.version.outputs.version }}"
+          Rename-Item installer/dist/tmosc-setup.exe "tmosc-setup-$v.exe"
+          Compress-Archive -Path dist/tmosc-bridge/* -DestinationPath "installer/dist/tmosc-bridge-$v-win64.zip"
+          "setup=installer/dist/tmosc-setup-$v.exe" >> $env:GITHUB_OUTPUT
+          "zip=installer/dist/tmosc-bridge-$v-win64.zip" >> $env:GITHUB_OUTPUT
+          Get-ChildItem installer/dist | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tmosc-setup
+          path: |
+            ${{ steps.pkg.outputs.setup }}
+            ${{ steps.pkg.outputs.zip }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tags only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" "${{ steps.pkg.outputs.setup }}" "${{ steps.pkg.outputs.zip }}" `
+            --title "TotalMix OSC ${{ needs.version.outputs.version }}" `
+            --notes "Signed Windows installer: pick Client (tray MIDI agent), Server (the bridge, no Python needed) or Both; the wizard writes the config. The zip is the bare bridge folder for a manual install."
