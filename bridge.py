@@ -2370,17 +2370,22 @@ class TotalMixOSCBridge:
         """Connect MQTT and start the client loop (web and standalone modes)."""
         logger.info("=== TOTALMIX OSC BRIDGE STARTING MQTT (web or standalone mode) ===")
         logger.info(f"OSC target → {OSC_IP}:{OSC_PORT}")
-        logger.info("MQTT macro namespace → totalmix/macro/<name>")
 
-        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-        setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, self)
-        self.mqtt_client = client
+        client = None
+        if ENABLE_MQTT:
+            logger.info("MQTT macro namespace → totalmix/macro/<name>")
+            client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+            setup_mqtt(client, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS, OSC_IP, OSC_PORT, self)
+            self.mqtt_client = client
+        else:
+            logger.info("MQTT disabled (ENABLE_MQTT=False) — macros via web UI / MIDI / REST only")
 
         if ENABLE_OSC_MONITOR:
             osc_monitor.start()
 
-        client.loop_start()
-        logger.info("MQTT client loop started — macro subscriptions ACTIVE")
+        if client is not None:
+            client.loop_start()
+            logger.info("MQTT client loop started — macro subscriptions ACTIVE")
 
 
 bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)

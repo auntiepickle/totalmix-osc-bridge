@@ -8,6 +8,9 @@ _app_paths.prepare()
 
 OSC_IP = os.getenv('OSC_IP')
 OSC_PORT = int(os.getenv('OSC_PORT', 7001))
+# ENABLE_MQTT=False runs the bridge without a broker (web UI / MIDI / REST only);
+# the Windows installer writes it when the MQTT page is left blank.
+ENABLE_MQTT = os.getenv('ENABLE_MQTT', 'True').lower() == 'true'
 MQTT_BROKER = os.getenv('MQTT_BROKER', 'mosquitto')
 MQTT_PORT = int(os.getenv('MQTT_PORT', 1883))
 MQTT_USER = os.getenv('MQTT_USER')
