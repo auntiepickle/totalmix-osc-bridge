@@ -190,7 +190,7 @@ static void test_bindings_parse(void)
     CHECK(n == 1 && a[0].kind == TM_ACTION_KNOB && a[0].macro_index == 0);
     CHECK(strcmp(tm_bindings_name(&b, a[0].macro_index), "fader") == 0);
 
-    n = tm_match(&st, &b.mapping, mk(0x82, 60, 0), a, 4);     /* combo note off ch2 */
+    n = tm_match(&st, &b.mapping, mk(0x81, 60, 0), a, 4);     /* combo note off ch2 (0x81) */
     CHECK(n == 1 && a[0].kind == TM_ACTION_FIRE && a[0].macro_index == 3);
 }
 
