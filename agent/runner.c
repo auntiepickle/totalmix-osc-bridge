@@ -32,8 +32,10 @@ static int   g_dirty[TM_MAX_MACROS];
 static char g_agent_id[96];    /* stable per-run identity: "<host>-tmosc-agent" */
 static char g_agent_host[64];
 
-static tm_midi_msg g_act;      /* latest raw message pending relay to the browser */
-static int         g_act_have = 0;
+/* Per-CC throttle so distinct controls (incl. a 14-bit CC's MSB + LSB, which
+ * have different numbers) all reach the browser, instead of latest-wins
+ * coalescing that clobbered the pair. Notes/PC/etc relay immediately. */
+static double g_cc_last[128];
 
 void tm_runner_stop(void) { g_stop = 1; }
 
@@ -199,7 +201,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
 {
     tm_net net; net.fd = -1;
     tm_clock clock;
-    double last_flush = 0, last_refresh = 0, last_reconnect = 0, last_heartbeat = 0, last_act_flush = 0;
+    double last_flush = 0, last_refresh = 0, last_reconnect = 0, last_heartbeat = 0;
     int connected = 0;
 
     g_verbose = verbose;
@@ -208,6 +210,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
     tm_clock_init(&clock);
     tm_match_state_init(&g_mstate);
     memset(g_dirty, 0, sizeof(g_dirty));
+    memset(g_cc_last, 0, sizeof(g_cc_last));
 
     while (!g_stop) {
         double t = now_ms();
@@ -239,7 +242,16 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
             tm_action acts[16];
             int m, na;
             if ((msg.status & 0xFF) == 0xF8) { tm_clock_tick(&clock, now_ms()); continue; }
-            if ((msg.status & 0xFF) < 0xF8) { g_act = msg; g_act_have = 1; }  /* relay latest raw msg */
+            if ((msg.status & 0xFF) < 0xF8) {            /* relay to the browser (monitor + learn) */
+                int relay = 1;
+                if ((msg.status & 0xF0) == 0xB0) {       /* CC: throttle per number, so pairs survive */
+                    int d1 = msg.data1 & 0x7F;
+                    double tn = now_ms();
+                    if (tn - g_cc_last[d1] < ACTIVITY_MIN_MS) relay = 0;
+                    else g_cc_last[d1] = tn;
+                }
+                if (relay && connected && post_activity(&net, &msg) != 0) connected = 0;
+            }
             na = tm_match(&g_mstate, &g_bind.mapping, msg, acts, 16);
             for (m = 0; m < na; m++) {
                 int idx = acts[m].macro_index;
@@ -264,10 +276,6 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
         if (connected && t - last_heartbeat >= HEARTBEAT_MS) {
             last_heartbeat = t;
             if (post_owner(&net, "/api/midi/owner/heartbeat") != 0) connected = 0;
-        }
-        if (connected && g_act_have && t - last_act_flush >= ACTIVITY_MIN_MS) {
-            last_act_flush = t; g_act_have = 0;
-            if (post_activity(&net, &g_act) != 0) connected = 0;
         }
         if (!connected) tm_net_close(&net);
     }
