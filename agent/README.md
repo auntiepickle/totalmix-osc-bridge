@@ -24,25 +24,31 @@ agent/
     tmosc_midi.[ch]     raw MIDI byte-stream parser (running status, sysex)
     tmosc_match.[ch]    trigger matcher — faithful port of web/static/midi.js
     tmosc_clock.[ch]    MIDI clock -> BPM
-    tmosc_proto.[ch]    build bridge messages (knob JSON, /api/trigger)
-  tests/
-    test_core.c         dependency-free unit tests (cross-checked vs midi.js)
+    tmosc_proto.[ch]    build bridge messages (/api/knob, /api/trigger)
+    tmosc_bindings.[ch] parse the /api/midi/bindings TSV
+  net/net.[ch]        cross-platform HTTP client + UDP LAN discovery
+  runner.[ch]         the shared loop (connect, match, coalesce, POST, retry)
+  linux/              ALSA MIDI backend + main + systemd unit
+  windows/            WinMM backend + console main + tray (icon, menu, startup)
+                      + Inno Setup installer.iss + make_icon.py
+  tests/test_core.c   dependency-free unit tests (cross-checked vs midi.js)
   CMakeLists.txt
-  (io/ + platform/ backends land next: PortMidi/WinMM/CoreMIDI/ALSA,
-   sockets + minimal WebSocket, and the tray)
 ```
 
-## How it talks to the bridge (no server changes)
+## How it talks to the bridge
 
-The agent uses the exact two entry points the browser already uses:
+The agent drives the same macros the browser does, over plain HTTP on the LAN:
 
 | MIDI               | Action                                                        |
 |--------------------|--------------------------------------------------------------|
-| knob CC / bend / … | WebSocket text frame `{"type":"knob","name":..,"value":..}`  |
+| knob CC / bend / … | `POST /api/knob/<name>`  `{"value":0..1}` (coalesced ~12ms)   |
 | fire trigger       | `POST /api/trigger/<name>`  `{"param":..[,"clock_bpm":..]}`   |
 
-So the bridge and the web UI stay exactly as they are; the agent is a new,
-isolated client.
+Plus, for coexistence with an open browser: a presence heartbeat
+(`POST /api/midi/owner/heartbeat`) so the browser yields Web MIDI to the tray,
+and a throttled raw-MIDI relay (`POST /api/midi/activity`) so browser MIDI-learn
+and the live activity view keep working while the agent owns the port. The one
+read-only feed the bridge adds is `GET /api/midi/bindings` (the trigger table).
 
 ## Build & test the core
 
@@ -93,40 +99,55 @@ agent). The daemon fetches that TSV, matches incoming MIDI, and POSTs
 `/api/knob/<name>` (knobs) / `/api/trigger/<name>` (fires) — the same effect as
 the browser, with no browser.
 
+## Install (Windows)
+
+Grab the signed installer from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases)
+(`tmosc-agent-setup-*.exe`, Authenticode-signed — no "unknown publisher"
+warning), run it, and follow the wizard: it **auto-detects the bridge on your
+LAN**, lists your MIDI inputs to pick from, and offers "start with Windows".
+Done. The exe is fully standalone (static CRT — no Visual C++ redistributable).
+
+Right-click the tray icon for **Open Web UI**, **Open Web UI - HTTPS**,
+**Start with Windows**, and **Quit**. The icon shows the state at a glance —
+indigo knob = running, orange = the MIDI device is held by another app (it
+retries and grabs it once free).
+
 ## Status
 
 - [x] Portable core: MIDI parse, trigger match, clock->BPM, message builders,
       bindings-TSV parser — freestanding, unit-tested vs `web/static/midi.js`
-- [x] Linux daemon: ALSA MIDI in + minimal HTTP client + coalesced knob flush
-      + reconnect + periodic bindings refresh; systemd unit
+- [x] Linux daemon (ALSA) + Windows console + Windows system-tray app, all from
+      one shared runner; cross-platform CI (gcc+ALSA and MSVC+WinMM)
 - [x] Bridge: read-only `GET /api/midi/bindings` (TSV) feed
-- [x] Cross-platform: shared runner + net (POSIX/Winsock); portable core and
-      the whole agent build on Linux (gcc+ALSA) AND Windows (MSVC+WinMM) in CI
-- [x] Windows: console daemon (`tmosc-agent`) + system-tray app
-      (`tmosc-agent-tray`) — sits in the notification area, runs headless, menu
-      opens the web UI; config from `%APPDATA%\tmosc-agent\config.txt` or TMOSC_* env
-- [ ] WebSocket knob fast-path (HTTP is fine on LAN; WS trims overhead later)
-- [ ] Learn relay + browser MIDI-yield (web UI Learn while the agent owns MIDI)
-- [ ] A real tray icon (currently the generic app icon) + start-on-login
+- [x] Coexistence: the bridge tracks a single MIDI owner; the browser yields Web
+      MIDI to the tray and stays a full monitor; MIDI-learn + live activity keep
+      working via a relay while the tray owns the port; the tray announces
+      ownership even while blocked so a browser releases the port to it
+- [x] Real tray icon + status states, start-on-login, LAN auto-discovery
+- [x] Signed (Azure Trusted Signing) + one-click Inno Setup installer with a
+      configuration wizard; standalone exe (static CRT)
+- [ ] Frozen bridge exe + unified Client/Server/Both installer (in progress)
+- [ ] WebSocket knob fast-path (measured unnecessary — HTTP is ~1.8ms on LAN)
 
-### Windows
+## Build from source
 
 ```
 cmake -S agent -B agent\build           && cmake --build agent\build --config Release
 agent\build\Release\tmosc-agent.exe --list          REM list MIDI inputs
+agent\build\Release\tmosc-agent.exe --discover       REM find the bridge on the LAN
 agent\build\Release\tmosc-agent-tray.exe            REM tray app (reads config below)
 ```
 
-`%APPDATA%\tmosc-agent\config.txt`:
+`%APPDATA%\tmosc-agent\config.txt` (the installer writes this for you):
 
 ```
-host=192.168.1.41
+host=192.168.1.41    # or `auto` to discover the bridge on the LAN
 port=8088
-midi=U6MIDI
+midi=U6MIDI          # a substring of your controller's name; blank = first input
 # optional — the secure client the tray's "Open Web UI - HTTPS" menu opens.
-# Defaults to the documented Caddy/nip.io URL for an IPv4 host
-# (https://192.168.1.41.nip.io); set explicitly if your HTTPS front differs.
-#https_url=https://mixer.example.com
+# Defaults to the Caddy/nip.io URL for an IPv4 host (https://<ip>.nip.io);
+# set explicitly if your HTTPS front differs (e.g. a custom port/path).
+#https_url=https://192.168.1.41.nip.io:9445/static/index.html
 ```
 
 The tray menu offers **Open Web UI** (plain HTTP) and **Open Web UI - HTTPS**.

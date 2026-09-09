@@ -41,6 +41,7 @@ MQTT is optional. If you run Home Assistant or a similar home automation stack, 
 - **Device capture + channel-map discovery** — the bridge listens to TotalMix's OSC feedback and builds `ufx2_channel_map.json` by walking the submixes itself (`POST /api/device/discover`)
 - **MQTT integration** — optional; Home Assistant can trigger macros and receive workspace state
 - **Auto-backup** — every config save writes a timestamped copy to `backups/`
+- **Background MIDI agent (tray)** — a signed, dependency-free Windows tray app that drives your MIDI mapping **without a browser open**; it auto-discovers the bridge on the LAN, and coexists with an open browser (which stays a live monitor). See [agent/README.md](agent/README.md)
 
 ---
 
@@ -101,3 +102,4 @@ All three have `*.example.json` counterparts. The real files are git-ignored so 
 | [docs/architecture.md](docs/architecture.md) | Signal flow, component responsibilities, TotalMix OSC gotchas, thread model, frontend patterns |
 | [docs/config.md](docs/config.md) | Full schema for all three config files with examples |
 | [docs/setup.md](docs/setup.md) | Local and Docker deployment, env vars, HTTPS, MQTT and Home Assistant |
+| [agent/README.md](agent/README.md) | The background MIDI tray agent — install, config, how it coexists with the browser, building from source |
