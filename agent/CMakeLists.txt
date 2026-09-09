@@ -62,14 +62,16 @@ endif()
 
 # --- Windows: console daemon + tray GUI (share the same runner) -----------
 if(WIN32)
-  add_executable(tmosc-agent windows/main_win.c windows/midi_win.c ${TMOSC_SHARED_SRC})
+  enable_language(RC)   # compile windows/tray.rc -> embeds tray.ico as the app/tray icon
+
+  add_executable(tmosc-agent windows/main_win.c windows/midi_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
   target_include_directories(tmosc-agent PRIVATE ${TMOSC_SHARED_INC} windows)
   target_link_libraries(tmosc-agent PRIVATE tmosc_core winmm ws2_32)
   install(TARGETS tmosc-agent RUNTIME DESTINATION bin)
 
   # WIN32 = GUI subsystem (WinMain, no console window)
-  add_executable(tmosc-agent-tray WIN32 windows/tray_win.c windows/midi_win.c ${TMOSC_SHARED_SRC})
+  add_executable(tmosc-agent-tray WIN32 windows/tray_win.c windows/midi_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
   target_include_directories(tmosc-agent-tray PRIVATE ${TMOSC_SHARED_INC} windows)
-  target_link_libraries(tmosc-agent-tray PRIVATE tmosc_core winmm ws2_32 shell32 user32)
+  target_link_libraries(tmosc-agent-tray PRIVATE tmosc_core winmm ws2_32 shell32 user32 advapi32)
   install(TARGETS tmosc-agent-tray RUNTIME DESTINATION bin)
 endif()

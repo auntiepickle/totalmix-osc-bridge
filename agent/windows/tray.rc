@@ -1,0 +1,5 @@
+#include "resource.h"
+
+/* The tray notification icon and the .exe file icon. First icon in the file
+ * becomes the default application icon shown in Explorer. */
+IDI_TRAY ICON "tray.ico"

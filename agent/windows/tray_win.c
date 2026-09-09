@@ -16,10 +16,42 @@
 
 #include "runner.h"
 #include "midi_win.h"
+#include "resource.h"
 
-#define WM_TRAY   (WM_APP + 1)
-#define ID_OPEN   1001
-#define ID_QUIT   1002
+#define WM_TRAY    (WM_APP + 1)
+#define ID_OPEN    1001
+#define ID_QUIT    1002
+#define ID_STARTUP 1003
+
+#define STARTUP_KEY  "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define STARTUP_NAME "TmoscAgent"
+
+/* Start-on-login via the per-user Run key (no admin needed). */
+static int startup_enabled(void)
+{
+    HKEY k; int on = 0;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, STARTUP_KEY, 0, KEY_QUERY_VALUE, &k) == ERROR_SUCCESS) {
+        if (RegQueryValueExA(k, STARTUP_NAME, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) on = 1;
+        RegCloseKey(k);
+    }
+    return on;
+}
+
+static void startup_toggle(void)
+{
+    HKEY k;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, STARTUP_KEY, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
+    if (startup_enabled()) {
+        RegDeleteValueA(k, STARTUP_NAME);
+    } else {
+        char path[MAX_PATH];
+        DWORD n = GetModuleFileNameA(NULL, path, (DWORD)sizeof(path));
+        if (n > 0 && n < sizeof(path))
+            RegSetValueExA(k, STARTUP_NAME, 0, REG_SZ,
+                           (const BYTE *)path, (DWORD)(strlen(path) + 1));
+    }
+    RegCloseKey(k);
+}
 
 static NOTIFYICONDATAA g_nid;
 static HWND   g_hwnd;
@@ -99,6 +131,9 @@ static void show_menu(HWND hwnd)
     snprintf(item, sizeof(item), "Open Web UI  (%s)", g_url);
     AppendMenuA(menu, MF_STRING, ID_OPEN, item);
     AppendMenuA(menu, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(menu, MF_STRING | (startup_enabled() ? MF_CHECKED : 0),
+                ID_STARTUP, "Start with Windows");
+    AppendMenuA(menu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(menu, MF_STRING, ID_QUIT, "Quit");
     SetForegroundWindow(hwnd);   /* so the menu dismisses on focus loss */
     TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL);
@@ -114,6 +149,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         case WM_COMMAND:
             if (LOWORD(wp) == ID_OPEN) ShellExecuteA(NULL, "open", g_url, NULL, NULL, SW_SHOWNORMAL);
+            else if (LOWORD(wp) == ID_STARTUP) startup_toggle();
             else if (LOWORD(wp) == ID_QUIT) { tm_runner_stop(); DestroyWindow(hwnd); }
             return 0;
         case WM_DESTROY:
@@ -136,6 +172,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdline, int show)
     wc.lpfnWndProc = wndproc;
     wc.hInstance = hInst;
     wc.lpszClassName = "TmoscAgentTray";
+    wc.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_TRAY));
     RegisterClassA(&wc);
     g_hwnd = CreateWindowA("TmoscAgentTray", "TotalMix OSC Agent", 0,
                            0, 0, 0, 0, HWND_MESSAGE, NULL, hInst, NULL);
@@ -146,7 +183,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdline, int show)
     g_nid.uID = 1;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
-    g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    g_nid.hIcon = (HICON)LoadImageA(hInst, MAKEINTRESOURCEA(IDI_TRAY), IMAGE_ICON,
+                                    GetSystemMetrics(SM_CXSMICON),
+                                    GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+    if (!g_nid.hIcon) g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
     snprintf(g_nid.szTip, sizeof(g_nid.szTip), "TotalMix OSC Agent - %s", g_url);
     Shell_NotifyIconA(NIM_ADD, &g_nid);
 
