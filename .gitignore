@@ -30,3 +30,8 @@ venv/
 web/static/style.css
 # Claude Code local state (worktrees, settings)
 .claude/
+
+# PyInstaller (frozen Windows bridge) build output
+build/
+dist/
+VERSION

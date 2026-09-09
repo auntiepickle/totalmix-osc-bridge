@@ -1,0 +1,13 @@
+# Dependencies for the FROZEN Windows build (PyInstaller) - see tmosc-bridge.spec.
+# Docker / source installs keep using requirements.txt. Differences on purpose:
+#  - plain uvicorn + websockets + h11 instead of uvicorn[standard]: no uvloop /
+#    httptools / watchfiles -> fewer native binaries to sign, fewer AV heuristics
+#  - no mido[rtmidi]: the bridge never imports it (MIDI enters via browser/agent)
+fastapi
+uvicorn
+websockets
+h11
+python-multipart>=0.0.6
+paho-mqtt
+python-osc
+pyinstaller>=6.10
