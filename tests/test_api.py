@@ -305,3 +305,27 @@ def test_auth_blocks_unauthenticated_write_when_set(monkeypatch):
     # ?token= also works
     r3 = client.post("/api/trigger/whatever?token=s3cret")
     assert r3.status_code != 401
+
+
+def test_midi_bindings_tsv(monkeypatch):
+    """/api/midi/bindings emits the agent's trigger table as TSV."""
+    import bridge as bridge_module
+    saved = bridge_module.bridge.mappings
+    try:
+        bridge_module.bridge.mappings = {"macros": {
+            "fader": {"steps": [{"operation": {"type": "knob"},
+                                 "target": {"channel": "Mic 1"}}],
+                      "midi_triggers": [{"type": "control_change", "number": 82,
+                                         "channel": 1, "use_value_as_param": True}]},
+            "scene": {"steps": [{"osc": "/setSubmix", "value": "1"}],
+                      "midi_triggers": [{"type": "program_change", "number": 5,
+                                         "channel": 1}]},
+        }}
+        r = client.get("/api/midi/bindings")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/plain")
+        lines = r.text.strip().split("\n")
+        assert "fader\t1\tcontrol_change\t82\t-1\t1\t1" in lines
+        assert "scene\t0\tprogram_change\t5\t-1\t1\t0" in lines
+    finally:
+        bridge_module.bridge.mappings = saved

@@ -7,6 +7,7 @@
 #include "tmosc_match.h"
 #include "tmosc_clock.h"
 #include "tmosc_proto.h"
+#include "tmosc_bindings.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -166,6 +167,33 @@ static void test_proto(void)
     (void)n;
 }
 
+static void test_bindings_parse(void)
+{
+    /* Mirrors the bridge's /api/midi/bindings TSV output. */
+    static tm_bindings b;
+    const char *tsv =
+        "fader\t1\tcontrol_change\t82\t-1\t1\t1\n"
+        "scene\t0\tprogram_change\t5\t-1\t1\t0\n"
+        "hicut\t1\tcontrol_change_14\t10\t-1\t1\t1\n"
+        "combo\t0\tnote_on\t-1\t60\t2\t0\n"
+        "combo\t0\tnote_off\t-1\t60\t2\t0\n";
+    tm_match_state st; tm_action a[4]; int n;
+    int rc = tm_bindings_parse(&b, tsv, (int)strlen(tsv));
+    CHECK(rc == 0);
+    CHECK(b.mapping.macro_count == 4);              /* combo's two triggers -> one macro */
+    CHECK(strcmp(tm_bindings_name(&b, 0), "fader") == 0);
+    CHECK(b.macros[0].is_knob == 1);
+    CHECK(b.macros[3].trigger_count == 2);          /* note_on + note_off */
+
+    tm_match_state_init(&st);
+    n = tm_match(&st, &b.mapping, mk(0xB0, 82, 127), a, 4);   /* fader CC82 */
+    CHECK(n == 1 && a[0].kind == TM_ACTION_KNOB && a[0].macro_index == 0);
+    CHECK(strcmp(tm_bindings_name(&b, a[0].macro_index), "fader") == 0);
+
+    n = tm_match(&st, &b.mapping, mk(0x82, 60, 0), a, 4);     /* combo note off ch2 */
+    CHECK(n == 1 && a[0].kind == TM_ACTION_FIRE && a[0].macro_index == 3);
+}
+
 int main(void)
 {
     test_cc_knob();
@@ -178,6 +206,7 @@ int main(void)
     test_parser_sysex_skip();
     test_clock_bpm();
     test_proto();
+    test_bindings_parse();
 
     if (g_fail) { printf("\n%d CHECK(s) FAILED\n", g_fail); return 1; }
     printf("all core tests passed\n");

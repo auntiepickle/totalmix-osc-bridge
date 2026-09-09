@@ -1,0 +1,19 @@
+[Unit]
+Description=TotalMix OSC MIDI agent (headless)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Edit these to your bridge and MIDI device (find the device with `amidi -l`).
+Environment=TMOSC_BRIDGE_HOST=192.168.1.41
+Environment=TMOSC_BRIDGE_PORT=8088
+Environment=TMOSC_MIDI=hw:1,0
+ExecStart=/usr/local/bin/tmosc-agent
+Restart=always
+RestartSec=2
+# reading a MIDI device needs the `audio` group
+SupplementaryGroups=audio
+
+[Install]
+WantedBy=multi-user.target

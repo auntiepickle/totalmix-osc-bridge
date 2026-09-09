@@ -74,6 +74,48 @@ static int is_unreserved(unsigned char c)
            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
 }
 
+/* Shared: "/api/<verb>/<url-encoded name>" */
+static int api_path(char *buf, int buflen, const char *verb, const char *name)
+{
+    int n = 0;
+    const char *s;
+    if (buflen <= 0) return -1;
+    if (!put_str(buf, buflen, &n, "/api/")) return -1;
+    if (!put_str(buf, buflen, &n, verb)) return -1;
+    if (!put(buf, buflen, &n, '/')) return -1;
+    for (s = name; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (is_unreserved(c)) {
+            if (!put(buf, buflen, &n, (char)c)) return -1;
+        } else {
+            char hex[4];
+            int k;
+            snprintf(hex, sizeof(hex), "%%%02X", c);
+            for (k = 0; hex[k]; k++) if (!put(buf, buflen, &n, hex[k])) return -1;
+        }
+    }
+    buf[n] = '\0';
+    return n;
+}
+
+int tm_proto_knob_path(char *buf, int buflen, const char *name)
+{
+    return api_path(buf, buflen, "knob", name);
+}
+
+int tm_proto_knob_body(char *buf, int buflen, float value)
+{
+    int n = 0;
+    char num[32];
+    if (buflen <= 0) return -1;
+    if (!put_str(buf, buflen, &n, "{\"value\":")) return -1;
+    snprintf(num, sizeof(num), "%.6g", (double)clamp01(value));
+    if (!put_str(buf, buflen, &n, num)) return -1;
+    if (!put(buf, buflen, &n, '}')) return -1;
+    buf[n] = '\0';
+    return n;
+}
+
 int tm_proto_trigger_path(char *buf, int buflen, const char *name)
 {
     int n = 0;

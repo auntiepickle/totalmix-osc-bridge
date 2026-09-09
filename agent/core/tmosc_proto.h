@@ -15,12 +15,18 @@
 extern "C" {
 #endif
 
+/* --- WebSocket knob stream (optional fast path) --- */
 /* {"type":"knob","name":"<name>","value":<v>}  -> buf. value clamped 0..1. */
 int tm_proto_knob_json(char *buf, int buflen, const char *name, float value);
 
+/* --- HTTP paths (the portable v1 path: POST these) --- */
+/* "/api/knob/<url-encoded name>" -> buf. */
+int tm_proto_knob_path(char *buf, int buflen, const char *name);
+/* {"value":<v>}  -> buf. value clamped 0..1. */
+int tm_proto_knob_body(char *buf, int buflen, float value);
+
 /* "/api/trigger/<url-encoded name>" -> buf. */
 int tm_proto_trigger_path(char *buf, int buflen, const char *name);
-
 /* {"param":<v>} or {"param":<v>,"clock_bpm":<bpm>} (bpm included only if >0). */
 int tm_proto_trigger_body(char *buf, int buflen, float param, int clock_bpm);
 

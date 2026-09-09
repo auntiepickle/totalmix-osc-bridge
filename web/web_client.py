@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 import json
 import threading
@@ -441,6 +441,33 @@ def get_duck():
     d = getattr(bridge, "duck", None)
     return {"available": d is not None,
             "duck": {k: dict(v) for k, v in (d.status if d else {}).items()}}
+
+
+@app.get("/api/midi/bindings", response_class=PlainTextResponse)
+def get_midi_bindings():
+    """MIDI trigger table as TSV, for the native background agent (and a
+    future microcontroller) to read without a JSON parser. One line per
+    trigger, tab-separated:
+
+        name  is_knob  type  number  note  channel  use_value_as_param
+
+    number/note are -1 when not applicable. Read-only; the agent matches
+    incoming MIDI against this and drives /ws (knob) or /api/trigger (fire),
+    exactly as the browser does."""
+    lines = []
+    for name, m in bridge.mappings.get("macros", {}).items():
+        is_knob = 1 if bridge._knob_step(m) else 0
+        for t in (m.get("midi_triggers") or []):
+            typ = str(t.get("type", "control_change"))
+            number = t.get("number", -1)
+            note = t.get("note", -1)
+            channel = t.get("channel", 1)
+            uvap = 1 if t.get("use_value_as_param") else 0
+            number = -1 if number is None else number
+            note = -1 if note is None else note
+            # name is MACRO_NAME_RE-constrained ([A-Za-z0-9_-]) so no tabs/newlines
+            lines.append(f"{name}\t{is_knob}\t{typ}\t{number}\t{note}\t{channel}\t{uvap}")
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 @app.get("/api/debug/levels")

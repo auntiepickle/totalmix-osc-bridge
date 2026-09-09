@@ -55,12 +55,40 @@ ctest --test-dir agent/build --output-on-failure
 The core needs only a C compiler — on the Pi, `sudo apt install cmake gcc` and
 the commands above.
 
+## Run the Linux daemon (Ubuntu server, Pi, or any Linux the controller plugs into)
+
+```sh
+sudo apt install cmake gcc libasound2-dev
+cmake -S agent -B agent/build && cmake --build agent/build
+amidi -l                              # find your MIDI input, e.g. hw:1,0
+TMOSC_BRIDGE_HOST=192.168.1.41 TMOSC_BRIDGE_PORT=8088 TMOSC_MIDI=hw:1,0 \
+  agent/build/tmosc-agent
+```
+
+No controller handy? Create a virtual MIDI port to test end to end:
+
+```sh
+sudo modprobe snd-virmidi                 # creates virtual MIDI ports
+amidi -l                                  # note the Virtual RawMIDI hw:N,0
+# point the agent at it, then in another shell send a CC 82 = 100 on ch1:
+amidi -p hw:N,0 -S 'B2 52 64'
+```
+
+Install as a service: copy `tmosc-agent` to `/usr/local/bin/`, edit the env in
+`linux/tmosc-agent.service`, then `systemctl enable --now tmosc-agent`.
+
+Requires the bridge to expose `GET /api/midi/bindings` (added alongside this
+agent). The daemon fetches that TSV, matches incoming MIDI, and POSTs
+`/api/knob/<name>` (knobs) / `/api/trigger/<name>` (fires) — the same effect as
+the browser, with no browser.
+
 ## Status
 
-- [x] Portable core: MIDI parse, trigger match, clock->BPM, message builders
-- [x] Unit tests cross-checked against `web/static/midi.js`
-- [ ] I/O backends: MIDI in (PortMidi / native), sockets + WebSocket client
-- [ ] Runner: connect, pull `/api/macros`, refresh on `macro_updated`, forward
-- [ ] Tray (Windows first) + config + start-on-login
-- [ ] Learn relay + browser MIDI-yield (so the web UI's Learn works while the
-      agent owns the port)
+- [x] Portable core: MIDI parse, trigger match, clock->BPM, message builders,
+      bindings-TSV parser — freestanding, unit-tested vs `web/static/midi.js`
+- [x] Linux daemon: ALSA MIDI in + minimal HTTP client + coalesced knob flush
+      + reconnect + periodic bindings refresh; systemd unit
+- [x] Bridge: read-only `GET /api/midi/bindings` (TSV) feed
+- [ ] WebSocket knob fast-path (HTTP is fine on LAN; WS trims overhead later)
+- [ ] Windows tray front-end over the same core (WinMM MIDI, Shell_NotifyIcon)
+- [ ] Learn relay + browser MIDI-yield (web UI Learn while the agent owns MIDI)
