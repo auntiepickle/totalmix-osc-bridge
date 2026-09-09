@@ -5,14 +5,9 @@
 #define TM_MIDI_ALSA_H
 
 #include <poll.h>
+#include "midi_port.h"
 
 typedef struct tm_midi_alsa tm_midi_alsa;
-
-/* A discovered rawmidi INPUT port: its ALSA id ("hw:1,0") and friendly name. */
-typedef struct {
-    char port[24];
-    char name[80];
-} tm_midi_port;
 
 /* Enumerate rawmidi input ports into `out` (up to `max`). Returns the count. */
 int tm_midi_alsa_list(tm_midi_port *out, int max);

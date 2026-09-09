@@ -1,11 +1,13 @@
-/* net.h — minimal HTTP/1.1 keep-alive client over POSIX sockets (Linux/macOS).
- * Just enough for the agent: one request at a time, Content-Length responses.
- * No TLS (the bridge is plain HTTP on the LAN); portable to Winsock later. */
+/* net.h — minimal HTTP/1.1 keep-alive client. Cross-platform: POSIX sockets on
+ * Linux/macOS, Winsock on Windows. Just enough for the agent: one request at a
+ * time, Content-Length responses, no TLS (the bridge is plain HTTP on the LAN). */
 #ifndef TM_NET_H
 #define TM_NET_H
 
+#include <stdint.h>
+
 typedef struct {
-    int fd;
+    intptr_t fd;      /* socket handle (SOCKET on Windows fits in intptr_t) */
     char host[128];
     int port;
 } tm_net;

@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-test:
-    name: cmake build + ctest
+  build-test-linux:
+    name: linux (gcc + ALSA)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,3 +25,15 @@ jobs:
         run: cmake --build agent/build
       - name: Test
         run: ctest --test-dir agent/build --output-on-failure
+
+  build-test-windows:
+    name: windows (MSVC + WinMM)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S agent -B agent/build
+      - name: Build
+        run: cmake --build agent/build --config Release
+      - name: Test
+        run: ctest --test-dir agent/build -C Release --output-on-failure
