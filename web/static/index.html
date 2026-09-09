@@ -88,6 +88,12 @@
                     <span class="text-[9px] text-zinc-600 font-mono">OSC</span>
                 </div>
 
+                <!-- MIDI owner chip: shown only while a tray/agent holds the MIDI port -->
+                <div id="midi-owner-chip" class="hidden flex items-center gap-1.5 px-3 py-2 bg-indigo-950/60 border border-indigo-700/60 rounded-2xl" title="MIDI handled by the tray agent">
+                    <i class="fas fa-satellite-dish text-indigo-400 text-[10px]"></i>
+                    <span class="text-[9px] text-indigo-300 font-mono">MIDI: TRAY</span>
+                </div>
+
                 <!-- New Macro -->
                 <button onclick="openNewMacro()"
                     class="flex items-center gap-2 bg-orange-500 hover:bg-orange-400 active:scale-95 text-black font-bold px-4 py-2 rounded-2xl text-sm transition-all whitespace-nowrap"

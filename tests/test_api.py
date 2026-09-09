@@ -329,3 +329,36 @@ def test_midi_bindings_tsv(monkeypatch):
         assert "scene\t0\tprogram_change\t5\t-1\t1\t0" in lines
     finally:
         bridge_module.bridge.mappings = saved
+
+
+# ── MIDI ownership (coexistence) ──────────────────────────────────────────────
+
+def test_midi_owner_claim_and_release():
+    b = bridge_module.bridge
+    b._midi_owner = None
+    assert client.get("/api/health").json()["midi_owner"] is None
+    # an agent claims the port
+    o = client.post("/api/midi/owner/heartbeat",
+                    json={"id": "agent-1", "host": "BOX"}).json()["owner"]
+    assert o["id"] == "agent-1" and o["host"] == "BOX"
+    assert client.get("/api/health").json()["midi_owner"]["id"] == "agent-1"
+    # a release from a DIFFERENT id must not steal/clear ownership
+    assert client.post("/api/midi/owner/release",
+                       json={"id": "someone-else"}).json()["released"] is False
+    assert client.get("/api/health").json()["midi_owner"]["id"] == "agent-1"
+    # the owner releases cleanly -> gone immediately
+    assert client.post("/api/midi/owner/release",
+                       json={"id": "agent-1"}).json()["released"] is True
+    assert client.get("/api/health").json()["midi_owner"] is None
+
+
+def test_midi_owner_ttl_expiry(monkeypatch):
+    b = bridge_module.bridge
+    b._midi_owner = None
+    # a stale heartbeat (older than the TTL) reads as no owner — the browser
+    # reclaims MIDI even if the agent crashed without releasing.
+    monkeypatch.setattr(b, "MIDI_OWNER_TTL_S", -1.0)
+    client.post("/api/midi/owner/heartbeat", json={"id": "crash-agent"})
+    assert b.midi_owner_state() is None
+    assert client.get("/api/health").json()["midi_owner"] is None
+    b._midi_owner = None

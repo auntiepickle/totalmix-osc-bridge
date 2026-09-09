@@ -172,11 +172,33 @@ async def switch_workspace(body: SwitchBody):
 
 @app.get("/api/health")
 async def get_health():
-    """Return connection health for MQTT and OSC."""
+    """Return connection health for MQTT and OSC, plus the current MIDI owner
+    (an external tray/agent holding the port) so the browser can yield/reclaim
+    Web MIDI. Polled by the header — keep it light."""
     return {
         "mqtt_connected": getattr(bridge, "mqtt_connected", False),
         "osc_configured": bridge.osc_client is not None,
+        "midi_owner": bridge.midi_owner_state(),
     }
+
+
+class MidiOwnerBody(BaseModel):
+    id: str
+    host: Optional[str] = None
+
+
+@app.post("/api/midi/owner/heartbeat")
+async def midi_owner_heartbeat(body: MidiOwnerBody):
+    """A tray/agent announces (every couple seconds) that it is handling MIDI.
+    Refreshes presence; browsers yield Web MIDI while an agent owns the port."""
+    return {"owner": bridge.midi_owner_heartbeat(body.id, body.host)}
+
+
+@app.post("/api/midi/owner/release")
+async def midi_owner_release(body: MidiOwnerBody):
+    """A tray/agent cleanly releases the MIDI port (on shutdown) so browsers
+    reclaim it immediately instead of waiting for the heartbeat to expire."""
+    return {"released": bridge.midi_owner_release(body.id)}
 
 
 @app.get("/api/test")

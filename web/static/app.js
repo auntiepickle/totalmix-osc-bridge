@@ -75,6 +75,9 @@ function _wsBanner(show) {
 
 function _onWSMessage(event) {
   const data = JSON.parse(event.data);
+  // Coexistence: a tray/agent claimed or released the MIDI port. Yield/reclaim
+  // Web MIDI promptly (poll-based expiry in pollHealth is the crash-safety net).
+  if (data.type === 'midi_owner') { applyMidiOwner(data.owner); return; }
   const layoutChanged =
     (data.current_workspace && data.current_workspace !== currentWorkspace) ||
     (data.current_snapshot && data.current_snapshot !== currentSnapshot);
@@ -852,12 +855,38 @@ setInterval(async () => {
   } catch (_) {}
 }, 160);
 
+// ── MIDI ownership (coexistence) ──────────────────────────────────────────────
+// The bridge reports whether a tray/agent holds the physical MIDI port. Only
+// agents claim ownership; this browser never does, so any non-null owner means
+// "an agent is driving MIDI" → yield Web MIDI (WinMM is exclusive) but keep
+// monitoring. Null → reclaim. Driven by both the WS event (prompt) and the
+// health poll (crash-safe expiry + late join).
+function applyMidiOwner(owner) {
+  const active = !!owner;
+  if (active && !window._midiYielded && typeof window.yieldMidi === 'function') {
+    window.yieldMidi();
+  } else if (!active && window._midiYielded && typeof window.reclaimMidi === 'function') {
+    window.reclaimMidi();
+  }
+  window._midiOwner = owner || null;
+  const chip = document.getElementById('midi-owner-chip');
+  if (chip) {
+    chip.classList.toggle('hidden', !active);
+    if (active) {
+      chip.title = 'MIDI is handled by the tray agent'
+        + (owner.host ? ' on ' + owner.host : '')
+        + ' — this browser is monitoring (Web MIDI yielded)';
+    }
+  }
+}
+
 // ── Health polling — MQTT and OSC status dots ─────────────────────────────────
 async function pollHealth() {
   try {
     const h = await API.getHealth();
     _applyHealthDot('mqtt-health-dot', h.mqtt_connected, 'MQTT');
     _applyHealthDot('osc-health-dot',  h.osc_configured,  'OSC');
+    applyMidiOwner(h.midi_owner);   // crash-safe expiry + late-join sync
   } catch (_) {
     _applyHealthDot('mqtt-health-dot', false, 'MQTT');
     _applyHealthDot('osc-health-dot',  false, 'OSC');

@@ -406,7 +406,7 @@ function _populateSelector() {
 // message (except cc14 pairs, which key on channel+cc), so merging streams
 // is safe
 function _connectAll() {
-  if (!midiAccess) return;
+  if (!midiAccess || window._midiYielded) return;   // yielded: the tray agent owns the port
   const inputs = Array.from(midiAccess.inputs.values());
   inputs.forEach(i => { i.onmidimessage = handleMIDIMessage; });
   midiInput = inputs[0] || null;
@@ -424,6 +424,7 @@ function _connectAll() {
 }
 
 function _connectInput(input) {
+  if (window._midiYielded) return;                  // yielded: the tray agent owns the port
   if (midiInput) midiInput.onmidimessage = null;
   midiInput = input;
   midiInput.onmidimessage = handleMIDIMessage;
@@ -473,4 +474,40 @@ window.rescanMIDI = async () => {
   midiAccess = null;
   midiConnectedDevice = '';
   await initWebMIDI();
+};
+
+// ── Coexistence: yield the physical MIDI port to a tray/agent ────────────────
+// WinMM inputs are exclusive, so when an agent owns the port the browser must
+// truly RELEASE it (not just stop listening) or the agent can't open it. The
+// browser stays a full monitor either way (meters + knob/ macro updates arrive
+// over the WebSocket regardless of who reads MIDI). The emulator is untouched.
+window._midiYielded = false;
+
+window.yieldMidi = () => {
+  window._midiYielded = true;
+  if (midiAccess) {
+    Array.from(midiAccess.inputs.values()).forEach(i => {
+      i.onmidimessage = null;
+      try { i.close(); } catch (_) {}   // release the OS device for the agent
+    });
+  }
+  midiInput = null;
+  midiConnectedDevice = '';
+  _clockTicks = [];
+  console.log('[MIDI] yielded to tray agent — released device inputs');
+  if (typeof updateStatusHeader === 'function') updateStatusHeader();
+};
+
+window.reclaimMidi = () => {
+  if (!window._midiYielded) return;
+  window._midiYielded = false;
+  console.log('[MIDI] reclaiming device inputs (agent gone)');
+  if (!midiAccess) { initWebMIDI(); return; }
+  if (!lastMidiDevice || lastMidiDevice === '__all__') {
+    _connectAll();
+  } else {
+    const target = Array.from(midiAccess.inputs.values()).find(i => i.name === lastMidiDevice);
+    if (target) _connectInput(target); else _connectAll();
+  }
+  if (typeof updateStatusHeader === 'function') updateStatusHeader();
 };

@@ -1,4 +1,10 @@
 /* runner.c — see runner.h. Shared, platform-agnostic. */
+#ifdef _WIN32
+/* winsock2.h MUST precede windows.h (gethostname + the now_ms windows.h below). */
+#  define WIN32_LEAN_AND_MEAN
+#  include <winsock2.h>
+#  include <windows.h>
+#endif
 #include "runner.h"
 #include "tmosc_match.h"
 #include "tmosc_clock.h"
@@ -12,6 +18,7 @@
 #define KNOB_MIN_MS   12
 #define REFRESH_MS    5000
 #define RECONNECT_MS  1000
+#define HEARTBEAT_MS  2000   /* announce MIDI ownership so browsers yield Web MIDI */
 
 static volatile int g_stop = 0;
 static int g_verbose = 0;
@@ -20,6 +27,9 @@ static tm_bindings    g_bind;
 static tm_match_state g_mstate;
 static float g_pending[TM_MAX_MACROS];
 static int   g_dirty[TM_MAX_MACROS];
+
+static char g_agent_id[96];    /* stable per-run identity: "<host>-tmosc-agent" */
+static char g_agent_host[64];
 
 void tm_runner_stop(void) { g_stop = 1; }
 
@@ -117,6 +127,33 @@ static int flush_knobs(tm_net *net)
     return err;
 }
 
+/* --- MIDI ownership heartbeat (coexistence with the browser) --------------- */
+#ifndef _WIN32
+  #include <unistd.h>     /* gethostname (Windows: via winsock2.h at top) */
+#endif
+
+static void init_agent_id(void)
+{
+    char host[64];
+    if (g_agent_id[0]) return;
+    if (gethostname(host, (int)sizeof(host)) != 0 || !host[0])
+        strcpy(host, "agent");
+    host[sizeof(host) - 1] = '\0';
+    snprintf(g_agent_host, sizeof(g_agent_host), "%s", host);
+    snprintf(g_agent_id, sizeof(g_agent_id), "%s-tmosc-agent", host);
+}
+
+static int post_owner(tm_net *net, const char *path)
+{
+    char body[192], resp[256];
+    int rlen, status = 0, rc;
+    snprintf(body, sizeof(body), "{\"id\":\"%s\",\"host\":\"%s\"}", g_agent_id, g_agent_host);
+    rc = tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    if (g_verbose && rc == 0 && status != 200)
+        fprintf(stderr, "[agent] owner %s [%d]\n", path, status);
+    return rc;
+}
+
 int tm_runner_dryrun(const char *host, int port)
 {
     tm_net dn; dn.fd = -1;
@@ -134,11 +171,12 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
 {
     tm_net net; net.fd = -1;
     tm_clock clock;
-    double last_flush = 0, last_refresh = 0, last_reconnect = 0;
+    double last_flush = 0, last_refresh = 0, last_reconnect = 0, last_heartbeat = 0;
     int connected = 0;
 
     g_verbose = verbose;
     g_stop = 0;
+    init_agent_id();
     tm_clock_init(&clock);
     tm_match_state_init(&g_mstate);
     memset(g_dirty, 0, sizeof(g_dirty));
@@ -194,10 +232,21 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
             last_refresh = t;
             if (load_bindings(&net) != 0) connected = 0;
         }
+        if (connected && t - last_heartbeat >= HEARTBEAT_MS) {
+            last_heartbeat = t;
+            if (post_owner(&net, "/api/midi/owner/heartbeat") != 0) connected = 0;
+        }
         if (!connected) tm_net_close(&net);
     }
 
     fprintf(stderr, "[agent] shutting down\n");
+    /* best-effort release so the browser reclaims MIDI immediately (fresh
+     * connection: the main one may be mid-failure at shutdown). */
+    if (g_agent_id[0]) {
+        tm_net rn; rn.fd = -1;
+        if (tm_net_connect(&rn, host, port) == 0) post_owner(&rn, "/api/midi/owner/release");
+        tm_net_close(&rn);
+    }
     tm_net_close(&net);
     return 0;
 }

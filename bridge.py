@@ -165,6 +165,8 @@ class TotalMixOSCBridge:
         self.duck = None                    # DuckSupervisor — sidechain engine
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
         self.last_probe = None              # result of the last device liveness probe
+        self._midi_owner = None             # {"id","host","last_seen"} — external agent (tray) holding the MIDI port
+        self._midi_owner_lock = threading.Lock()  # coexistence: browser yields Web MIDI while an agent owns it
         self.sweep_state = {"status": "idle"}      # physical-table sweep job state (#24)
         # Live-vs-map freshness verdict (None = unknown). A stale map after
         # a snapshot change refused correctly but looked like a dead server
@@ -210,6 +212,72 @@ class TotalMixOSCBridge:
                     "macro_event": macro_event,
                 }
                 await client.send_json(state)
+            except Exception:
+                if client in ws_clients:
+                    ws_clients.remove(client)
+
+    # ─────────────────────────────────────────────────────────────
+    # MIDI OWNERSHIP (coexistence): a tray/agent announces it holds the
+    # physical MIDI port via a heartbeat. The browser yields Web MIDI
+    # while an agent owns it (WinMM inputs are exclusive) and reclaims
+    # when the agent leaves. Presence is advisory and TTL-expired.
+    # ─────────────────────────────────────────────────────────────
+    MIDI_OWNER_TTL_S = 6.0
+
+    def midi_owner_state(self):
+        """Current MIDI owner, or None if no heartbeat within the TTL."""
+        with self._midi_owner_lock:
+            o = self._midi_owner
+            if not o:
+                return None
+            age = time.time() - o["last_seen"]
+            if age > self.MIDI_OWNER_TTL_S:
+                return None
+            return {"id": o["id"], "host": o.get("host"), "age_s": round(age, 2)}
+
+    def midi_owner_heartbeat(self, owner_id, host=None):
+        """An agent announces it is handling MIDI. Refreshes presence; on a
+        NEW claim (none/expired -> owned, or a different owner) broadcasts a
+        midi_owner event so browsers yield promptly."""
+        now = time.time()
+        with self._midi_owner_lock:
+            prev = self._midi_owner
+            was_active = bool(prev) and (now - prev["last_seen"] <= self.MIDI_OWNER_TTL_S)
+            new_claim = (not was_active) or (prev is not None and prev["id"] != owner_id)
+            self._midi_owner = {"id": owner_id, "host": host, "last_seen": now}
+        if new_claim:
+            self.broadcast_midi_owner(self.midi_owner_state())
+        return self.midi_owner_state()
+
+    def midi_owner_release(self, owner_id):
+        """An agent cleanly releases the port (shutdown). Clears presence and
+        broadcasts so browsers reclaim MIDI immediately."""
+        with self._midi_owner_lock:
+            released = bool(self._midi_owner) and self._midi_owner["id"] == owner_id
+            if released:
+                self._midi_owner = None
+        if released:
+            self.broadcast_midi_owner(None)
+        return released
+
+    def broadcast_midi_owner(self, owner):
+        """Push a typed midi_owner event to all WS clients (thread-safe)."""
+        event = {"type": "midi_owner", "owner": owner}
+        try:
+            asyncio.get_running_loop()
+            asyncio.create_task(self._do_broadcast_event(event))
+        except RuntimeError:
+            if getattr(self, "main_loop", None) is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(self._do_broadcast_event(event), self.main_loop)
+                except Exception as e:
+                    logger.debug(f"midi_owner broadcast skipped: {e}")
+
+    async def _do_broadcast_event(self, event):
+        """Broadcast an arbitrary typed event dict (has a top-level 'type')."""
+        for client in list(ws_clients):
+            try:
+                await client.send_json(event)
             except Exception:
                 if client in ws_clients:
                     ws_clients.remove(client)
