@@ -1,0 +1,110 @@
+name: agent-release
+
+# Builds the signed Windows installer (Inno Setup) with the config wizard and,
+# on a version tag, publishes it as a GitHub Release.
+#   - tag  agent-v1.2.3  -> build, sign, create Release v1.2.3 with the installer
+#   - manual dispatch    -> build + sign + upload artifact (no Release)
+on:
+  push:
+    tags: ['agent-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, e.g. 0.3.0'
+        required: true
+        default: '0.3.0'
+
+permissions:
+  contents: write   # gh release create
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    env:
+      # surfaced so the sign steps can gate on env.AZURE_CLIENT_ID != ''
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version
+        id: ver
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag') { $v = '${{ github.ref_name }}' -replace '^agent-v','' }
+          else { $v = '${{ inputs.version }}' }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build (static CRT) + test
+        run: |
+          cmake -S agent -B agent/build
+          cmake --build agent/build --config Release
+          ctest --test-dir agent/build -C Release --output-on-failure
+
+      - name: Stage exes next to the installer script
+        shell: pwsh
+        run: |
+          Copy-Item agent/build/Release/tmosc-agent.exe      agent/windows/ -Force
+          Copy-Item agent/build/Release/tmosc-agent-tray.exe agent/windows/ -Force
+
+      - name: Sign the exes (Azure Trusted Signing)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\agent\windows
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        working-directory: agent/windows
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer.iss'
+
+      - name: Sign the installer (Azure Trusted Signing)
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\agent\windows\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Name the installer with its version
+        id: pkg
+        shell: pwsh
+        run: |
+          $name = "tmosc-agent-setup-${{ steps.ver.outputs.version }}.exe"
+          Rename-Item agent/windows/dist/tmosc-agent-setup.exe $name
+          "file=agent/windows/dist/$name" >> $env:GITHUB_OUTPUT
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmosc-agent-installer
+          path: ${{ steps.pkg.outputs.file }}
+
+      - name: Publish GitHub Release (tags only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" "${{ steps.pkg.outputs.file }}" `
+            --title "TotalMix OSC Agent ${{ steps.ver.outputs.version }}" `
+            --notes "Signed Windows installer for the background MIDI tray agent. Run it, follow the wizard (bridge address + MIDI controller), done. No dependencies — static CRT, no VC++ redist needed."

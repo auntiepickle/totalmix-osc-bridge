@@ -1,0 +1,6 @@
+# Build + packaging artifacts (produced in CI, never committed)
+build/
+out/
+windows/tmosc-agent.exe
+windows/tmosc-agent-tray.exe
+windows/dist/

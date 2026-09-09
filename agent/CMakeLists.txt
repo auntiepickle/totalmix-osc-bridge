@@ -5,7 +5,7 @@
 # platform     : Linux (ALSA) or Windows (WinMM) MIDI backend + entry point
 #
 #   cmake -S agent -B agent/build && cmake --build agent/build && ctest --test-dir agent/build
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)   # 3.15 => CMP0091 NEW, for CMAKE_MSVC_RUNTIME_LIBRARY
 project(tmosc_agent C)
 
 set(CMAKE_C_STANDARD 99)
@@ -15,6 +15,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 if(MSVC)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+  # Static CRT: the exes then run on a clean Windows box with NO Visual C++
+  # redistributable (no vcruntime140.dll dependency) — copy-and-run.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 # --- portable core (the base) ---------------------------------------------
