@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — 2026-09-09 · Windows installer: Client / Server / Both
+
+- **One signed Windows installer** (`tmosc-setup-<version>.exe`, built by
+  `.github/workflows/release.yml` on a `v*` tag): pick **Client** (the tray
+  MIDI agent), **Server** (the bridge as a standalone exe - no Python, no
+  Docker) or **Both**. The server pages ask for TotalMix's IP, OSC ports,
+  transport and optional MQTT and write `%APPDATA%\tmosc-bridge\config.env`;
+  the client page keeps the LAN auto-discovery + MIDI-input picker. Answers
+  are read back on upgrade. Elevated installs open the firewall for the
+  bridge; the Start Menu gets a Web UI link.
+- **Frozen bridge** (`bridge_main.py`, `tmosc-bridge.spec`, PyInstaller
+  onedir, trimmed `requirements-frozen.txt`): the same FastAPI app
+  in-process, every binary in the folder Authenticode-signed, smoke-tested
+  in CI (`tools/smoke_frozen.ps1`: health, template fallback, static UI,
+  state write, WebSocket). Also shipped as a bare zip.
+- **`app_paths.py`**: live state (config JSON, backups, logs) vs. shipped
+  resources is now explicit. From source and in Docker nothing moves (repo
+  root, as before); the frozen build keeps state per-user in
+  `%APPDATA%\tmosc-bridge` and loads `config.env` at startup (real env
+  wins). `TMOSC_DATA_DIR` overrides.
+- `ENABLE_MQTT=false` runs the bridge without a broker (the installer writes
+  it when the MQTT page is left blank).
+
 ## Unreleased — 2026-08-24 · MODUL: the instrument layout
 
 - New **MODUL** design (gear menu → Design → Modul): not a repaint — the one

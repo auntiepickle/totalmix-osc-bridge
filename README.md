@@ -81,6 +81,18 @@ docker compose logs -f
 
 HTTPS is required for Web MIDI on a real IP. See [docs/setup.md](docs/setup.md#https).
 
+### Option C: Windows installer (no Python, no Docker)
+
+Download `tmosc-setup-<version>.exe` from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases) and pick what this PC should be:
+
+| Choice | What you get |
+|---|---|
+| **Client** | the signed tray MIDI agent; the wizard finds the bridge on your LAN and lists your MIDI inputs |
+| **Server** | the bridge as a standalone exe; the wizard asks for TotalMix's IP, ports, transport and optional MQTT and writes `%APPDATA%\tmosc-bridge\config.env` |
+| **Both** | the single-PC studio: TotalMix, bridge and controller on one machine |
+
+Everything is Authenticode-signed. Server state (your `mappings.json`, channel/snapshot maps, backups, logs) lives in `%APPDATA%\tmosc-bridge`, and the Start Menu gets a "TotalMix OSC Web UI" link. Details in [docs/setup.md](docs/setup.md#windows-installer).
+
 ---
 
 ## Config files
@@ -91,7 +103,7 @@ HTTPS is required for Web MIDI on a real IP. See [docs/setup.md](docs/setup.md#h
 | `ufx2_snapshot_map.json` | Workspace names to TotalMix Quick Select slots and snapshot names |
 | `ufx2_channel_map.json` | OSC address to human name map for routing labels on cards |
 
-All three have `*.example.json` counterparts. The real files are git-ignored so live edits survive `git pull`. Full schema in [docs/config.md](docs/config.md).
+All three have `*.example.json` counterparts. The real files are git-ignored so live edits survive `git pull`; the Windows installer build keeps them in `%APPDATA%\tmosc-bridge` instead (`app_paths.py`). Full schema in [docs/config.md](docs/config.md).
 
 ---
 

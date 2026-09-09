@@ -10,7 +10,7 @@ One rule, two modes - live STATE lives in ``data_dir()``, shipped RESOURCES
 
 * FROZEN (the PyInstaller Windows exe, ``sys.frozen`` set): the install
   folder is replaced on every upgrade and may be read-only, so live state
-  moves to a per-user writable dir - ``%APPDATA%\tmosc-bridge`` on Windows
+  moves to a per-user writable dir - ``%APPDATA%/tmosc-bridge`` on Windows
   (XDG / Library equivalents elsewhere). The bundled ``*.example.json``
   templates stay read-only inside the bundle and remain the startup
   fallbacks / "init from example" sources, same as today.

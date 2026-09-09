@@ -101,9 +101,10 @@ the browser, with no browser.
 
 ## Install (Windows)
 
-Grab the signed installer from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases)
-(`tmosc-agent-setup-*.exe`, Authenticode-signed — no "unknown publisher"
-warning), run it, and follow the wizard: it **auto-detects the bridge on your
+Grab the signed installer from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases):
+`tmosc-setup-*.exe` (choose **Client**, or **Both** if this PC also hosts the
+bridge) or the client-only `tmosc-agent-setup-*.exe`. Both are
+Authenticode-signed (no "unknown publisher" warning). Run it and follow the wizard: it **auto-detects the bridge on your
 LAN**, lists your MIDI inputs to pick from, and offers "start with Windows".
 Done. The exe is fully standalone (static CRT — no Visual C++ redistributable).
 
@@ -126,7 +127,7 @@ retries and grabs it once free).
 - [x] Real tray icon + status states, start-on-login, LAN auto-discovery
 - [x] Signed (Azure Trusted Signing) + one-click Inno Setup installer with a
       configuration wizard; standalone exe (static CRT)
-- [ ] Frozen bridge exe + unified Client/Server/Both installer (in progress)
+- [x] Frozen bridge exe (PyInstaller, signed) + unified Client/Server/Both installer
 - [ ] WebSocket knob fast-path (measured unnecessary — HTTP is ~1.8ms on LAN)
 
 ## Build from source

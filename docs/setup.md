@@ -1,6 +1,38 @@
 # Setup
 
-Two ways to run the bridge: local Python on any machine that has TotalMix, or Docker for an always-on server. MQTT is optional in both cases.
+Three ways to run the bridge: the Windows installer (no Python, no Docker), local Python on any machine that has TotalMix, or Docker for an always-on server. MQTT is optional in every case.
+
+---
+
+## Windows installer
+
+The signed `tmosc-setup-<version>.exe` from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases) installs the tray MIDI agent (**Client**), the bridge as a standalone exe (**Server**), or **Both**. Per-user by default (no admin needed).
+
+**Server wizard pages** - the answers become `%APPDATA%\tmosc-bridge\config.env` (plain `KEY=VALUE`; edit any time and restart the bridge to apply; an upgrade reads the values back into the wizard):
+
+| Field | `config.env` key | Default |
+|---|---|---|
+| IP of the PC running TotalMix FX | `OSC_IP` | `127.0.0.1` |
+| TotalMix "Port incoming" / "Port outgoing" | `OSC_PORT` / `OSC_LISTEN_PORT` | `7001` / `9001` |
+| Web UI port | `WEB_PORT` | `8088` |
+| OSC transport | `OSC_TRANSPORT` (plus `GLOBAL_OSC_*` for global) | `classic` |
+| MQTT broker (blank = off) | `MQTT_BROKER`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASS`, `ENABLE_MQTT` | off |
+
+Where things live:
+
+| What | Where |
+|---|---|
+| Program | `%LOCALAPPDATA%\Programs\TotalMix OSC\bridge\` (per-user) or `C:\Program Files\TotalMix OSC\bridge\` (elevated) |
+| State: `mappings.json`, `ufx2_channel_map.json`, `ufx2_snapshot_map.json`, `backups\`, `bridge.log`, `config.env` | `%APPDATA%\tmosc-bridge\` |
+| Templates (`*.example.json`) and the web UI | inside the program folder (`_internal\`), read-only; "Init from example" in the UI copies a template into the state dir |
+
+Notes:
+
+- The bridge runs as a minimized console window (Start Menu "TotalMix OSC Bridge"; the "start when I sign in" task adds it to Startup). Close the window to stop it.
+- Windows Firewall: an elevated install adds an inbound rule for the bridge. A per-user install gets Windows' allow/deny prompt the first time the bridge listens - allow it if other machines should reach the web UI or TotalMix runs on another PC; localhost works either way.
+- TotalMix itself is configured exactly as for any other install: OSC "Port incoming" `7001`, "Port outgoing" `9001`, remote IP = the bridge PC. See [TotalMix OSC configuration](#totalmix-osc-configuration-the-canonical-client-setup).
+- `tmosc-bridge.exe --data-dir` prints the state dir, `--version` the build; `TMOSC_DATA_DIR` overrides the state dir.
+- Portable use: the release also ships `tmosc-bridge-<version>-win64.zip`, the bare program folder. Unzip anywhere and run `tmosc-bridge.exe`; drop a `config.env` into `%APPDATA%\tmosc-bridge` or set the variables in the environment.
 
 ---
 
@@ -56,12 +88,13 @@ Only `OSC_IP` is required. Everything else has a default or is safe to omit.
 | `OSC_IP` | required | IP of the machine running TotalMix |
 | `OSC_PORT` | `7001` | TotalMix OSC receive port |
 | `WEB_PORT` | `8088` | Internal HTTP port proxied by Caddy |
+| `ENABLE_MQTT` | `true` | `false` runs without a broker (web UI / MIDI / REST only) |
 | `MQTT_BROKER` | unset | Hostname or IP of your MQTT broker. Omit to disable MQTT. |
 | `MQTT_PORT` | `1883` | MQTT port |
 | `MQTT_USER` | unset | MQTT username |
 | `MQTT_PASS` | unset | MQTT password |
 | `ENABLE_OSC_MONITOR` | `false` | Set to `true` to log incoming OSC from TotalMix |
-| `BRIDGE_LOG_FILE` | `bridge.log` | Path for the rotating log |
+| `BRIDGE_LOG_FILE` | `bridge.log` | Path for the rotating log (default lives in the state dir: repo root from source, `%APPDATA%\tmosc-bridge` when installed) |
 | `OSC_MONITOR_PORT` | `9001` | UDP port for the OSC listener |
 | `OSC_TRANSPORT` | `classic` | `global` = write via Global OSC (TotalMix 2.1+, **the standard**) |
 | `GLOBAL_OSC_IP` | `OSC_IP` | TotalMix host for the Global remote |
