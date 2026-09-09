@@ -16,6 +16,7 @@
 
 #include "runner.h"
 #include "midi_win.h"
+#include "net.h"
 #include "resource.h"
 
 #define WM_TRAY      (WM_APP + 1)
@@ -110,6 +111,8 @@ static void load_config(void)
             fclose(f);
         }
     }
+    /* host=auto (or blank) -> discover the bridge on the LAN at runtime */
+    if (strcmp(g_host, "auto") == 0) g_host[0] = '\0';
     snprintf(g_url, sizeof(g_url), "http://%s:%d", g_host, g_port);
 
     /* Secure client for Web MIDI: an explicit https_url wins; otherwise use the
@@ -140,10 +143,24 @@ static DWORD WINAPI worker(LPVOID arg)
      * ~3s and reflect the state in the tray icon so the user can see it. */
     while (!g_quit) {
         char resolved[64];
+        char found[64];
         const char *q = g_midi[0] ? g_midi : NULL;
         tm_midi_win *m = NULL;
         tm_midi_src src;
         int i;
+
+        /* host=auto (blank): find the bridge on the LAN before doing anything */
+        if (g_host[0] == '\0') {
+            if (tm_net_discover(g_port, found, (int)sizeof(found)) == 0) {
+                set_str(g_host, sizeof(g_host), found);
+                snprintf(g_url, sizeof(g_url), "http://%s:%d", g_host, g_port);
+            } else {
+                PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);
+                for (i = 0; i < 30 && !g_quit; i++) Sleep(100);   /* ~3s, then re-scan */
+                continue;
+            }
+        }
+
         if (tm_midi_win_resolve(q, resolved, sizeof(resolved)) != 0
             || (m = tm_midi_win_open(resolved)) == NULL) {
             PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);

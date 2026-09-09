@@ -12,6 +12,7 @@
 #include "tmosc_midi.h"
 #include "runner.h"
 #include "midi_win.h"
+#include "net.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +58,14 @@ int main(int argc, char **argv)
         const char *h = argc > 2 ? argv[2] : (host ? host : "127.0.0.1");
         const char *ps = argc > 3 ? argv[3] : (ports ? ports : "8088");
         return tm_runner_dryrun(h, atoi(ps));
+    }
+    if (argc > 1 && strcmp(argv[1], "--discover") == 0) {
+        /* auto-find the bridge on the LAN; prints its IP (used by the installer). */
+        int dp = argc > 2 ? atoi(argv[2]) : (ports ? atoi(ports) : 8088);
+        char found[64];
+        if (tm_net_discover(dp, found, (int)sizeof(found)) == 0) { printf("%s\n", found); return 0; }
+        fprintf(stderr, "no TotalMix OSC bridge found on the LAN\n");
+        return 1;
     }
 
     if (argc > 1) host = argv[1];

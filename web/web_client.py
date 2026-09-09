@@ -1136,4 +1136,9 @@ async def startup_event():
     bridge.start_osc_listener()
     bridge.start_global_osc()   # #25: no-op unless enabled via env
     bridge.main_loop = asyncio.get_running_loop()
+    try:
+        import discovery
+        discovery.start(WEB_PORT, int(os.getenv("DISCOVERY_PORT", WEB_PORT)))
+    except Exception as e:
+        logger.warning(f"discovery responder not started: {e}")
     print(f"🚀 TotalMix Web Client + Bridge started (port {WEB_PORT}) — MQTT ACTIVE")

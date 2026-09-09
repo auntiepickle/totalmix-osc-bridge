@@ -21,6 +21,7 @@
   #include <sys/socket.h>
   #include <netinet/in.h>
   #include <netinet/tcp.h>
+  #include <arpa/inet.h>
   #include <netdb.h>
   typedef int sock_t;
   #define SOCK_BAD  (-1)
@@ -68,6 +69,53 @@ int tm_net_connect(tm_net *n, const char *host, int port)
     { int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, SOCKOPT_CAST &one, sizeof(one)); }
     n->fd = (intptr_t)fd;
     return 0;
+}
+
+int tm_net_discover(int port, char *host_out, int host_cap)
+{
+    sock_t fd;
+    struct sockaddr_in dst;
+    const char *req = "TMOSC-DISCOVER?";
+    int one = 1, attempt, got = -1;
+#ifdef _WIN32
+    DWORD tv = 800;   /* ms */
+#else
+    struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 800000;
+#endif
+    if (host_cap < 8) return -1;
+    net_startup();
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd == SOCK_BAD) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_BROADCAST, SOCKOPT_CAST &one, sizeof(one));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, SOCKOPT_CAST &tv, sizeof(tv));
+
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons((unsigned short)port);
+    dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);   /* 255.255.255.255 */
+
+    for (attempt = 0; attempt < 3 && got != 0; attempt++) {
+        char buf[64];
+        struct sockaddr_in src;
+        int n;
+#ifdef _WIN32
+        int slen = (int)sizeof(src);
+#else
+        socklen_t slen = sizeof(src);
+#endif
+        sendto(fd, req, (int)strlen(req), 0, (struct sockaddr *)&dst, sizeof(dst));
+        for (;;) {
+            slen = sizeof(src);
+            n = (int)recvfrom(fd, buf, sizeof(buf) - 1, 0, (struct sockaddr *)&src, &slen);
+            if (n <= 0) break;   /* timeout -> retry */
+            buf[n] = '\0';
+            if (strncmp(buf, "TMOSC-BRIDGE", 12) == 0) {
+                if (inet_ntop(AF_INET, &src.sin_addr, host_out, host_cap)) { got = 0; break; }
+            }
+        }
+    }
+    sock_close(fd);
+    return got;
 }
 
 static int write_all(sock_t fd, const char *buf, int len)

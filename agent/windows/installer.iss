@@ -88,6 +88,25 @@ begin
   MidiCombo.ItemIndex := 0;
 end;
 
+function DiscoverHost: String;
+var
+  ExeTmp, OutFile: String;
+  Lines: TArrayOfString;
+  code: Integer;
+begin
+  Result := '';
+  try
+    ExtractTemporaryFile('{#ExeConsole}');
+    ExeTmp := ExpandConstant('{tmp}\{#ExeConsole}');
+    OutFile := ExpandConstant('{tmp}\disc.txt');
+    if Exec(ExpandConstant('{cmd}'), '/C ""' + ExeTmp + '" --discover > "' + OutFile + '" 2>nul"',
+            '', SW_HIDE, ewWaitUntilTerminated, code) then
+      if (code = 0) and LoadStringsFromFile(OutFile, Lines) and (GetArrayLength(Lines) > 0) then
+        Result := Trim(Lines[0]);
+  except
+  end;
+end;
+
 procedure AddLabel(ACaption: String; ATop: Integer);
 var
   L: TNewStaticText;
@@ -100,11 +119,13 @@ begin
 end;
 
 procedure InitializeWizard;
+var
+  Found: String;
 begin
   Page := CreateCustomPage(wpSelectDir, 'Bridge connection',
     'Point the agent at your TotalMix OSC bridge and pick the MIDI controller on this PC.');
 
-  AddLabel('Bridge host or IP:', 0);
+  AddLabel('Bridge host or IP (auto-detected if the bridge is running):', 0);
   EditHost := TNewEdit.Create(Page);
   EditHost.Parent := Page.Surface;
   EditHost.Top := 16; EditHost.Width := Page.SurfaceWidth;
@@ -129,6 +150,8 @@ begin
   EditHttps.Text := '';
 
   PopulateMidi;
+  Found := DiscoverHost;                     // auto-find the bridge on the LAN
+  if Found <> '' then EditHost.Text := Found;
 end;
 
 function MidiValue: String;
