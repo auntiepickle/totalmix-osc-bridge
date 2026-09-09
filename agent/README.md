@@ -123,4 +123,13 @@ agent\build\Release\tmosc-agent-tray.exe            REM tray app (reads config b
 host=192.168.1.41
 port=8088
 midi=U6MIDI
+# optional — the secure client the tray's "Open Web UI - HTTPS" menu opens.
+# Defaults to the documented Caddy/nip.io URL for an IPv4 host
+# (https://192.168.1.41.nip.io); set explicitly if your HTTPS front differs.
+#https_url=https://mixer.example.com
 ```
+
+The tray menu offers **Open Web UI** (plain HTTP) and **Open Web UI - HTTPS**.
+Use HTTPS when you want the browser itself to do Web MIDI (it needs a secure
+context on a real IP — see [docs/setup.md](../docs/setup.md#https)); with the
+tray handling MIDI, plain HTTP is fine for monitoring.

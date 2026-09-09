@@ -20,7 +20,8 @@
 
 #define WM_TRAY      (WM_APP + 1)
 #define WM_SETSTATUS (WM_APP + 2)   /* worker -> UI thread; wParam = ST_* */
-#define ID_OPEN    1001
+#define ID_OPEN       1001
+#define ID_OPEN_HTTPS 1004
 #define ID_QUIT    1002
 #define ID_STARTUP 1003
 
@@ -64,6 +65,7 @@ static char   g_host[128] = "127.0.0.1";
 static int    g_port = 8088;
 static char   g_midi[80] = "";
 static char   g_url[192];
+static char   g_https_url[192];     /* secure client (Web MIDI): Caddy/nip.io or explicit https_url */
 static volatile int g_quit = 0;     /* tray shutting down: stop the worker retry loop */
 static HICON  g_ico_ok, g_ico_err;  /* preloaded small icons for the two states */
 
@@ -79,10 +81,12 @@ static void load_config(void)
     const char *h = getenv("TMOSC_BRIDGE_HOST");
     const char *p = getenv("TMOSC_BRIDGE_PORT");
     const char *m = getenv("TMOSC_MIDI");
+    const char *s = getenv("TMOSC_HTTPS_URL");
     const char *ad;
     if (h) set_str(g_host, sizeof(g_host), h);
     if (p) g_port = atoi(p);
     if (m) set_str(g_midi, sizeof(g_midi), m);
+    if (s) set_str(g_https_url, sizeof(g_https_url), s);
 
     ad = getenv("APPDATA");
     if (ad) {
@@ -101,11 +105,28 @@ static void load_config(void)
                 if      (!strcmp(k, "host")) set_str(g_host, sizeof(g_host), v);
                 else if (!strcmp(k, "port")) g_port = atoi(v);
                 else if (!strcmp(k, "midi")) set_str(g_midi, sizeof(g_midi), v);
+                else if (!strcmp(k, "https_url")) set_str(g_https_url, sizeof(g_https_url), v);
             }
             fclose(f);
         }
     }
     snprintf(g_url, sizeof(g_url), "http://%s:%d", g_host, g_port);
+
+    /* Secure client for Web MIDI: an explicit https_url wins; otherwise use the
+     * documented Caddy/nip.io default for an IPv4 host (https://<ip>.nip.io),
+     * else best-effort https://<host>. */
+    if (!g_https_url[0]) {
+        int dots = 0, ipish = 1;
+        const char *c;
+        for (c = g_host; *c; c++) {
+            if (*c == '.') dots++;
+            else if (*c < '0' || *c > '9') { ipish = 0; break; }
+        }
+        if (ipish && dots == 3)
+            snprintf(g_https_url, sizeof(g_https_url), "https://%s.nip.io", g_host);
+        else
+            snprintf(g_https_url, sizeof(g_https_url), "https://%s", g_host);
+    }
 }
 
 static int  win_read(void *ctx, tm_midi_msg *out, int max) { return tm_midi_win_read((tm_midi_win *)ctx, out, max); }
@@ -151,6 +172,8 @@ static void show_menu(HWND hwnd)
     GetCursorPos(&pt);
     snprintf(item, sizeof(item), "Open Web UI  (%s)", g_url);
     AppendMenuA(menu, MF_STRING, ID_OPEN, item);
+    snprintf(item, sizeof(item), "Open Web UI - HTTPS  (%s)", g_https_url);
+    AppendMenuA(menu, MF_STRING, ID_OPEN_HTTPS, item);
     AppendMenuA(menu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(menu, MF_STRING | (startup_enabled() ? MF_CHECKED : 0),
                 ID_STARTUP, "Start with Windows");
@@ -182,6 +205,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         case WM_COMMAND:
             if (LOWORD(wp) == ID_OPEN) ShellExecuteA(NULL, "open", g_url, NULL, NULL, SW_SHOWNORMAL);
+            else if (LOWORD(wp) == ID_OPEN_HTTPS) ShellExecuteA(NULL, "open", g_https_url, NULL, NULL, SW_SHOWNORMAL);
             else if (LOWORD(wp) == ID_STARTUP) startup_toggle();
             else if (LOWORD(wp) == ID_QUIT) DestroyWindow(hwnd);
             return 0;
