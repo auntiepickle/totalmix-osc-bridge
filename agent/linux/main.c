@@ -7,8 +7,10 @@
  * controller plugs into (a server, a Pi, a PoE box).
  *
  * Config (env or argv):  TMOSC_BRIDGE_HOST TMOSC_BRIDGE_PORT TMOSC_MIDI
- *   argv:  tmosc-agent [host] [port] [midi-device]
- * Defaults: 127.0.0.1  8088  hw:1,0   (find the device with `amidi -l`)
+ *   argv:  tmosc-agent [host] [port] [midi-device]   |   tmosc-agent --list
+ * TMOSC_MIDI accepts an ALSA id ("hw:1,0") OR a case-insensitive name
+ * substring ("U6MIDI"); unset picks the first MIDI input. `--list` prints the
+ * available inputs and exits.
  */
 #define _POSIX_C_SOURCE 200809L
 #include "tmosc_midi.h"
@@ -104,12 +106,21 @@ int main(int argc, char **argv)
     double last_flush = 0, last_refresh = 0, last_reconnect = 0;
     int connected = 0;
 
+    /* --list: print available MIDI inputs and exit */
+    if (argc > 1 && strcmp(argv[1], "--list") == 0) {
+        tm_midi_port pl[32];
+        int c = tm_midi_alsa_list(pl, 32), i;
+        if (c <= 0) { fprintf(stderr, "no MIDI input ports found\n"); return 1; }
+        printf("MIDI input ports:\n");
+        for (i = 0; i < c; i++) printf("  %-10s  %s\n", pl[i].port, pl[i].name);
+        return 0;
+    }
+
     if (argc > 1) host = argv[1];
     if (argc > 2) ports = argv[2];
     if (argc > 3) mididev = argv[3];
     if (!host) host = "127.0.0.1";
     if (!ports) ports = "8088";
-    if (!mididev) mididev = "hw:1,0";
     port = atoi(ports);
 
     signal(SIGINT, on_signal);
@@ -121,12 +132,26 @@ int main(int argc, char **argv)
     tm_match_state_init(&g_mstate);
     memset(g_dirty, 0, sizeof(g_dirty));
 
-    midi = tm_midi_alsa_open(mididev);
-    if (!midi) {
-        fprintf(stderr, "[agent] cannot open MIDI '%s' (try `amidi -l`)\n", mididev);
-        return 1;
+    /* resolve the device query (hw:X,Y | name substring | first input) */
+    {
+        char resolved[64];
+        if (tm_midi_alsa_resolve(mididev, resolved, sizeof(resolved)) != 0) {
+            tm_midi_port pl[32];
+            int c = tm_midi_alsa_list(pl, 32), i;
+            fprintf(stderr, "[agent] no MIDI input matched '%s'. Available:\n",
+                    mididev ? mididev : "(first)");
+            for (i = 0; i < c; i++) fprintf(stderr, "    %-10s  %s\n", pl[i].port, pl[i].name);
+            if (c == 0) fprintf(stderr, "    (none — is a controller plugged in?)\n");
+            return 1;
+        }
+        midi = tm_midi_alsa_open(resolved);
+        if (!midi) {
+            fprintf(stderr, "[agent] cannot open MIDI '%s'\n", resolved);
+            return 1;
+        }
+        fprintf(stderr, "[agent] MIDI %s (%s) open; bridge http://%s:%d\n",
+                resolved, mididev ? mididev : "first input", host, port);
     }
-    fprintf(stderr, "[agent] MIDI '%s' open; bridge http://%s:%d\n", mididev, host, port);
 
     while (!g_stop) {
         double t = now_ms();

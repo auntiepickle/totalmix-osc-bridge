@@ -8,8 +8,23 @@
 
 typedef struct tm_midi_alsa tm_midi_alsa;
 
-/* Open the rawmidi input `device` (e.g. "hw:1,0" — find it with `amidi -l`).
- * Returns a handle or NULL. */
+/* A discovered rawmidi INPUT port: its ALSA id ("hw:1,0") and friendly name. */
+typedef struct {
+    char port[24];
+    char name[80];
+} tm_midi_port;
+
+/* Enumerate rawmidi input ports into `out` (up to `max`). Returns the count. */
+int tm_midi_alsa_list(tm_midi_port *out, int max);
+
+/* Resolve a device query to an ALSA port id in `out`:
+ *   - "hw:X,Y" (starts with "hw:") is used verbatim
+ *   - otherwise a case-insensitive SUBSTRING of a port's friendly name
+ *     (e.g. "U6MIDI"); empty/NULL picks the first input port
+ * Returns 0 on success, -1 if nothing matched. */
+int tm_midi_alsa_resolve(const char *query, char *out, int outlen);
+
+/* Open the rawmidi input `device` (an ALSA id like "hw:1,0"). NULL. */
 tm_midi_alsa *tm_midi_alsa_open(const char *device);
 void tm_midi_alsa_close(tm_midi_alsa *m);
 

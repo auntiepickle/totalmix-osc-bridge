@@ -5,10 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Edit these to your bridge and MIDI device (find the device with `amidi -l`).
+# Edit these to your bridge and MIDI device. TMOSC_MIDI takes an ALSA id
+# (hw:1,0), a case-insensitive name substring (U6MIDI), or omit for the first
+# input. List inputs with:  tmosc-agent --list
 Environment=TMOSC_BRIDGE_HOST=192.168.1.41
 Environment=TMOSC_BRIDGE_PORT=8088
-Environment=TMOSC_MIDI=hw:1,0
+Environment=TMOSC_MIDI=U6MIDI
 ExecStart=/usr/local/bin/tmosc-agent
 Restart=always
 RestartSec=2

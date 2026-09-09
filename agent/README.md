@@ -60,10 +60,14 @@ the commands above.
 ```sh
 sudo apt install cmake gcc libasound2-dev
 cmake -S agent -B agent/build && cmake --build agent/build
-amidi -l                              # find your MIDI input, e.g. hw:1,0
-TMOSC_BRIDGE_HOST=192.168.1.41 TMOSC_BRIDGE_PORT=8088 TMOSC_MIDI=hw:1,0 \
+agent/build/tmosc-agent --list        # list MIDI inputs (port + friendly name)
+# pick by NAME substring (no need to memorize hw:X,Y), or omit for the first input:
+TMOSC_BRIDGE_HOST=192.168.1.41 TMOSC_BRIDGE_PORT=8088 TMOSC_MIDI="U6MIDI" \
   agent/build/tmosc-agent
 ```
+
+`TMOSC_MIDI` accepts an ALSA id (`hw:1,0`), a case-insensitive **name
+substring** (`U6MIDI`, `UFX`), or is omitted to use the first input.
 
 No controller handy? Create a virtual MIDI port to test end to end:
 
