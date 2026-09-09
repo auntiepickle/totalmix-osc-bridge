@@ -69,6 +69,13 @@ TMOSC_BRIDGE_HOST=192.168.1.41 TMOSC_BRIDGE_PORT=8088 TMOSC_MIDI="U6MIDI" \
 `TMOSC_MIDI` accepts an ALSA id (`hw:1,0`), a case-insensitive **name
 substring** (`U6MIDI`, `UFX`), or is omitted to use the first input.
 
+Verify without touching the device:
+
+```sh
+agent/build/tmosc-agent --dry-run 192.168.1.41 8088   # print the loaded trigger table, exit
+TMOSC_VERBOSE=1 ... tmosc-agent                        # log each MIDI -> action + HTTP status
+```
+
 No controller handy? Create a virtual MIDI port to test end to end:
 
 ```sh

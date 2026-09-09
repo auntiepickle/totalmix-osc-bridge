@@ -44,6 +44,38 @@ static double now_ms(void)
 
 static tm_bindings   g_bind;
 static tm_match_state g_mstate;
+static int g_verbose = 0;
+
+static const char *trig_type_name(int t)
+{
+    switch (t) {
+        case TM_TRIG_CC: return "cc";
+        case TM_TRIG_CC14: return "cc14";
+        case TM_TRIG_NOTE_ON: return "note_on";
+        case TM_TRIG_NOTE_OFF: return "note_off";
+        case TM_TRIG_PROGRAM_CHANGE: return "pc";
+        case TM_TRIG_PITCH_BEND: return "bend";
+        case TM_TRIG_AFTERTOUCH: return "at";
+        default: return "?";
+    }
+}
+
+static void print_bindings(void)
+{
+    int i, j;
+    printf("loaded %d macro(s):\n", g_bind.mapping.macro_count);
+    for (i = 0; i < g_bind.mapping.macro_count; i++) {
+        const tm_macro *m = &g_bind.macros[i];
+        printf("  %-24s %s\n", tm_bindings_name(&g_bind, i),
+               m->is_knob ? "[knob]" : "[fire]");
+        for (j = 0; j < m->trigger_count; j++) {
+            const tm_trigger *t = &m->triggers[j];
+            printf("      %-8s ch%-2d number=%d note=%d uvap=%d\n",
+                   trig_type_name(t->type), t->channel, t->number, t->note,
+                   t->use_value_as_param);
+        }
+    }
+}
 
 /* pending coalesced knob values, per macro index */
 static float g_pending[TM_MAX_MACROS];
@@ -66,19 +98,25 @@ static int load_bindings(tm_net *net)
 static int post_trigger(tm_net *net, const char *name, float param, int bpm)
 {
     char path[256], body[64], resp[512];
-    int rlen, status;
+    int rlen, status = 0, rc;
     if (tm_proto_trigger_path(path, sizeof(path), name) < 0) return 0;
     if (tm_proto_trigger_body(body, sizeof(body), param, bpm) < 0) return 0;
-    return tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    rc = tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    if (g_verbose) fprintf(stderr, "[agent] fire %-20s param=%.3f bpm=%d [%d]%s\n",
+                           name, param, bpm, status, rc ? " NET-ERR" : "");
+    return rc;
 }
 
 static int post_knob(tm_net *net, const char *name, float value)
 {
     char path[256], body[48], resp[512];
-    int rlen, status;
+    int rlen, status = 0, rc;
     if (tm_proto_knob_path(path, sizeof(path), name) < 0) return 0;
     if (tm_proto_knob_body(body, sizeof(body), value) < 0) return 0;
-    return tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    rc = tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    if (g_verbose) fprintf(stderr, "[agent] knob %-20s <- %.3f [%d]%s\n",
+                           name, value, status, rc ? " NET-ERR" : "");
+    return rc;
 }
 
 /* Flush dirty knob values. Returns 0 ok, -1 if a net error occurred. */
@@ -106,6 +144,8 @@ int main(int argc, char **argv)
     double last_flush = 0, last_refresh = 0, last_reconnect = 0;
     int connected = 0;
 
+    g_verbose = getenv("TMOSC_VERBOSE") != NULL;
+
     /* --list: print available MIDI inputs and exit */
     if (argc > 1 && strcmp(argv[1], "--list") == 0) {
         tm_midi_port pl[32];
@@ -113,6 +153,22 @@ int main(int argc, char **argv)
         if (c <= 0) { fprintf(stderr, "no MIDI input ports found\n"); return 1; }
         printf("MIDI input ports:\n");
         for (i = 0; i < c; i++) printf("  %-10s  %s\n", pl[i].port, pl[i].name);
+        return 0;
+    }
+
+    /* --dry-run [host] [port]: connect, load + print the trigger table, exit.
+     * Proves connectivity and mapping-parse without opening MIDI or writing. */
+    if (argc > 1 && strcmp(argv[1], "--dry-run") == 0) {
+        const char *h = argc > 2 ? argv[2] : (host ? host : "127.0.0.1");
+        const char *ps = argc > 3 ? argv[3] : (ports ? ports : "8088");
+        tm_net dn; dn.fd = -1;
+        if (tm_net_connect(&dn, h, atoi(ps)) != 0) {
+            fprintf(stderr, "cannot connect to bridge http://%s:%s\n", h, ps);
+            return 1;
+        }
+        if (load_bindings(&dn) != 0) { fprintf(stderr, "bindings fetch failed\n"); return 1; }
+        print_bindings();
+        tm_net_close(&dn);
         return 0;
     }
 
@@ -175,11 +231,17 @@ int main(int argc, char **argv)
             }
         }
 
-        /* wait for MIDI or the next flush/refresh deadline */
+        /* wait for MIDI or the next flush/refresh deadline. When knob values
+         * are pending, wake at the flush cadence; when idle, wake slowly (MIDI
+         * still wakes poll immediately either way). */
         {
             struct pollfd pfds[8];
             int nf = tm_midi_alsa_pollfds(midi, pfds, 8);
-            int timeout = KNOB_MIN_MS;
+            int any_pending = 0, k;
+            int timeout;
+            for (k = 0; k < g_bind.mapping.macro_count; k++)
+                if (g_dirty[k]) { any_pending = 1; break; }
+            timeout = any_pending ? KNOB_MIN_MS : 200;
             if (nf < 0) nf = 0;
             (void)poll(pfds, (nfds_t)nf, timeout);
         }
