@@ -100,6 +100,27 @@ the browser, with no browser.
 - [x] Linux daemon: ALSA MIDI in + minimal HTTP client + coalesced knob flush
       + reconnect + periodic bindings refresh; systemd unit
 - [x] Bridge: read-only `GET /api/midi/bindings` (TSV) feed
+- [x] Cross-platform: shared runner + net (POSIX/Winsock); portable core and
+      the whole agent build on Linux (gcc+ALSA) AND Windows (MSVC+WinMM) in CI
+- [x] Windows: console daemon (`tmosc-agent`) + system-tray app
+      (`tmosc-agent-tray`) — sits in the notification area, runs headless, menu
+      opens the web UI; config from `%APPDATA%\tmosc-agent\config.txt` or TMOSC_* env
 - [ ] WebSocket knob fast-path (HTTP is fine on LAN; WS trims overhead later)
-- [ ] Windows tray front-end over the same core (WinMM MIDI, Shell_NotifyIcon)
 - [ ] Learn relay + browser MIDI-yield (web UI Learn while the agent owns MIDI)
+- [ ] A real tray icon (currently the generic app icon) + start-on-login
+
+### Windows
+
+```
+cmake -S agent -B agent\build           && cmake --build agent\build --config Release
+agent\build\Release\tmosc-agent.exe --list          REM list MIDI inputs
+agent\build\Release\tmosc-agent-tray.exe            REM tray app (reads config below)
+```
+
+`%APPDATA%\tmosc-agent\config.txt`:
+
+```
+host=192.168.1.41
+port=8088
+midi=U6MIDI
+```
