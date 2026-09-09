@@ -197,6 +197,17 @@ int tm_runner_dryrun(const char *host, int port)
     return 0;
 }
 
+int tm_runner_announce(const char *host, int port)
+{
+    tm_net n; int rc;
+    n.fd = -1;
+    init_agent_id();
+    if (tm_net_connect(&n, host, port) != 0) { tm_net_close(&n); return -1; }
+    rc = post_owner(&n, "/api/midi/owner/heartbeat");
+    tm_net_close(&n);
+    return rc;
+}
+
 int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int verbose)
 {
     tm_net net; net.fd = -1;

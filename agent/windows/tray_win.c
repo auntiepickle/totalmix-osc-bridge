@@ -126,6 +126,10 @@ static DWORD WINAPI worker(LPVOID arg)
         if (tm_midi_win_resolve(q, resolved, sizeof(resolved)) != 0
             || (m = tm_midi_win_open(resolved)) == NULL) {
             PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);
+            /* Announce ownership even though we don't hold the device yet: the
+             * bridge marks us present and a browser yields its Web MIDI (closing
+             * the port), so the next open can succeed. */
+            tm_runner_announce(g_host, g_port);
             for (i = 0; i < 30 && !g_quit; i++) Sleep(100);  /* ~3s, wake fast on quit */
             continue;
         }
