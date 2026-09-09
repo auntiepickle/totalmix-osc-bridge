@@ -1,0 +1,27 @@
+name: agent-core
+
+# Builds and tests the portable native core (agent/core) on every push.
+# Ubuntu here stands in for the Raspberry Pi / Linux target; the core is
+# freestanding C99 so a green build is a portability signal, not a full matrix.
+on:
+  push:
+    branches: [main]
+    paths: ['agent/**', '.github/workflows/agent.yml']
+  pull_request:
+    paths: ['agent/**', '.github/workflows/agent.yml']
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    name: cmake build + ctest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake gcc
+      - name: Configure
+        run: cmake -S agent -B agent/build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build agent/build
+      - name: Test
+        run: ctest --test-dir agent/build --output-on-failure
