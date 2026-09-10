@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-09-09 · Repo restructure (#27)
 
+- Dependencies: `mido[rtmidi]` dropped from `requirements.txt` (nothing in the
+  server imports it - MIDI enters through the browser or the tray agent), and
+  with it the `libasound2-dev` build package in the Dockerfile and CI. Smaller
+  image, faster builds; takes effect at the next `docker compose build`.
 - **docs/known-limitations.md rewritten (#34)**: only limitations that are
   still true under the Global-first design, each as constraint, consequence
   and workaround, grouped into protocol limits, design decisions, unmeasured
