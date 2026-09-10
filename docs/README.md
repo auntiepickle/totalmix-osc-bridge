@@ -16,4 +16,5 @@ three ways to install it.
 | [../CHANGELOG.md](../CHANGELOG.md) | What changed and why, newest first |
 
 `history/` keeps dated snapshots (the 2026-08-27 critical review, the
-simplification notes) for the record; they are not maintained.
+simplification notes, the August known-limitations notes) for the record;
+they are not maintained.

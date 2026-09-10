@@ -2,6 +2,11 @@
 
 ## Unreleased — 2026-09-09 · Repo restructure (#27)
 
+- **docs/known-limitations.md rewritten (#34)**: only limitations that are
+  still true under the Global-first design, each as constraint, consequence
+  and workaround, grouped into protocol limits, design decisions, unmeasured
+  hardware paths and device quirks. The August notes moved to
+  `docs/history/`.
 - **Detail drawer (#31)**: a card's DETAILS and its editor open in a drawer
   instead of a narrow column inside the card - a right-side panel on
   desktop that leaves the grid usable (another card's DETAILS swaps the

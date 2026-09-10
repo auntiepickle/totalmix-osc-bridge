@@ -1,80 +1,89 @@
 # Known limitations
 
-Honest edges, kept so nobody re-discovers them. Most entries date from the
-classic-transport era; with Global OSC as the standard some only apply to the
-remaining classic paths (workspace/snapshot switching, sweep, probe).
+What the bridge cannot do, why, and what to do instead. Each entry names the
+constraint, its consequence, and the workaround where one exists. Entries that
+only bite on the legacy classic transport say so. The August 2026 notes this
+page replaces are archived in
+[history/known-limitations-2026-08.md](history/known-limitations-2026-08.md).
 
-## Hardware-untested branches
-- **Page-2 silence refusal** ("no page-2 dump followed the row-mirror
-  nudge"): needs a dead device to exercise; unit-tested only. If it fires
-  in the wild, apply the freeze protocol — first question is whether the
-  rack is powered.
-- **Ramp/LFO mid-run trajectories**: park values are hardware-verified;
-  the in-flight shape can't be sampled without diverting row-scoped writes
-  (forced-dump toggle limitation). Verified by unit tests + the math.
-- **Review batch fixes** (device lock, ordered ingestion, freshness
-  floors): unit-tested; a hardware regression round is queued with the
-  server agent.
-- **Hidden channels (Channel Layout presets)**: the physical table was
-  measured with all channels visible. Classic OSC skips hidden channels
-  in STRIP numbering (community-documented); whether hiding also shifts
-  the hardware-offset commands we aim with (`/setBankStart`,
-  `/setSubmix`) has never been measured. Accepted unmeasured by user
-  decision (2026-08-21): this rig hides nothing. The Global transport
-  (now the standard) resolves it via TotalMix's "Receive on hidden
-  channels" option; only the remaining classic paths (sweep, probe) are
-  unmeasured with hidden channels.
+## TotalMix OSC protocol
 
-## By design / device constraints
-- **Submix name→index is not queryable on the classic remote** (order is
-  derivable, spacing is not, and a mispredicted `/setSubmix` is the crash
-  operation). The sweep (`POST /api/device/sweep`) plus live Global name
-  feedback replace the old discovery walk; re-run the sweep after layout
-  changes.
-- **TotalMix does not echo OSC-originated changes** — live-value UI would
-  need forced dumps (constraint recorded on #6).
-- **Widths and layouts are snapshot-dependent** — new layouts need their
-  input widths posted (`POST /api/device/widths`) or a fingerprint
-  derivation (#16 phase 2, not built) before input EQ/dynamics aim there.
-  Output aiming needs no widths.
-- Concurrent macros serialize at step granularity behind the device-aim
-  lock — a long ramp makes a simultaneously fired macro wait. Correctness
-  over parallelism; finer-grained locking is future work.
-- **Ramp "parked at start" means the ramp trajectory's start** (the sweep
-  floor), not the channel's pre-ramp value. Natural for a volume fade;
-  on an EQ-gain ramp it reads as "slammed to the floor and left there".
-  Restore-to-prior-value and editor wording are #19 design-half work.
-- A `/setSubmix` to the already-selected submix (every stereo pair's
-  second index) is a **total no-op — zero feedback**. The walk
-  disambiguates silence from a crash with a row-toggle probe.
-- **`/3/reverbEnable` and `/3/echoEnable` are momentary toggle buttons**
-  (1.0 flips, 0.0 is ignored) — the bridge sets them by reading fresh
-  state and pressing only on difference, and modulates them by pressing
-  only on 0/1 edges. The `/2/` enables (eq/dyn/alev/lowcut/phase) are
-  **unverified** and assumed value-settable until a hardware round
-  discriminates press-vs-set for them.
+- **The active workspace is not reported over OSC.** The bridge only knows
+  the workspace it last switched to itself (or absorbed from a retained MQTT
+  message). A workspace changed inside TotalMix stays invisible until the
+  next bridge-side switch. The header renders an unconfirmed workspace dashed
+  and dimmed; picking one there switches TotalMix and re-syncs. (#30)
+- **Snapshot feedback is a slot number, not a name.** The Global feed reports
+  which Quick Select slot is active and whether it was edited since; the name
+  comes from `ufx2_snapshot_map.json` for the believed workspace. A stale map
+  names the wrong snapshot. Keep the map current
+  (`tools/scrape_totalmix_snapshots.*` or the config editor).
+- **TotalMix never echoes the bridge's own writes.** The remote's "re-send"
+  option stays off on purpose: with it on, every write would come back as a
+  change. After a knob move the device value is therefore only known once the
+  bridge re-reads the channel (about 0.4 s later). Moves made in TotalMix are
+  reported normally, which is what device sync relies on.
+- **Submix name to index is not queryable on the classic remote.** Classic
+  aiming (`/setSubmix`) needs the index, and a wrong index moves the wrong
+  send. The sweep (`POST /api/device/sweep`) measures the physical table once
+  per layout and Global name feedback keeps it current. Re-run the sweep after
+  changing the channel layout.
+- **Every OSC remote setting is stored per workspace.** Ports, IPs and
+  "Number of Faders per Bank" revert when a workspace loads unless that
+  workspace was saved with them. Symptom: the bridge sees 8 strips instead of
+  48 after a switch. Re-save every workspace after changing OSC settings
+  ([setup.md](setup.md#totalmix-osc-configuration-the-canonical-client-setup)).
+- **The classic remote only reports the current bank.** With the default bank
+  of 8, channels above 8 never reach the classic listener (sweep, probe). Set
+  the bank wide enough for the whole mixer (48 on a UFX II).
 
-## Not exposed
-- `/2/reverbSend` — constant sentinel (−3.615/−oo) on every channel;
-  not a real control on this device.
-- `/2/select` — persistent Select-button state, not a parameter.
-- EQ band 2 type — the device has none (band 2 is always Bell).
-- Page-2 input-stage extras (phantom, pad, instrument, refLevel, width,
-  msProc, loopback, recordEnable) — inventoried, shippable on request.
+## Bridge design decisions
 
-## Open feature board
-- #6 live-fed routing picker (channel state only; the map stays for
-  indices), #8 channel identify, #9 simple patch mode, #16 phase 2 width
-  auto-derivation, #19 design half (rate/curve controls in the editor,
-  mode descriptions, SET/SWEEP/WOBBLE naming).
+- **Workspace and snapshot switching stay on the classic remote**, even with
+  Global as the transport: Global snapshot-load feedback proved unreliable as
+  a switch confirmation and the classic dump did not. Both remotes must be
+  configured.
+- **Macros serialize at step granularity behind the device lock.** A long
+  ramp makes a macro fired at the same time wait for that step to finish.
+  Correctness over parallelism.
+- **Cancelling a ramp parks it at the ramp's own floor** (the low end of its
+  `range`), not at the value the channel had before. Natural for a fade; on
+  an EQ-gain ramp it reads as "slammed to the floor". Use a `hold` knob where
+  the previous value matters.
+- **Knob positions clamp to their range.** A knob is 0..1 across its
+  configured `range`; a fader moved in TotalMix beyond that range shows as
+  0 or 1 (full travel) on the card and on the Home Assistant slider.
+- **Momentary buttons are pressed on difference only.** `/3/reverbEnable`
+  and `/3/echoEnable` are toggles (1.0 flips, 0.0 is ignored), so the bridge
+  reads fresh state and presses only when it differs. The page-2 enables (eq,
+  dyn, lowcut, phase) are treated as value-settable; that has not been
+  discriminated on hardware.
+- **Web MIDI needs a secure context.** On a LAN address the browser only
+  offers MIDI over HTTPS (Caddy with `tls internal`, see
+  [setup.md](setup.md#https)) or from localhost. The tray agent takes MIDI
+  out of the browser entirely.
 
-## Device quirks (documented, not ours to fix)
-- Output names cap around **11 characters** and the device may pad with a
-  trailing space — a longer rename can truncate into a name whose
-  stripped form is IDENTICAL to the original, making the rename a no-op
-  from the layout system's point of view. Layout tests should use short,
-  obviously-different names and verify the live name-set.
-- A strip reports `RE-!50 Out` (device-side typo).
-- Page-2 low-cut frequencies read back quantised (250 → 260 Hz).
-- Number of Faders per Bank and other OSC settings are per-workspace and
-  revert on workspace load unless the workspace is re-saved.
+## Not measured on hardware
+
+- **Hidden channels (Channel Layout presets) on the classic paths.** The
+  physical table was measured with every channel visible; whether hiding
+  channels shifts the `/setBankStart` and `/setSubmix` offsets is unmeasured.
+  Global handles hidden channels through TotalMix's "Receive on hidden
+  channels" option. This rig hides nothing (decision 2026-08-21).
+- **Page-2 silence refusal** (no dump after the row-mirror nudge) exists only
+  in unit tests; it needs a dead device to reproduce. If it ever fires, check
+  that the rack is powered before anything else.
+- **Ramp and LFO shapes in flight** are verified by the unit tests and the
+  math; the park values are hardware-verified, the trajectory itself was
+  never sampled on the device.
+
+## Device quirks (RME, not ours)
+
+- Output names cap at about 11 characters and may gain a trailing space, so a
+  long rename can yield a name identical to the old one once stripped. Use
+  short, clearly different names when testing layouts.
+- One strip on this rig reports `RE-!50 Out` (a typo stored on the device).
+- Page-2 low-cut frequencies read back quantised (250 reads as 260 Hz).
+- `/2/reverbSend` reports a constant sentinel on every channel and
+  `/2/select` is the Select-button state, not a parameter; neither is exposed.
+- EQ band 2 has no type on this device (always Bell).
