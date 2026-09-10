@@ -40,7 +40,8 @@ your MIDI inputs (client). Everything is Authenticode-signed.
 ```bash
 git clone https://github.com/auntiepickle/totalmix-osc-bridge.git
 cd totalmix-osc-bridge
-cp deploy/docker-compose.example.yml docker-compose.yml   # set OSC_IP at minimum
+cp deploy/docker-compose.example.yml docker-compose.yml
+printf 'OSC_IP=192.168.1.50\nOSC_TRANSPORT=global\nENABLE_MQTT=false\n' > .env   # your TotalMix PC; drop ENABLE_MQTT if you run a broker
 cp examples/mappings.example.json mappings.json
 cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
 docker compose build && docker compose up -d
@@ -52,12 +53,14 @@ docker compose build && docker compose up -d
 python -m venv .venv && source .venv/bin/activate     # .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 cp examples/mappings.example.json mappings.json
-OSC_IP=127.0.0.1 python -m tmosc                       # web UI on http://localhost:8088
+OSC_IP=127.0.0.1 OSC_TRANSPORT=global ENABLE_MQTT=false python -m tmosc   # web UI on http://localhost:8088
 ```
 
-Then point TotalMix at the bridge: **Settings > OSC**, enable a remote, port
-incoming `7001`, port outgoing `9001`, remote IP = the bridge machine. For the
-Global OSC transport (TotalMix FX 2.1+, the standard) see
+Then point TotalMix at the bridge (**Options > Mixer Settings > OSC**):
+Remote 2 = Global OSC, port incoming `7002`, port outgoing `9002`, remote IP =
+the bridge machine (TotalMix FX 2.1+; this is the standard transport). Keep
+Remote 1 configured too (classic, `7001` / `9001`): it still performs workspace
+and snapshot switching. Step by step in
 [docs/setup.md](docs/setup.md#totalmix-osc-configuration-the-canonical-client-setup).
 
 ## How it fits together
@@ -77,7 +80,8 @@ Home Assistant ── MQTT ─────────────────�
   device-side sync (move the fader in TotalMix and every view follows), and a
   retained MQTT state topic for a phone slider.
 - The **tray agent** owns the MIDI port; an open browser yields to it and
-  stays a live monitor. Both find the bridge by LAN auto-discovery.
+  stays a live monitor. The agent and the installer wizard find the bridge by
+  LAN auto-discovery.
 
 ## Features
 

@@ -103,8 +103,9 @@ the browser, with no browser.
 
 Grab the signed installer from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases):
 `tmosc-setup-*.exe` (choose **Client**, or **Both** if this PC also hosts the
-bridge) or the client-only `tmosc-agent-setup-*.exe`. Both are
-Authenticode-signed (no "unknown publisher" warning). Run it and follow the wizard: it **auto-detects the bridge on your
+bridge). A client-only `tmosc-agent-setup-*.exe` is built on `agent-v*` tags
+(none published so far). Both are Authenticode-signed (no "unknown publisher"
+warning). Run it and follow the wizard: it **auto-detects the bridge on your
 LAN**, lists your MIDI inputs to pick from, and offers "start with Windows".
 Done. The exe is fully standalone (static CRT — no Visual C++ redistributable).
 

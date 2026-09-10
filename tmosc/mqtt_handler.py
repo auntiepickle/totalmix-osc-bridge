@@ -337,7 +337,13 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
                     try:
                         param = float(payload)
                         logger.info(f"MQTT macro trigger: '{macro_name}' param={param:.3f}")
-                        bridge.run_macro(macro_name, param)
+                        # Off paho's network thread (like /api/trigger): a
+                        # multi-bar ramp would otherwise block every other MQTT
+                        # delivery - and the keepalive - for its whole duration.
+                        threading.Thread(target=bridge.run_macro,
+                                         args=(macro_name, param),
+                                         name=f"mqtt-macro-{macro_name}",
+                                         daemon=True).start()
                     except ValueError:
                         logger.warning(f"Invalid param for macro '{macro_name}': {payload!r}")
                 else:

@@ -3,6 +3,8 @@ setup_mqtt registers, then tests invoke on_message directly. No broker."""
 import time
 from types import SimpleNamespace
 
+import threading
+
 import pytest
 
 import tmosc.mqtt_handler as mqtt_handler
@@ -85,10 +87,31 @@ def handler(monkeypatch):
     return client, fake_bridge, sent_osc
 
 
+def _join_macro_threads():
+    """MQTT macro triggers run off paho's thread now; wait for them."""
+    for t in threading.enumerate():
+        if t.name.startswith("mqtt-macro-"):
+            t.join(timeout=2)
+
+
 def test_macro_topic_triggers_run_macro(handler):
     client, bridge, _ = handler
     client.on_message(client, None, msg("totalmix/macro/known_macro", "0.75"))
+    _join_macro_threads()
     assert bridge.run_macro_calls == [("known_macro", 0.75)]
+
+
+def test_macro_trigger_does_not_block_the_mqtt_thread(handler):
+    """A long macro (multi-bar ramp) must not stall other deliveries."""
+    import time
+    client, bridge, _ = handler
+    gate = threading.Event()
+    bridge.run_macro = lambda name, param: gate.wait(2)
+    t0 = time.time()
+    client.on_message(client, None, msg("totalmix/macro/known_macro", "0.5"))
+    assert time.time() - t0 < 0.5          # returned immediately
+    gate.set()
+    _join_macro_threads()
 
 
 def test_unknown_macro_not_triggered(handler):

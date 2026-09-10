@@ -86,7 +86,7 @@ Server/client mirrors that must change together: `RUNTIME_FIELDS` and
 | `mappings_is_example` | `bool` | True when running from `mappings.example.json` |
 | `channel_map_is_example` | `bool` | True when running from `ufx2_channel_map.example.json` |
 | `mqtt_connected` | `bool` | True when MQTT broker connection is active. False if no broker is configured. |
-| `main_loop` | event loop | Set by `web_client.startup_event`. Required for thread-safe broadcast. |
+| `main_loop` | event loop | Set by `startup_event()` in `tmosc/api/app.py`. Required for thread-safe broadcast. |
 | `_suppress_handler` | `bool` | Blocks MQTT feedback during macro execution |
 | `_running_macros` | `set[str]` | Names of currently executing macros |
 | `_cancel_events` | `dict` | One `threading.Event` per running macro, set to cancel on `restart` |
@@ -109,8 +109,8 @@ Server/client mirrors that must change together: `RUNTIME_FIELDS` and
 7.  Already on target workspace?      -> skip switch
     force_switch=False, other macro running? -> emit macro_skipped, return
 8.  Switch:
-      /loadQuickWorkspace {slot}  -> sleep 1.0s
-      /3/snapshots/{9-n}/1        -> sleep 0.3s
+      /loadQuickWorkspace {slot}  -> wait for feedback confirmation (2 s timeout; fixed 1.0 s only without a listener)
+      /3/snapshots/{9-n}/1        -> wait for confirmation (1 s timeout; 0.3 s fallback)
 9.  Broadcast macro_start
 10. Execute steps in order
 11. Broadcast macro_complete
@@ -134,7 +134,7 @@ This issue only exists when MQTT is configured. Without a broker there is no fee
 
 FastAPI runs in asyncio. MQTT callbacks and macro threads are OS threads. `bridge.broadcast_state()` must work from both.
 
-`web_client.startup_event()` stores the running asyncio loop as `bridge.main_loop`. Sync threads call `asyncio.run_coroutine_threadsafe(self._do_broadcast(...), self.main_loop)`. Asyncio context creates a task directly. Broadcasts before FastAPI startup are silently dropped.
+`startup_event()` in `tmosc/api/app.py` stores the running asyncio loop as `bridge.main_loop`. Sync threads call `asyncio.run_coroutine_threadsafe(self._do_broadcast(...), self.main_loop)`. Asyncio context creates a task directly. Broadcasts before FastAPI startup are silently dropped.
 
 ---
 
@@ -144,7 +144,7 @@ TotalMix pushes its state over OSC to the configured "Port outgoing" whenever th
 
 `osc_listener.OSCListener` receives that stream and maintains a `DeviceState`: channel data scoped per submix (row 3 output faders are submix-independent and stored under `_outputs`), plus a raw address store so unrecognized feedback is inspectable rather than lost. Volume floods are throttled to one WebSocket `device_update` event per 250ms; structural changes (submix/trackname) broadcast immediately.
 
-`discovery.discover_channel_map()` interrogates the device: send `/setSubmix i` for i = 1..N, wait `settle_s` for the feedback burst, record what came back. Empty submixes (`<Empty>`) and repeated labels are skipped — stereo-linked outputs occupy two consecutive indices reporting the same label, so the walk continues past duplicates rather than stopping. The pre-walk submix is restored afterward. The result is a `ufx2_channel_map.json`-compatible draft.
+`bridge.run_sweep()` (`POST /api/device/sweep`) measures the **physical table**: it walks the bank with `/setBankStart` and a row-mirror nudge, reads each hardware channel's name at every fixed position on both rows, and persists the result into `ufx2_channel_map.json` under `physical_table`. It never sends `/setSubmix` and never writes a parameter. Under the Global transport, names are additionally learned live from feedback (`/input|playback|output/N/name`) and merged into the table by the name-sync thread, so the table does not go stale between sweeps.
 
 Page-1 channel feedback (`/1/volume{n}`, `/1/trackname{n}`) refers to whichever *row* is selected via `/1/busInput` / `/1/busPlayback` / `/1/busOutput` — the listener tracks the active row and files channel data accordingly (verified against a UFX II capture: 177 distinct feedback addresses including mutes, solos, mic gains, phantom, snapshots, and the FX section).
 
@@ -152,10 +152,13 @@ API surface:
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/device/state` | Live captured state + raw address dump |
-| `POST /api/device/discover` | Start a discovery walk (background thread; `discovery_progress` / `discovery_complete` WS events) |
-| `GET /api/device/discovery` | Status and result of the last walk |
-| `POST /api/device/discovery/apply` | Promote the draft to the live `ufx2_channel_map.json` (auto-backup first) |
+| `GET /api/device/state` | Classic listener state + raw address dump |
+| `POST /api/device/sweep`, `GET /api/device/sweep` | Measure the physical table (background thread; `sweep_progress` WS events) / status of the last sweep |
+| `GET /api/device/physical_table` | The measured table |
+| `GET /api/device/global` | Global transport and listener status (heartbeat, names, snapshots) |
+| `GET /api/device/activity` | Human-change log from Global feedback (wiggle-to-learn) |
+| `POST /api/device/pulse`, `POST /api/device/probe` | Channel identify pulse / liveness probe |
+| `GET /api/device/picker` | Live names for the routing picker |
 
 Macro management builds on this: `POST`/`PATCH /api/config/macros/{name}` upserts a single macro (name validated `[A-Za-z0-9_-]{1,64}`), `DELETE /api/config/macros/{name}` removes one. Both auto-backup `mappings.json`, hot-reload the bridge, and broadcast `macro_created` / `macro_updated` / `macro_deleted` WebSocket events so every open tab re-syncs its cards.
 
@@ -173,15 +176,13 @@ Steps can therefore carry a name-based target instead of trusting a stored addre
 
 At fire time `bridge._resolve_target()` looks up the submix index by name (channel map), sends `/setSubmix`, waits for the listener to confirm via `/1/labelSubmix` (1.5s timeout), then matches the channel *name* against the live bank's tracknames to find today's strip index. The stored `osc` address is only a fallback for when feedback is unavailable. `get_routing_label()` prefers target names, so card labels can't go stale either. The editor's routing picker writes targets; legacy raw-address macros (explicit `/setSubmix` steps) still execute unchanged.
 
-The draft is also written to `discovered_channel_map.json` (git-ignored) for manual inspection.
-
 ---
 
 ## TotalMix OSC quirks
 
 **Snapshot index reversal.** TotalMix numbers snapshot buttons bottom-to-top in its OSC namespace. Slot 1 is OSC index 8; slot 8 is index 1. The formula is `9 - slot_number`, handled by `config.snapshot_num_to_osc_index()`. The recall command is `/3/snapshots/{index}/1` with value `1.0`.
 
-**Workspace switch sleep.** After `/loadQuickWorkspace`, TotalMix takes roughly one second to finish switching. The bridge sleeps 1.0s before sending snapshot recall and 0.3s after before executing macro steps. Too short and OSC commands land in the wrong workspace.
+**Workspace switch timing.** After `/loadQuickWorkspace`, TotalMix takes roughly one second to finish switching. The bridge waits for the classic listener to confirm the switch (2 s / 1 s timeouts) and only falls back to fixed 1.0 s / 0.3 s sleeps when no listener is running. Too short and OSC commands land in the wrong workspace.
 
 **`/setSubmix` selects the output bus.** Send `/setSubmix {index}` before adjusting a send level. The level command (`/1/volume{N}`) applies to whichever bus TotalMix has selected. Omit `/setSubmix` and you will adjust the wrong bus.
 
@@ -191,7 +192,7 @@ The draft is also written to `discovered_channel_map.json` (git-ignored) for man
 
 ## Config fallback
 
-`mappings.json` and `ufx2_channel_map.json` are git-ignored. If missing, the bridge loads from the corresponding `*.example.json` files and sets `mappings_is_example` or `channel_map_is_example` to True. The UI shows an amber indicator in the settings menu.
+`mappings.json` and `ufx2_channel_map.json` are git-ignored. If missing, the bridge loads from the corresponding `examples/*.example.json` templates and sets `mappings_is_example` or `channel_map_is_example` to True. The UI shows an amber indicator in the settings menu.
 
 `ufx2_snapshot_map.json` loads from `/app/config/ufx2_snapshot_map.json` first, then from the local directory. A background thread polls the mounted path every 5 seconds and reloads on change.
 
@@ -233,7 +234,7 @@ The editor reads every `[data-field]` input in the panel, traverses the dot-sepa
 
 ## Adding an operation type
 
-Register with `@OperationRegistry.register("name")` in `operations.py`:
+Register with `@OperationRegistry.register("name")` in `tmosc/operations.py`:
 
 ```python
 @OperationRegistry.register("hold")
@@ -258,7 +259,7 @@ Use in `mappings.json`:
 
 ---
 
-## Thread safety
+## Macro trigger concurrency
 
 Macro triggers arrive concurrently from three places: the web API thread, the MQTT callback thread, and queued re-fire threads. `bridge._macro_lock` guards the shared trigger state (`_running_macros`, `_cancel_events`, `_queued_params`) — the fire-mode guard, debounce check, and registration run as one atomic block, and cleanup in `finally` takes the same lock.
 

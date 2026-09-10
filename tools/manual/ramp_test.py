@@ -6,7 +6,7 @@ import sys
 
 # ================== AUTO-LOAD .env ==================
 def load_dotenv():
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    env_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
     if not os.path.exists(env_path):
         print(f"❌ .env file not found at {env_path}")
         sys.exit(1)

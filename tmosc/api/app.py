@@ -395,7 +395,7 @@ def get_meters():
         # first frame)
         rows_seen = {k[0] for k in st.levels}
     out = {}
-    for name, m in bridge.mappings.get("macros", {}).items():
+    for name, m in list(bridge.mappings.get("macros", {}).items()):   # snapshot: other threads resize it
         step = bridge._knob_step(m)
         if not step:
             continue
@@ -476,7 +476,7 @@ def get_duck():
     and the key channel's level - painted onto the modules by the UI."""
     d = getattr(bridge, "duck", None)
     return {"available": d is not None,
-            "duck": {k: dict(v) for k, v in (d.status if d else {}).items()}}
+            "duck": {k: dict(v) for k, v in dict(d.status if d else {}).items()}}
 
 
 @app.get("/api/midi/bindings", response_class=PlainTextResponse)
@@ -491,7 +491,7 @@ def get_midi_bindings():
     incoming MIDI against this and drives /ws (knob) or /api/trigger (fire),
     exactly as the browser does."""
     lines = []
-    for name, m in bridge.mappings.get("macros", {}).items():
+    for name, m in list(bridge.mappings.get("macros", {}).items()):   # snapshot: other threads resize it
         is_knob = 1 if bridge._knob_step(m) else 0
         for t in (m.get("midi_triggers") or []):
             typ = str(t.get("type", "control_change"))
@@ -754,7 +754,7 @@ def get_global_osc_status(probe: bool = False):
             "message_count": st.message_count,
             "names": {row: st.channel_names(row)
                       for row in ("inputs", "playbacks", "outputs")},
-            "snapshots": {str(k): v for k, v in st.snapshots.items()},
+            "snapshots": {str(k): v for k, v in dict(st.snapshots).items()},
         })
     if bridge.global_transport:
         if probe:
@@ -888,7 +888,7 @@ def pulse_channel(body: dict):
 
 
 @app.post("/api/device/probe")
-async def probe_device():
+def probe_device():
     """Liveness probe (kept through #24 — TASK 6 deviation fix): a state-
     changing row toggle that must produce a dump. The only sound aliveness
     check; silence from an idle mixer is not evidence."""
@@ -898,7 +898,7 @@ async def probe_device():
 
 
 @app.get("/api/device/picker")
-async def get_picker():
+def get_picker():
     """Routing-picker inventory (#6/#24): LIVE names preferred — inputs
     from the listener's cached current bank (zero device traffic),
     outputs from a fresh row-3 enumeration (~0.2s, cached) — each mapped

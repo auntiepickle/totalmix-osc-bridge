@@ -1,6 +1,6 @@
 # Config Reference
 
-Three JSON files configure the bridge. All have `*.example.json` counterparts in the repo. The real files are git-ignored so live edits survive `git pull`. Changes saved through the web UI write to disk and hot-reload without a restart.
+Three JSON files configure the bridge. All have `*.example.json` counterparts in `examples/`. The real files are git-ignored so live edits survive `git pull`. Changes saved through the web UI write to disk and hot-reload without a restart.
 
 ---
 
@@ -49,11 +49,29 @@ Every macro the bridge knows about.
 |---|---|
 | `ignore` | Drop the trigger. The running macro finishes uninterrupted. |
 | `queue` | Save the param and fire once the current run finishes. Overwrites any previously queued param. |
-| `restart` | Cancel the running execution immediately (sends `0.0` to the OSC address), then re-run with the new param. |
+| `restart` | Cancel the running execution immediately (parks the step at its `range` floor), then re-run with the new param. |
 
 ---
 
-### Steps: instant send
+### Steps: name target (the standard form)
+
+```json
+{ "target": {"submix": "RE-150 In", "channel": "AN 2"},
+  "value": "{{param}}", "operation": {"type": "ramp", "bars": 2, "bpm": "clock"} }
+```
+
+| Target field | Meaning |
+|---|---|
+| `submix` + `channel` | A send: `channel` (row 1 input or row 2 playback) into the output named `submix` |
+| `channel` + `row: 3` | An output's own fader |
+| `param` | Which parameter (default `volume`): `pan`, `mute`, `lowcut_freq`, `eq_gain_2`, ... see the knob section |
+| `osc` (optional) | Classic-transport fallback address, only used when feedback is unavailable |
+
+Targets resolve by *name* at fire time through the measured physical table, so
+nothing breaks when strips move. Raw-address steps below are the legacy
+classic form.
+
+### Steps: instant send (classic, raw address)
 
 ```json
 { "osc": "/setSubmix", "value": 14 }
@@ -80,6 +98,8 @@ Smooth value change over musical time. Duration = `bars x 4 x 60 / bpm` seconds.
 | `bars` | `2` | Length in bars |
 | `bpm` | `140` | Tempo in BPM. Set to `"clock"` to sync to live MIDI clock. |
 | `curve` | `"triangle"` | `"triangle"` ramps up then back to zero. `"linear"` ramps from zero to the param value and holds. |
+| `range` | param full range | `[lo, hi]` sweep window: the ramp runs between these two points of the parameter's 0..1 span |
+| `threshold` | — | Gate point applied after the range map, for toggle params (mute) |
 
 **Using `"bpm": "clock"`:** the browser reads `0xF8` MIDI timing clock messages and computes live BPM. That value is sent with every trigger and substituted at execution time. Falls back to 140 if no clock is detected.
 
@@ -236,7 +256,7 @@ Maps workspace names to TotalMix Quick Select slots and their snapshot names. Th
 
 ## ufx2_channel_map.json
 
-Maps OSC addresses to human-readable routing names. Used only to generate routing labels on macro cards (e.g. `/1/volume2` -> `AN 3 -> ADAT 1`). Not required for macro execution.
+Channel names and the **physical table** the bridge measured (`physical_table`, written by `POST /api/device/sweep`). Both transports resolve name targets through it, so it is required for every name-targeted step; it also feeds the routing labels on macro cards (e.g. `AN 3 -> ADAT 1`). The legacy `submixes` block below maps classic addresses.
 
 ```json
 {

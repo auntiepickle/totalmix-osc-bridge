@@ -1,50 +1,25 @@
-# ================================================
-# TotalMix OSC Bridge + Web Client v1
-# Full example docker-compose service
-# Copy & paste the "totalmix-osc-bridge" block into your main docker-compose.yml
-# ================================================
-
-version: '3.9'
-
+# TotalMix OSC Bridge - docker compose example
+#
+# 1. cp deploy/docker-compose.example.yml docker-compose.yml     (repo root, next to the Dockerfile)
+# 2. create .env beside it - at least:  OSC_IP=<TotalMix PC>  OSC_TRANSPORT=global
+#    (ENABLE_MQTT=false if you have no broker; all variables: docs/setup.md#environment-variables)
+# 3. docker compose build && docker compose up -d
+#
+# Updates are `git pull` + `docker compose restart` (the checkout is bind-mounted);
+# rebuild only when requirements.txt, the Dockerfile or the web UI's Tailwind classes change.
 services:
   totalmix-osc-bridge:
-    # === BUILD OPTIONS ===
-    build:
-      context: https://github.com/auntiepickle/totalmix-osc-bridge.git
-      # Pin to specific commit for stability:
-      # context: https://github.com/auntiepickle/totalmix-osc-bridge.git#4a712b55c96c6744fe2453f678c85ace03d2a7a6
-
+    build: .
     container_name: totalmix-osc-bridge
     restart: unless-stopped
-
-    # === ENVIRONMENT (WEB_PORT now lives here — single source of truth) ===
     env_file:
-      - /path/to/your/totalmix-osc-bridge/.env     # ← must contain WEB_PORT=
-
-    depends_on:
-      - mosquitto
-
-    # === PORTS & NETWORK ===
-    ports:
-      - "9001:9001/udp"   # RME UFX II OSC control
-      - "9003:9003/udp"   # OSC Monitor
-
-    # Web Client v1 now lives at http://YOUR-STUDIO-IP:${WEB_PORT}
-    # (8088 by default — change once in .env and you're done)
-
-    # Studio recommended:
+      - .env
+    # Host networking: TotalMix sends OSC feedback to this host on UDP 9001 / 9002
+    # and LAN auto-discovery answers broadcasts on UDP 8088, so no port mappings
+    # are needed (compose also rejects `ports:` together with network_mode: host).
     network_mode: host
-
-    # === VOLUMES ===
     volumes:
-      - ../totalmix-osc-bridge:/app
-      - /mnt/md0/NAS/guest/Scripts/totalmix:/app/config:ro
-
-# ================================================
-# Quick Start
-# ================================================
-# 1. Add WEB_PORT=8088 to your .env
-# 2. docker compose up -d
-# 3. Open http://YOUR-STUDIO-IP:8088
-#
-# One change in .env now controls EVERYTHING.
+      - .:/app
+      # Optional shared config dir - a ufx2_snapshot_map.json here is authoritative
+      # and hot-reloads without a restart:
+      # - /path/on/your/nas/totalmix:/app/config:ro

@@ -57,19 +57,16 @@ cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
 cp examples/ufx2_snapshot_map.example.json ufx2_snapshot_map.json
 
 export OSC_IP=127.0.0.1         # TotalMix on same machine; use LAN IP if remote
-export OSC_PORT=7001
-uvicorn tmosc.api.app:app --host 0.0.0.0 --port 8080 --reload
+export OSC_TRANSPORT=global     # the standard transport (TotalMix FX 2.1+, Remote 2)
+export ENABLE_MQTT=false        # no broker on a laptop
+python -m tmosc                 # or: uvicorn tmosc.api.app:app --host 0.0.0.0 --port 8088 --reload
 ```
 
-Open `http://localhost:8080`. Select your MIDI input in the header. Macro cards load from `mappings.json`.
+Open `http://localhost:8088`. Select your MIDI input in the header. Macro cards load from `mappings.json`.
 
 `--reload` restarts on Python file changes. Config files hot-reload via the UI without it.
 
-**Finding OSC addresses:** move a fader in TotalMix while the monitor runs. The address appears in `osc_monitor.log`.
-
-```bash
-ENABLE_OSC_MONITOR=true uvicorn tmosc.api.app:app --host 0.0.0.0 --port 8080
-```
+**Finding what a control does:** move it in TotalMix and read `GET /api/device/activity` (the Global feedback change log), or use MIDI learn and the routing picker in the UI. The legacy log-only monitor (`ENABLE_OSC_MONITOR=true`) shares UDP 9001 with the listener, so give it `OSC_MONITOR_PORT=9003` if you ever enable it.
 
 ---
 
@@ -89,13 +86,17 @@ Only `OSC_IP` is required. Everything else has a default or is safe to omit.
 | `OSC_PORT` | `7001` | TotalMix OSC receive port |
 | `WEB_PORT` | `8088` | Internal HTTP port proxied by Caddy |
 | `ENABLE_MQTT` | `true` | `false` runs without a broker (web UI / MIDI / REST only) |
-| `MQTT_BROKER` | unset | Hostname or IP of your MQTT broker. Omit to disable MQTT. |
+| `MQTT_BROKER` | `mosquitto` | Hostname or IP of your MQTT broker (`ENABLE_MQTT=false` runs without one) |
 | `MQTT_PORT` | `1883` | MQTT port |
 | `MQTT_USER` | unset | MQTT username |
 | `MQTT_PASS` | unset | MQTT password |
 | `ENABLE_OSC_MONITOR` | `false` | Set to `true` to log incoming OSC from TotalMix |
 | `BRIDGE_LOG_FILE` | `bridge.log` | Path for the rotating log (default lives in the state dir: repo root from source, `%APPDATA%\tmosc-bridge` when installed) |
-| `OSC_MONITOR_PORT` | `9001` | UDP port for the OSC listener |
+| `OSC_LISTEN_PORT` | `9001` | UDP port of the classic feedback listener (TotalMix Remote 1 "Port outgoing") |
+| `ENABLE_OSC_LISTENER` | `true` | Classic feedback listener (workspace/snapshot confirmation, sweep) |
+| `OSC_MONITOR_PORT` | `9001` | Legacy log-only monitor port; change it if you enable the monitor (it cannot share the listener's port) |
+| `API_TOKEN` | unset | Shared token required on state-changing requests and `/ws` ([security.md](security.md)) |
+| `TMOSC_DATA_DIR` | state dir | Override where config JSON, backups and logs live |
 | `OSC_TRANSPORT` | `classic` | `global` = write via Global OSC (TotalMix 2.1+, **the standard**) |
 | `GLOBAL_OSC_IP` | `OSC_IP` | TotalMix host for the Global remote |
 | `GLOBAL_OSC_PORT` | `7002` | Global remote's incoming port |
@@ -116,9 +117,12 @@ Create a `.env` file next to `docker-compose.yml`:
 
 ```env
 OSC_IP=192.168.1.50
+OSC_TRANSPORT=global
+# GLOBAL_OSC_PORT=7002          # Remote 2 defaults; uncomment to change
+# GLOBAL_OSC_LISTEN_PORT=9002
 OSC_PORT=7001
 WEB_PORT=8088
-# Remove the lines below if you have no MQTT broker
+# No broker? replace the four MQTT lines with:  ENABLE_MQTT=false
 MQTT_BROKER=192.168.1.10
 MQTT_PORT=1883
 MQTT_USER=studio
@@ -143,9 +147,11 @@ Within a few seconds: `OSC Client ready -> 192.168.x.x:7001`. If MQTT is configu
 
 ```bash
 git pull origin main
-docker compose build --no-cache
-docker compose up -d
+docker compose restart          # the checkout is bind-mounted: new code, same image
 ```
+
+Rebuild only when `requirements.txt`, the `Dockerfile` or the web UI's Tailwind
+classes changed: `docker compose build && docker compose up -d`.
 
 `mappings.json` and `ufx2_channel_map.json` are git-ignored. A pull never touches them.
 
@@ -167,17 +173,18 @@ The bridge polls `/app/config/ufx2_snapshot_map.json` every 5 seconds and reload
 
 The Web MIDI API requires a secure context on real IPs. `localhost` is exempt.
 
-The included `deploy/Caddyfile` uses `nip.io` for automatic DNS and Let's Encrypt TLS. `nip.io` maps any `IP.nip.io` hostname to that IP, giving you a valid HTTPS cert for a LAN address without DNS setup.
+The included `deploy/Caddyfile` uses `nip.io` for the hostname (any `IP.nip.io` name resolves to that IP, so no DNS setup) and Caddy's internal CA for the certificate (`tls internal`; a public CA cannot issue for a private address). Trust Caddy's root certificate once per browser.
 
 Edit `deploy/Caddyfile` to match your server IP:
 
 ```
-192.168.1.x.nip.io {
-    reverse_proxy localhost:8088
+192.168.1.x.nip.io:9445 {
+    tls internal
+    reverse_proxy 127.0.0.1:8088
 }
 ```
 
-Run Caddy on the host or add it to `docker-compose.yml`. Access the UI at `https://192.168.1.x.nip.io`.
+Run Caddy on the host or add it to `docker-compose.yml`. Access the UI at `https://192.168.1.x.nip.io:9445/static/index.html`.
 
 Alternatives: [mkcert](https://github.com/FiloSottile/mkcert) for a local CA, or a real domain with Certbot.
 
@@ -193,6 +200,9 @@ With it, you get bidirectional state sync and macro triggers from automations. O
 
 | Topic | Payload | Description |
 |---|---|---|
+| `totalmix/workspace` | slot number (retained) | Current workspace Quick Select slot |
+| `totalmix/snapshot` | snapshot number (retained) | Current snapshot |
+| `totalmix/knob/<name>/state` | `0..1` (retained, 4 decimals) | Knob position after any change, including a fader moved in TotalMix ([home-assistant.md](home-assistant.md)) |
 | `totalmix/workspaces` | JSON array | `[{"name": "Live_set", "index": 3}, ...]` sorted by slot |
 | `totalmix/snapshot_map` | JSON object | Full snapshot map |
 | `totalmix/snapshot/status` | `loaded_N` | Confirms snapshot N was recalled |
@@ -201,6 +211,8 @@ With it, you get bidirectional state sync and macro triggers from automations. O
 
 | Topic | Payload | Effect |
 |---|---|---|
+| `totalmix/knob/<name>` | `0..1` or `0..100` | Set a knob (retained commands are ignored) |
+| `totalmix/config/snapshot_map` | JSON object | Replace the snapshot map at runtime |
 | `totalmix/workspace` | `"3"` (slot number) | Switch workspace |
 | `totalmix/snapshot` | `"4"` (1-8) | Recall snapshot |
 | `totalmix/macro/<name>` | `"0.0"` to `"1.0"` | Fire macro with param value |
@@ -228,7 +240,7 @@ pytest
 
 It covers macro execution (fire modes, debounce, param clamping, workspace/snapshot resolution and state-aware switching), ramp/LFO operations including cancellation, MQTT message routing and feedback-loop suppression, and the web API.
 
-GitHub Actions runs the suite plus a Docker image build on every push to `main` and every PR (`.github/workflows/ci.yml`). **Deploy flow: push, wait for the green check, then `git pull` + `docker compose build` on the server.** A red X means the server should not pull.
+GitHub Actions runs the suite plus a Docker image build on every push to `main` and every PR (`.github/workflows/ci.yml`). **Deploy flow: push, wait for the green check, then `git pull` + `docker compose restart` on the server** (rebuild only when the image inputs changed). A red X means the server should not pull.
 
 Hardware-in-the-loop scripts (real MQTT broker, real UFX II) live in `tools/manual/` — see the README there. pytest ignores that directory.
 
@@ -241,7 +253,7 @@ The bridge uses up to TWO OSC remotes in TotalMix, configured in
 versions call it Settings). Each remote is selected with the
 "Remote Controller Select" radio buttons.
 
-**Remote 1 — classic protocol (required; drives macros today):**
+**Remote 1 — classic protocol (still required: workspace/snapshot switching, the sweep and the liveness probe):**
 
 | Setting | Value |
 |---|---|
@@ -252,8 +264,8 @@ versions call it Settings). Each remote is selected with the
 | Number of Faders per Bank | **high enough to cover every channel** (e.g. 48) |
 | Compatibility (Mode) | `TotalMix 1.96` (the classic/default mode) |
 
-**Remote 2 — Global OSC (TotalMix FX 2.1+; the next-generation transport,
-issue #25):**
+**Remote 2 — Global OSC (TotalMix FX 2.1+; the standard transport,
+`OSC_TRANSPORT=global`):**
 
 | Setting | Value |
 |---|---|
@@ -273,9 +285,9 @@ to OSC Controller 1" as required by the classic protocol; do NOT enable
 submix-linking for the Global remote.
 
 The fader-bank size matters: TotalMix only reports the strips inside the
-current bank over OSC. At the default of 8, discovery and live resolution can
+current bank over OSC. At the default of 8, the sweep and live resolution can
 only see the first 8 strips per row — ADAT and other higher channels never
-appear. Raise it, then re-run discovery. (The bridge sends `/setBankStart 0`
+appear. Raise it, then re-run the sweep (`POST /api/device/sweep`). (The bridge sends `/setBankStart 0`
 before every capture/resolution so a scrolled bank cannot shift indices —
 the address is 0-based.)
 
@@ -305,7 +317,9 @@ Separately, stereo-link state and channel names change per **snapshot** —
 the bridge handles that at fire time by resolving channel names against live
 feedback.
 
-**The bridge boots blind by design.** Since retained MQTT no longer drives
+**The classic listener boots blind by design** (the Global listener is not:
+Remote 2's cyclic status feeds it from boot, so `/api/device/global` is live
+immediately). Since retained MQTT no longer drives
 the device, nothing provokes a feedback dump at startup —
 `/api/device/state` starts empty and `osc_bank_width` / `live_strip_count`
 are `null` until the first dump arrives. So the pre-flight check has three

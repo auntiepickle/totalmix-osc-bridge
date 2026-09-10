@@ -10,15 +10,15 @@ COPY web/ ./web/
 COPY tailwind.config.js ./
 
 RUN npm init -y
-RUN npm install -D tailwindcss@latest @tailwindcss/cli
+# Pinned: an unpinned @latest made style.css differ from build to build
+RUN npm install -D tailwindcss@4.3.3 @tailwindcss/cli@4.3.3
 
 # Defensive cleanup + build to style.css
 RUN rm -rf ./web/static/style.css
 RUN npx @tailwindcss/cli --cwd /build \
     -i ./web/static/input.css \
     -o ./web/static/style.css \
-    --minify \
-    --config ./tailwind.config.js
+    --minify
 
 # Debug
 RUN echo "=== BUILDER FINAL CHECK ===" && ls -la ./web/static/ && wc -c ./web/static/style.css || echo "style.css MISSING IN BUILDER"

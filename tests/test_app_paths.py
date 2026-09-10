@@ -72,7 +72,7 @@ def test_override_wins_in_any_mode(monkeypatch, tmp_path):
 
 
 def test_config_env_loader(tmp_path):
-    keys = ("TMOSC_T_IP", "TMOSC_T_PORT", "TMOSC_T_BROKER", "TMOSC_T_EXISTING")
+    keys = ("TMOSC_T_IP", "TMOSC_T_PORT", "TMOSC_T_PORT2", "TMOSC_T_BROKER", "TMOSC_T_EXISTING")
     cfg = tmp_path / "config.env"
     cfg.write_text(
         "# TotalMix bridge config\n"
@@ -80,13 +80,15 @@ def test_config_env_loader(tmp_path):
         "TMOSC_T_IP=192.168.1.50\n"
         'TMOSC_T_PORT = "8090"\n'
         "TMOSC_T_BROKER='broker'\n"
+        "TMOSC_T_PORT2=7001              # TotalMix Remote 1 port incoming\n"
         "not a key value line\n"
         "TMOSC_T_EXISTING=from_file\n",
         encoding="utf-8",
     )
     os.environ["TMOSC_T_EXISTING"] = "from_env"
     try:
-        assert app_paths.load_config_env(cfg) == 3
+        assert app_paths.load_config_env(cfg) == 4
+        assert os.environ["TMOSC_T_PORT2"] == "7001"   # inline comment stripped
         assert os.environ["TMOSC_T_IP"] == "192.168.1.50"
         assert os.environ["TMOSC_T_PORT"] == "8090"      # quotes stripped
         assert os.environ["TMOSC_T_BROKER"] == "broker"

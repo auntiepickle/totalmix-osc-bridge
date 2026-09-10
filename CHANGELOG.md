@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-09-10 · Repo restructure (#27)
+## Unreleased — 2026-09-09 · Repo restructure (#27)
 
 - The server is now a package, `tmosc/` (bridge, `api/`, both OSC transports
   and listeners, MQTT, discovery, duck engine, config, app_paths), with
@@ -19,6 +19,19 @@
   workflow (an unpinned @latest made `style.css` differ between builds) and
   its inert `--config` flag dropped; the Docker image now ships the server
   code; `/api/test` counts the live mappings instead of the boot-time copy.
+- Review fixes (from the audit that accompanied the restructure): the routing
+  picker and the liveness probe no longer block the event loop (they held the
+  device lock inside `async` handlers); MQTT macro triggers run off paho's
+  network thread like `/api/trigger`; the duck supervisor is joined before
+  the Global transport shuts down so a ducked send is always restored; the
+  channel-map file is written through a private temp file under a lock (the
+  name-sync thread, a sweep and a web save could truncate each other);
+  threadpool GET handlers iterate snapshots of the live dicts; `config.env`
+  tolerates inline comments. `deploy/docker-compose.example.yml` is now a
+  valid, runnable project; the quick starts set `OSC_TRANSPORT=global`;
+  `.env.example` no longer points writes at the feedback port; the dead
+  `validate_capture.sh` (removed endpoints) is gone; docs corrected in ~40
+  places (endpoints, ports, paths, transport wording).
 
 ## Unreleased — 2026-09-09 · Windows installer: Client / Server / Both
 
@@ -30,7 +43,7 @@
   the client page keeps the LAN auto-discovery + MIDI-input picker. Answers
   are read back on upgrade. Elevated installs open the firewall for the
   bridge; the Start Menu gets a Web UI link.
-- **Frozen bridge** (`bridge_main.py`, `tmosc-bridge.spec`, PyInstaller
+- **Frozen bridge** (`bridge_main.py`, now `tmosc/__main__.py`, `tmosc-bridge.spec`, PyInstaller
   onedir, trimmed `requirements-frozen.txt`): the same FastAPI app
   in-process, every binary in the folder Authenticode-signed, smoke-tested
   in CI (`tools/smoke_frozen.ps1`: health, template fallback, static UI,

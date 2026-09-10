@@ -20,16 +20,17 @@ remaining classic paths (workspace/snapshot switching, sweep, probe).
   in STRIP numbering (community-documented); whether hiding also shifts
   the hardware-offset commands we aim with (`/setBankStart`,
   `/setSubmix`) has never been measured. Accepted unmeasured by user
-  decision (2026-08-21): this rig hides nothing, and the Global OSC
-  migration (#25) resolves it properly via its "Receive to hidden
-  channels" option. If you start hiding channels before #25 lands,
-  re-run the sweep experiment first.
+  decision (2026-08-21): this rig hides nothing. The Global transport
+  (now the standard) resolves it via TotalMix's "Receive on hidden
+  channels" option; only the remaining classic paths (sweep, probe) are
+  unmeasured with hidden channels.
 
 ## By design / device constraints
-- The **discovery walk cannot be replaced** — submix name→index is not
-  queryable from feedback (order is derivable, spacing is not, and a
-  mispredicted `/setSubmix` is the crash operation). Run a walk after
-  layout changes.
+- **Submix name→index is not queryable on the classic remote** (order is
+  derivable, spacing is not, and a mispredicted `/setSubmix` is the crash
+  operation). The sweep (`POST /api/device/sweep`) plus live Global name
+  feedback replace the old discovery walk; re-run the sweep after layout
+  changes.
 - **TotalMix does not echo OSC-originated changes** — live-value UI would
   need forced dumps (constraint recorded on #6).
 - **Widths and layouts are snapshot-dependent** — new layouts need their

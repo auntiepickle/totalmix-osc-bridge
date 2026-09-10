@@ -66,8 +66,8 @@ jobs:
         shell: pwsh
         run: |
           npm init -y | Out-Null
-          npm install -D tailwindcss@latest @tailwindcss/cli
-          npx @tailwindcss/cli -i ./web/static/input.css -o ./web/static/style.css --minify --config ./tailwind.config.js
+          npm install -D tailwindcss@4.3.3 @tailwindcss/cli@4.3.3
+          npx @tailwindcss/cli -i ./web/static/input.css -o ./web/static/style.css --minify
           "style.css: $((Get-Item web/static/style.css).Length) bytes"
 
       - name: Install Python deps (trimmed set for the freeze)

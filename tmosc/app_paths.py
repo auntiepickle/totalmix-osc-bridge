@@ -90,7 +90,8 @@ def static_dir() -> str:
 def load_config_env(path=None) -> int:
     """Load ``KEY=VALUE`` lines from ``<data_dir>/config.env`` (or ``path``)
     into os.environ. Real environment variables always win. Blank lines and
-    ``#`` comments are skipped; surrounding quotes are stripped. Returns the
+    ``#`` comments (whole-line or inline after a space) are skipped; surrounding
+    quotes are stripped. Returns the
     number of keys applied; a missing file is 0, never an error."""
     p = Path(path) if path else data_dir() / CONFIG_ENV
     try:
@@ -104,6 +105,8 @@ def load_config_env(path=None) -> int:
             continue
         key, _, val = line.partition("=")
         key, val = key.strip(), val.strip()
+        if " #" in val:                      # inline comment, .env style
+            val = val.split(" #", 1)[0].rstrip()
         if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
             val = val[1:-1]
         if key and key not in os.environ:

@@ -17,6 +17,7 @@ published on every `v*` tag as `tmosc-setup-<version>.exe`.
 
 Inputs are staged by CI (`.github/workflows/release.yml`): the signed agent
 exes in `agent/windows/` and the signed PyInstaller folder in
-`dist/tmosc-bridge/`. Compile locally with
-`iscc /DAppVersion=0.0.0-dev tmosc-setup.iss` after staging the same inputs.
+`dist/tmosc-bridge/`. Compile locally from `installer/` with
+`iscc /DAppVersion=0.0.0-dev tmosc-setup.iss` after staging the same inputs
+(the script resolves its inputs relative to itself).
 The client-only `agent/windows/installer.iss` still exists for `agent-v*` tags.

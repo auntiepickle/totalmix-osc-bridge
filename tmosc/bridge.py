@@ -3,6 +3,7 @@ import time
 import logging
 import logging.handlers
 import json
+import tempfile
 import threading
 import paho.mqtt.client as mqtt
 import re
@@ -153,6 +154,7 @@ class TotalMixOSCBridge:
         self._knob_last_pushed = {}     # name -> snapshot tuple (device-sync differ)
         self._mqtt_knob_published = {}  # name -> last value sent to totalmix/knob/<name>/state (#28)
         self._knob_watch_stop = threading.Event()
+        self._persist_lock = threading.Lock()   # channel-map file writes (3 threads can race)
         self._knob_enable_sent = {}     # name -> ts of last auto-enable write
         self.channel_map = None
         self.channel_map_is_example = False
@@ -1462,10 +1464,24 @@ class TotalMixOSCBridge:
         """Atomic write of the channel map (temp + replace — a crash mid-
         write must not corrupt the only copy of the layout library)."""
         target = app_paths.data_path("ufx2_channel_map.json")
-        tmp = target + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(cm, f, indent=2)
-        os.replace(tmp, target)
+        # Private temp file + lock: the Global name-sync thread, a sweep and a
+        # web save can all persist at once, and one shared .tmp path let them
+        # truncate each other mid-write (review finding 2026-09-09).
+        with self._persist_lock:
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target) or ".",
+                                       prefix=".tmp-channel-map-", suffix=".json")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(cm, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, target)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
 
     def _read_button_state(self, addr: str, row=None, timeout: float = 1.0):
         """Fresh state of a momentary button. The refresh is picked BY
@@ -1821,8 +1837,10 @@ class TotalMixOSCBridge:
         # reduction on duck-enabled knob targets. Shares the knob-watch stop.
         from tmosc.duck_engine import DuckSupervisor
         self.duck = DuckSupervisor(self)
-        threading.Thread(target=self.duck.run,
-                         args=(self._knob_watch_stop,), daemon=True).start()
+        self._duck_thread = threading.Thread(target=self.duck.run,
+                                             args=(self._knob_watch_stop,),
+                                             name="duck-supervisor", daemon=True)
+        self._duck_thread.start()
         mode = ("TRANSPORT ACTIVE" if OSC_TRANSPORT == "global"
                 else "shadow mode (observing only)")
         logger.info(f"Global OSC {mode} → {GLOBAL_OSC_IP}:{GLOBAL_OSC_PORT} "
@@ -1830,6 +1848,12 @@ class TotalMixOSCBridge:
 
     def stop_global_osc(self):
         self._knob_watch_stop.set()
+        # Let the duck supervisor run its restore-on-exit BEFORE the transport
+        # is torn down - otherwise a ducked send stays ducked across a restart
+        # (its restore write needs the transport; review finding 2026-09-09).
+        t = getattr(self, "_duck_thread", None)
+        if t is not None and t.is_alive():
+            t.join(timeout=1.5)
         if self.global_transport:
             self.global_transport.stop()
             self.global_transport = None
