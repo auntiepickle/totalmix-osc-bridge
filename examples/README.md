@@ -5,7 +5,7 @@ Templates for the three config files. For `mappings.json` and
 file is missing and offers "init from example" in the web UI, which copies it
 into the state directory; `ufx2_snapshot_map.json` has no fallback - copy the
 template or generate it with `tools/scrape_totalmix_snapshots.*`. The state
-directory is the repo root from source or Docker, `%APPDATA%\tmosc-bridge` for the Windows installer). Schemas are in
+directory is the repo root from source or Docker, `%APPDATA%\tmosc-bridge` for the Windows installer. Schemas are in
 [docs/config.md](../docs/config.md).
 
 | Template | Becomes |

@@ -7,7 +7,7 @@ Helpers that are not part of the server and not collected by pytest.
 | `smoke_frozen.ps1` | dev box / CI (Windows) | Boots `dist/tmosc-bridge/tmosc-bridge.exe` from a foreign directory with state redirected and checks health, template fallback, the bundled UI, a config write, and a WebSocket handshake. `pwsh tools/smoke_frozen.ps1 -Port 8098` |
 | `global_osc_probe.py` | the TotalMix host | Global OSC hardware harness: read triggers and write-verify probes that restore what they change |
 | `global_hw_gates.py` | the TotalMix host | Hardware gates HW-3/5/6/8 (+ snapshot wash) used to calibrate the Global unit transforms |
-| `scrape_totalmix_snapshots.py` / `.ps1` | the TotalMix host | Scrape TotalMix's workspace/snapshot files into `ufx2_snapshot_map.json` (HASS.Agent friendly) |
+| `scrape_totalmix_snapshots.py` / `.ps1` | the TotalMix host | Build `ufx2_snapshot_map.json` from TotalMix's workspace/snapshot files. The `.py` prints the JSON to stdout (HASS.Agent friendly) and drops a copy in `%LOCALAPPDATA%\TotalMixFX`; the `.ps1` writes to `$SERVER_SHARE` (set it; the default is one rig's UNC path). Copy the result into the state dir or the `/app/config` mount |
 | `manual/` | the rig | Hand-run scripts against a live broker and device; see `manual/README.md` |
 
 The Python tools add the repo root to `sys.path` themselves and import from

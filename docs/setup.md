@@ -1,6 +1,6 @@
 # Setup
 
-Three ways to run the bridge: the Windows installer (no Python, no Docker), local Python on any machine that has TotalMix, or Docker for an always-on server. MQTT is optional in every case.
+Three ways to run the bridge: the Windows installer (no Python, no Docker), local Python on any machine that can reach TotalMix, or Docker for an always-on server. MQTT is optional in every case.
 
 ---
 
@@ -15,7 +15,7 @@ The signed `tmosc-setup-<version>.exe` from [Releases](https://github.com/auntie
 | IP of the PC running TotalMix FX | `OSC_IP` | `127.0.0.1` |
 | TotalMix "Port incoming" / "Port outgoing" | `OSC_PORT` / `OSC_LISTEN_PORT` | `7001` / `9001` |
 | Web UI port | `WEB_PORT` | `8088` |
-| OSC transport | `OSC_TRANSPORT` (plus `GLOBAL_OSC_*` for global) | `classic` |
+| OSC transport (pick `global`) | `OSC_TRANSPORT` (plus `GLOBAL_OSC_*` for global) | `classic` |
 | MQTT broker (blank = off) | `MQTT_BROKER`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASS`, `ENABLE_MQTT` | off |
 
 Where things live:
@@ -30,7 +30,7 @@ Notes:
 
 - The bridge runs as a minimized console window (Start Menu "TotalMix OSC Bridge"; the "start when I sign in" task adds it to Startup). Close the window to stop it.
 - Windows Firewall: an elevated install adds an inbound rule for the bridge. A per-user install gets Windows' allow/deny prompt the first time the bridge listens - allow it if other machines should reach the web UI or TotalMix runs on another PC; localhost works either way.
-- TotalMix itself is configured exactly as for any other install: OSC "Port incoming" `7001`, "Port outgoing" `9001`, remote IP = the bridge PC. See [TotalMix OSC configuration](#totalmix-osc-configuration-the-canonical-client-setup).
+- On the transport page pick `global` (the wizard defaults to classic). In TotalMix configure both remotes: Remote 1 = classic, ports `7001` / `9001` (still needed for workspace and snapshot switching), Remote 2 = Global OSC, ports `7002` / `9002`, remote IP = the bridge PC. See [TotalMix OSC configuration](#totalmix-osc-configuration-the-canonical-client-setup).
 - `tmosc-bridge.exe --data-dir` prints the state dir, `--version` the build; `TMOSC_DATA_DIR` overrides the state dir.
 - Portable use: the release also ships `tmosc-bridge-<version>-win64.zip`, the bare program folder. Unzip anywhere and run `tmosc-bridge.exe`; drop a `config.env` into `%APPDATA%\tmosc-bridge` or set the variables in the environment.
 
@@ -40,7 +40,7 @@ Notes:
 
 Best for road use, development, or running on the same machine as TotalMix.
 
-**Prerequisites:** Python 3.12+. TotalMix FX with OSC enabled: TotalMix > Settings > OSC, enable and set a receive port (default `7001`). No broker, no Docker, no HTTPS needed for localhost.
+**Prerequisites:** Python 3.12+. TotalMix FX 2.1+ with OSC enabled and both remotes configured as in [TotalMix OSC configuration](#totalmix-osc-configuration-the-canonical-client-setup) (Remote 2 = Global OSC `7002` / `9002`, Remote 1 = classic `7001` / `9001`). No broker, no Docker, no HTTPS needed for localhost.
 
 ```bash
 git clone https://github.com/auntiepickle/totalmix-osc-bridge.git
@@ -66,7 +66,7 @@ Open `http://localhost:8088`. Select your MIDI input in the header. Macro cards 
 
 `--reload` restarts on Python file changes. Config files hot-reload via the UI without it.
 
-**Finding what a control does:** move it in TotalMix and read `GET /api/device/activity` (the Global feedback change log), or use MIDI learn and the routing picker in the UI. The legacy log-only monitor (`ENABLE_OSC_MONITOR=true`) shares UDP 9001 with the listener, so give it `OSC_MONITOR_PORT=9003` if you ever enable it.
+**Finding what a control does:** move it in TotalMix and read `GET /api/device/activity` (the Global feedback change log), or use MIDI learn and the routing picker in the UI. The legacy log-only monitor (`ENABLE_OSC_MONITOR=true`) defaults to the listener's port, and the listener defaults to the monitor's, so if you ever enable it set both explicitly: `OSC_MONITOR_PORT=9003` and `OSC_LISTEN_PORT=9001`.
 
 ---
 
@@ -94,9 +94,13 @@ Only `OSC_IP` is required. Everything else has a default or is safe to omit.
 | `BRIDGE_LOG_FILE` | `bridge.log` | Path for the rotating log (default lives in the state dir: repo root from source, `%APPDATA%\tmosc-bridge` when installed) |
 | `OSC_LISTEN_PORT` | `9001` | UDP port of the classic feedback listener (TotalMix Remote 1 "Port outgoing") |
 | `ENABLE_OSC_LISTENER` | `true` | Classic feedback listener (workspace/snapshot confirmation, sweep) |
-| `OSC_MONITOR_PORT` | `9001` | Legacy log-only monitor port; change it if you enable the monitor (it cannot share the listener's port) |
+| `OSC_MONITOR_PORT` | `9001` | Legacy log-only monitor port. `OSC_LISTEN_PORT` inherits it when unset, so to run both set `OSC_MONITOR_PORT=9003` and `OSC_LISTEN_PORT=9001` |
 | `API_TOKEN` | unset | Shared token required on state-changing requests and `/ws` ([security.md](security.md)) |
 | `TMOSC_DATA_DIR` | state dir | Override where config JSON, backups and logs live |
+| `GLOBAL_HEARTBEAT_TIMEOUT_S` | `5` | Seconds without a Global status heartbeat before the transport counts as down |
+| `OSC_MONITOR_LOG_FILE` | `osc_monitor.log` | Log file of the legacy monitor (in the state dir) |
+| `WEB_HOST` | `0.0.0.0` | Bind address for `python -m tmosc` and the Windows exe |
+| `LOG_LEVEL` | `info` | uvicorn log level for `python -m tmosc` and the Windows exe |
 | `OSC_TRANSPORT` | `classic` | `global` = write via Global OSC (TotalMix 2.1+, **the standard**) |
 | `GLOBAL_OSC_IP` | `OSC_IP` | TotalMix host for the Global remote |
 | `GLOBAL_OSC_PORT` | `7002` | Global remote's incoming port |
@@ -135,6 +139,7 @@ MQTT_PASS=yourpassword
 cp docker-compose.example.yml docker-compose.yml
 cp examples/mappings.example.json mappings.json
 cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
+cp examples/ufx2_snapshot_map.example.json ufx2_snapshot_map.json
 
 docker compose build --no-cache
 docker compose up -d

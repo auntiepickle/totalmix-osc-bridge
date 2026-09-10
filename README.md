@@ -32,8 +32,8 @@ goblin turning the knob at exactly the right rate.
 Download `tmosc-setup-<version>.exe` from
 [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases),
 run it, pick **Client**, **Server**, or **Both**. The wizard asks for
-TotalMix's IP and ports (server) and finds the bridge on your LAN and lists
-your MIDI inputs (client). Everything is Authenticode-signed.
+TotalMix's IP, the ports and the transport (server; choose `global`) and
+finds the bridge on your LAN and lists your MIDI inputs (client). Everything is Authenticode-signed.
 
 ### Docker (always-on server)
 
@@ -41,9 +41,10 @@ your MIDI inputs (client). Everything is Authenticode-signed.
 git clone https://github.com/auntiepickle/totalmix-osc-bridge.git
 cd totalmix-osc-bridge
 cp docker-compose.example.yml docker-compose.yml
-printf 'OSC_IP=192.168.1.50\nOSC_TRANSPORT=global\nENABLE_MQTT=false\n' > .env   # your TotalMix PC; drop ENABLE_MQTT if you run a broker
+printf 'OSC_IP=192.168.1.50\nOSC_TRANSPORT=global\nENABLE_MQTT=false\n' > .env   # your TotalMix PC; with a broker use MQTT_BROKER=<ip> instead of ENABLE_MQTT=false
 cp examples/mappings.example.json mappings.json
 cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
+cp examples/ufx2_snapshot_map.example.json ufx2_snapshot_map.json   # workspace/snapshot switching needs it
 docker compose build && docker compose up -d
 ```
 

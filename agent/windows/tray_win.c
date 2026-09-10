@@ -77,6 +77,21 @@ static void set_str(char *dst, size_t cap, const char *src)
     dst[cap - 1] = '\0';
 }
 
+/* "value   # note" -> "value": drop an inline comment (a # at the start or
+ * after whitespace) and surrounding whitespace, so a hand-edited config.txt
+ * with notes still parses (the README sample had them; review finding). */
+static char *trim_value(char *v)
+{
+    char *h, *e;
+    while (*v == ' ' || *v == '\t') v++;
+    for (h = v; *h; h++) {
+        if (*h == '#' && (h == v || h[-1] == ' ' || h[-1] == '\t')) { *h = '\0'; break; }
+    }
+    e = v + strlen(v);
+    while (e > v && (e[-1] == ' ' || e[-1] == '\t')) *--e = '\0';
+    return v;
+}
+
 static void load_config(void)
 {
     const char *h = getenv("TMOSC_BRIDGE_HOST");
@@ -103,6 +118,7 @@ static void load_config(void)
                 if (!eq) continue;
                 *eq = '\0'; k = line; v = eq + 1;
                 nl = strpbrk(v, "\r\n"); if (nl) *nl = '\0';
+                v = trim_value(v);
                 if      (!strcmp(k, "host")) set_str(g_host, sizeof(g_host), v);
                 else if (!strcmp(k, "port")) g_port = atoi(v);
                 else if (!strcmp(k, "midi")) set_str(g_midi, sizeof(g_midi), v);

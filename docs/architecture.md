@@ -58,7 +58,7 @@ still accurate for those remaining paths.
 
 ### Frontend
 
-Load order: `api.js` -> `app.js` -> `ui.js` -> `midi.js` (plus `modul/knob.js`, `modul/graph.js` and vendored uPlot).
+Load order: vendored uPlot, `modul/knob.js`, `modul/graph.js` (in `<head>`), then `api.js` -> `app.js` -> `ui.js` -> `midi.js`.
 
 | File | Owns |
 |---|---|
@@ -174,7 +174,9 @@ Steps can therefore carry a name-based target instead of trusting a stored addre
   "value": "{{param}}", "operation": {"type": "ramp", "bars": 2, "bpm": "clock"} }
 ```
 
-At fire time `bridge._resolve_target()` looks up the submix index by name (channel map), sends `/setSubmix`, waits for the listener to confirm via `/1/labelSubmix` (1.5s timeout), then matches the channel *name* against the live bank's tracknames to find today's strip index. The stored `osc` address is only a fallback for when feedback is unavailable. `get_routing_label()` prefers target names, so card labels can't go stale either. The editor's routing picker writes targets; legacy raw-address macros (explicit `/setSubmix` steps) still execute unchanged.
+**Global transport (the standard):** at fire time `GlobalTransport.resolve_step(target)` maps the channel and submix names through the physical table to an absolute address (`/mix/in/<hw>/<out_hw>/faderlin`, `/output/<hw>/...`) and returns a writer for `OperationRegistry.execute`; no aiming, no bank wait.
+
+**Classic transport only:** at fire time `bridge._resolve_target()` looks up the submix index by name (channel map), sends `/setSubmix`, waits for the listener to confirm via `/1/labelSubmix` (1.5s timeout), then matches the channel *name* against the live bank's tracknames to find today's strip index. The stored `osc` address is only a fallback for when feedback is unavailable. `get_routing_label()` prefers target names, so card labels can't go stale either. The editor's routing picker writes targets; legacy raw-address macros (explicit `/setSubmix` steps) still execute unchanged.
 
 ---
 
@@ -184,7 +186,7 @@ At fire time `bridge._resolve_target()` looks up the submix index by name (chann
 
 **Workspace switch timing.** After `/loadQuickWorkspace`, TotalMix takes roughly one second to finish switching. The bridge waits for the classic listener to confirm the switch (2 s / 1 s timeouts) and only falls back to fixed 1.0 s / 0.3 s sleeps when no listener is running. Too short and OSC commands land in the wrong workspace.
 
-**`/setSubmix` selects the output bus.** Send `/setSubmix {index}` before adjusting a send level. The level command (`/1/volume{N}`) applies to whichever bus TotalMix has selected. Omit `/setSubmix` and you will adjust the wrong bus.
+**`/setSubmix` selects the output bus** (classic remote only; Global addresses name the bus). Send `/setSubmix {index}` before adjusting a send level. The level command (`/1/volume{N}`) applies to whichever bus TotalMix has selected. Omit `/setSubmix` and you will adjust the wrong bus.
 
 **Snapshot name matching.** The bridge lowercases and strips whitespace on both sides before comparing `snapshot` from `mappings.json` against `snapshot_map`. Case mismatches are safe. Leading or trailing whitespace is not.
 

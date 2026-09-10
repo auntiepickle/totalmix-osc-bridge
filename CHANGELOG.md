@@ -57,8 +57,15 @@
   `validate_capture.sh` (removed endpoints) is gone; docs corrected in ~40
   places (endpoints, ports, paths, transport wording).
 
-## Unreleased — 2026-09-09 · Windows installer: Client / Server / Both
+## v0.3.1 — 2026-09-10 · Windows installer: Client / Server / Both
 
+Released as v0.3.0 and, with the #28 fixes below, as v0.3.1 (both tagged 2026-09-10).
+
+- **The Home Assistant knob follows the device (#28)**: the retained
+  `totalmix/knob/<name>/state` topic now republishes on device-side fader
+  moves (it was only published from `knob_set`), and an output's own fader
+  reads back from `/output/<hw>/volume` feedback - before that every
+  row-3 volume knob (the speaker-volume slider) had no device value at all.
 - **One signed Windows installer** (`tmosc-setup-<version>.exe`, built by
   `.github/workflows/release.yml` on a `v*` tag): pick **Client** (the tray
   MIDI agent), **Server** (the bridge as a standalone exe - no Python, no
@@ -80,7 +87,7 @@
 - `ENABLE_MQTT=false` runs the bridge without a broker (the installer writes
   it when the MQTT page is left blank).
 
-## Unreleased — 2026-08-24 · MODUL: the instrument layout
+## v0.3.0 — 2026-08-24 · MODUL: the instrument layout (tagged 2026-09-10)
 
 - New **MODUL** design (gear menu → Design → Modul): not a repaint — the one
   skin with its own layout, from a design sprint over Rams/Braun (ET66), the

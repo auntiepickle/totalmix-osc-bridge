@@ -2,9 +2,9 @@
 
 These run against the real setup - a live MQTT broker and the bridge in front
 of TotalMix FX. They are not collected by pytest. Run them from the repo root;
-both read the broker credentials from the repo-root `.env`. `ramp_test.py`
-targets a hard-coded macro name and broker (`127.0.0.1:1883`): edit the
-constants at the top of the script first.
+both read the broker credentials from the repo-root `.env` but connect to a
+hard-coded broker at `127.0.0.1:1883`; `ramp_test.py` additionally hard-codes
+the macro topic. Edit the constants at the top of the scripts first.
 
 | Script | What it does |
 |---|---|

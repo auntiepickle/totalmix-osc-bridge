@@ -88,11 +88,13 @@ No controller handy? Create a virtual MIDI port to test end to end:
 sudo modprobe snd-virmidi                 # creates virtual MIDI ports
 amidi -l                                  # note the Virtual RawMIDI hw:N,0
 # point the agent at it, then in another shell send a CC 82 = 100 on ch1:
-amidi -p hw:N,0 -S 'B2 52 64'
+amidi -p hw:N,0 -S 'B0 52 64'
 ```
 
 Install as a service: copy `tmosc-agent` to `/usr/local/bin/`, edit the env in
-`linux/tmosc-agent.service`, then `systemctl enable --now tmosc-agent`.
+`linux/tmosc-agent.service`, then
+`sudo cp agent/linux/tmosc-agent.service /etc/systemd/system/ && sudo systemctl daemon-reload`
+and `sudo systemctl enable --now tmosc-agent`.
 
 Requires the bridge to expose `GET /api/midi/bindings` (added alongside this
 agent). The daemon fetches that TSV, matches incoming MIDI, and POSTs
@@ -143,9 +145,11 @@ agent\build\Release\tmosc-agent-tray.exe            REM tray app (reads config b
 `%APPDATA%\tmosc-agent\config.txt` (the installer writes this for you):
 
 ```
-host=192.168.1.41    # or `auto` to discover the bridge on the LAN
+# host: the bridge, or `auto` to discover it on the LAN
+host=192.168.1.41
 port=8088
-midi=U6MIDI          # a substring of your controller's name; blank = first input
+# midi: a substring of your controller's name; blank = first input
+midi=U6MIDI
 # optional — the secure client the tray's "Open Web UI - HTTPS" menu opens.
 # Defaults to the Caddy/nip.io URL for an IPv4 host (https://<ip>.nip.io);
 # set explicitly if your HTTPS front differs (e.g. a custom port/path).

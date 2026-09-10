@@ -275,7 +275,33 @@ Channel names and the **physical table** the bridge measured (`physical_table`, 
 }
 ```
 
-`bridge.get_routing_label()` walks every send and checks whether any macro step uses that `osc_address`. On a match it returns `"{send_name} -> {submix_name}"`. If no match, the card shows `—`.
+### physical_table
+
+Written by `POST /api/device/sweep`; both transports resolve name targets through it.
+
+```json
+"physical_table": {
+  "schema_version": 1,
+  "channels_per_row": 30,
+  "rows": {
+    "inputs":    { "0": ["AN 1", "AN 1/2"], "1": ["AN 1", "AN 1/2", "AN 2"] },
+    "playbacks": { "4": ["AN 5", "AN 5/6"], "5": ["AN 5/6", "AN 6"] },
+    "outputs":   { "0": ["Main"], "2": ["AN 3/4"] }
+  },
+  "last_sweep": { "...": "when it was measured" },
+  "source": { "...": "sweep or seeded" }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `channels_per_row` | Hardware channels per row on this interface (30 on a UFX II) |
+| `rows.<row>.<hw>` | 0-based hardware channel index to every name it answers to (mono and linked-pair names), so a target resolves whatever the current pairing is |
+| `last_sweep`, `source` | Measurement provenance, also reported by `GET /api/status` |
+
+### Routing labels
+
+`bridge.get_routing_label()` prefers name-based `target` steps: they yield `"{channel} -> {submix}"`, `"{channel} (Lowcut Freq)"`, `"FX: Reverb Enable"` or `"{channel} (mute)"`. Only for legacy raw-address steps does it walk the `submixes` block for a send whose `osc_address` the step uses. If nothing matches, the card shows `—`.
 
 Set `routing_label` directly in `mappings.json` to override for any macro.
 
