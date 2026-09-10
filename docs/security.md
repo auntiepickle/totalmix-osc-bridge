@@ -56,6 +56,13 @@ curl -H "X-Api-Token: choose-a-long-random-string" \
      -H 'Content-Type: application/json' -d '{"value":0.3}'
 ```
 
+### Tray agent
+
+The native tray agent cannot send the token yet: its heartbeat, knob, trigger and
+MIDI-relay requests are all state-changing POSTs, so with `API_TOKEN` set the tray
+gets 401s and shows as disconnected. Until that lands (tracked on GitHub), run the
+agent only against a bridge without a token, or keep Option A.
+
 ## What this does and doesn't cover
 
 - **Covers:** anonymous writes — nobody on the network can move a fader,

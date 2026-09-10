@@ -1001,17 +1001,35 @@ def backup_json_files(files=("mappings.json", "ufx2_channel_map.json")):
             logger.info(f"✅ Auto-backup: {fn}.{timestamp}")
 
 
+# Config uploads are small JSON files; a runaway body must not be read into
+# memory whole, and a rejected upload must not leave a pointless backup behind.
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+
+
+async def _read_json_upload(file: UploadFile) -> dict:
+    if not (file.filename or "").endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json files allowed")
+    contents = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413,
+                            detail=f"File larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+    try:
+        data = json.loads(contents)
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(status_code=400, detail=f"Not valid JSON: {e}")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Top level must be a JSON object")
+    return data
+
+
 @app.post("/api/upload/mappings")
 async def upload_mappings(file: UploadFile = File(...)):
-    if not file.filename.endswith(".json"):
-        raise HTTPException(status_code=400, detail="Only .json files allowed")
     try:
-        backup_json_files("mappings.json")
-        contents = await file.read()
-        data = json.loads(contents)
+        data = await _read_json_upload(file)
         if "macros" not in data:
             raise HTTPException(status_code=400, detail="Invalid mappings.json format")
         data = _sanitize_mappings(data)
+        backup_json_files("mappings.json")
         target = app_paths.data_path("mappings.json")
         _atomic_write_json(target, data)
         bridge.mappings = data
@@ -1028,14 +1046,11 @@ async def upload_mappings(file: UploadFile = File(...)):
 
 @app.post("/api/upload/channel_map")
 async def upload_channel_map(file: UploadFile = File(...)):
-    if not file.filename.endswith(".json"):
-        raise HTTPException(status_code=400, detail="Only .json files allowed")
     try:
-        backup_json_files("ufx2_channel_map.json")
-        contents = await file.read()
-        data = json.loads(contents)
+        data = await _read_json_upload(file)
         if "submixes" not in data and "physical_table" not in data:
             raise HTTPException(status_code=400, detail="Invalid ufx2_channel_map.json format")
+        backup_json_files("ufx2_channel_map.json")
         target = app_paths.data_path("ufx2_channel_map.json")
         _atomic_write_json(target, data)
         bridge._load_channel_map()
