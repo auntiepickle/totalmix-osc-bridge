@@ -2,6 +2,14 @@
 
 ## Unreleased — 2026-09-09 · Repo restructure (#27)
 
+- **Detail drawer (#31)**: a card's DETAILS and its editor open in a drawer
+  instead of a narrow column inside the card - a right-side panel on
+  desktop that leaves the grid usable (another card's DETAILS swaps the
+  content, Esc or the close key dismisses), a bottom sheet on phones.
+  The card's own details node moves into the drawer while open, so the
+  simple/advanced editor, save, cancel and Full JSON are unchanged.
+  MODUL gets its own materials for it (`web/static/drawer.css` +
+  `skins/modul.css`).
 - **Header follows the device (#30)**: the bridge now reads TotalMix's
   `/snapshot/load/N` Global feedback and adopts the active slot as the
   current snapshot (name via the snapshot map of the believed workspace),
@@ -20,7 +28,9 @@
 - Root tidied: templates in `examples/`, deployment glue in `deploy/` (compose
   example, entrypoint, Caddyfile, Home Assistant package), helper scripts in
   `tools/` (rig scripts in `tools/manual/`; classic-era scripts removed), dated
-  review docs in `docs/history/`, `docs/known-limitations.md`.
+  review docs in `docs/history/`, `docs/known-limitations.md`. The compose
+  example stays at the root, runnable in place (`docker compose -f
+  docker-compose.example.yml up -d --build`).
 - New READMEs: the root front door, `docs/README.md`, and one each for
   `tools/`, `deploy/`, `examples/`, `installer/`; `docs/architecture.md`
   module map refreshed for the Global-first design.
@@ -36,7 +46,7 @@
   channel-map file is written through a private temp file under a lock (the
   name-sync thread, a sweep and a web save could truncate each other);
   threadpool GET handlers iterate snapshots of the live dicts; `config.env`
-  tolerates inline comments. `deploy/docker-compose.example.yml` is now a
+  tolerates inline comments. `docker-compose.example.yml` is now a
   valid, runnable project; the quick starts set `OSC_TRANSPORT=global`;
   `.env.example` no longer points writes at the feedback port; the dead
   `validate_capture.sh` (removed endpoints) is gone; docs corrected in ~40

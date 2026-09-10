@@ -1,11 +1,11 @@
 # deploy/
 
 Everything for running the bridge as an always-on server. The `Dockerfile`
-stays at the repo root (it is the build context).
+and `docker-compose.example.yml` stay at the repo root (the build context;
+the compose example is runnable in place with `-f`).
 
 | File | Purpose |
 |---|---|
-| `docker-compose.example.yml` | Copy to the repo root as `docker-compose.yml`; `network_mode: host` so OSC feedback and LAN discovery work; bind-mounts the checkout at `/app` |
 | `docker-entrypoint.sh` | Restores the Tailwind-built `style.css` from the image on every start (the bind mount would otherwise shadow it), then execs uvicorn |
 | `Caddyfile` | HTTPS front on `<ip>.nip.io` so Web MIDI works from a LAN address (see `docs/setup.md#https`) |
 | `ha_config/packages/totalmix.yaml` | Home Assistant package: MQTT entities and automations for the bridge |

@@ -40,7 +40,7 @@ your MIDI inputs (client). Everything is Authenticode-signed.
 ```bash
 git clone https://github.com/auntiepickle/totalmix-osc-bridge.git
 cd totalmix-osc-bridge
-cp deploy/docker-compose.example.yml docker-compose.yml
+cp docker-compose.example.yml docker-compose.yml
 printf 'OSC_IP=192.168.1.50\nOSC_TRANSPORT=global\nENABLE_MQTT=false\n' > .env   # your TotalMix PC; drop ENABLE_MQTT if you run a broker
 cp examples/mappings.example.json mappings.json
 cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
@@ -118,7 +118,8 @@ tmosc/            the server package (python -m tmosc): bridge.py engine, api/ (
 web/              browser UI (web/static) + the web.web_client compatibility shim
 agent/            native C MIDI client: portable core, Linux daemon, Windows tray
 installer/        Inno Setup unified installer (Client / Server / Both)
-deploy/           Docker compose example, entrypoint, Caddy HTTPS front, Home Assistant package
+deploy/           Docker entrypoint, Caddy HTTPS front, Home Assistant package
+docker-compose.example.yml  runnable compose file (copy or `-f` it)
 examples/         *.example.json templates
 tools/            dev + hardware helpers, frozen-build smoke test, manual rig scripts
 tests/            pytest suite (no hardware needed)

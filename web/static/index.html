@@ -13,6 +13,8 @@
     <link href="mobile.css" rel="stylesheet">
     <!-- Graphs base look, every theme (toggle in gear menu / Design) -->
     <link href="graphs.css" rel="stylesheet">
+    <!-- Detail drawer (#31): card DETAILS / editor open beside the grid, not inside a card -->
+    <link href="drawer.css" rel="stylesheet">
     <!-- Optional skin (pure CSS re-style, scoped by html[data-skin]) -->
     <link id="skin-css" rel="stylesheet" href="" disabled>
     <!-- MODUL: realtime graphing engine (uPlot, vendored) + components -->
@@ -25,6 +27,24 @@
 <body class="bg-zinc-950 text-white">
     <div class="max-w-7xl mx-auto p-6">
 
+        <!-- Detail drawer (#31): a card's DETAILS / editor opens here: a right-side
+             panel on desktop, a bottom sheet on phones. The card's own
+             #detail-<name> node is moved in while open (see ui.js). -->
+        <aside id="detail-drawer" class="hidden" aria-hidden="true">
+            <div class="drawer-scrim" onclick="closeDetailDrawer()"></div>
+            <section class="drawer-panel" role="dialog" aria-labelledby="drawer-title" tabindex="-1">
+                <header class="drawer-head">
+                    <div class="drawer-grip" aria-hidden="true"></div>
+                    <div class="drawer-titles">
+                        <h2 id="drawer-title" class="drawer-title"></h2>
+                        <div id="drawer-sub" class="drawer-sub font-mono"></div>
+                    </div>
+                    <button type="button" class="drawer-close" onclick="closeDetailDrawer()"
+                            title="Close (Esc)" aria-label="Close details"><i class="fas fa-xmark"></i></button>
+                </header>
+                <div id="drawer-body" class="drawer-body"></div>
+            </section>
+        </aside>
         <!-- NAV BAR -->
         <div class="flex items-center justify-between mb-8 bg-zinc-900 rounded-3xl px-8 py-4 border border-zinc-700">
             <div>

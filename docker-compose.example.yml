@@ -1,9 +1,9 @@
 # TotalMix OSC Bridge - docker compose example
 #
-# 1. cp deploy/docker-compose.example.yml docker-compose.yml     (repo root, next to the Dockerfile)
-# 2. create .env beside it - at least:  OSC_IP=<TotalMix PC>  OSC_TRANSPORT=global
+# 1. create .env next to this file - at least:  OSC_IP=<TotalMix PC>  OSC_TRANSPORT=global
 #    (ENABLE_MQTT=false if you have no broker; all variables: docs/setup.md#environment-variables)
-# 3. docker compose build && docker compose up -d
+# 2. either run it as is:      docker compose -f docker-compose.example.yml up -d --build
+#    or copy it first:         cp docker-compose.example.yml docker-compose.yml && docker compose up -d --build
 #
 # Updates are `git pull` + `docker compose restart` (the checkout is bind-mounted);
 # rebuild only when requirements.txt, the Dockerfile or the web UI's Tailwind classes change.

@@ -132,7 +132,7 @@ MQTT_PASS=yourpassword
 ### Deploy
 
 ```bash
-cp deploy/docker-compose.example.yml docker-compose.yml
+cp docker-compose.example.yml docker-compose.yml
 cp examples/mappings.example.json mappings.json
 cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
 
