@@ -1,117 +1,157 @@
 # TotalMix OSC Bridge
 
-Nobody wants to move a fader unless they mean to. This bridge makes that a deliberate choice rather than a constant task.
+**Turn RME TotalMix FX into an instrument.** One MIDI knob or trigger fires a
+macro: switch workspace and snapshot, ramp a send over four bars in time with
+your sequencer clock, duck a return under a sidechain, open a filter - all
+over OSC, with 32-bit floats instead of 128 MIDI steps. A signed Windows
+installer, a Docker image, and a plain Python checkout all run the same code.
 
----
+<p align="center"><img src="docs/assets/logo.jpg" width="360" alt="TotalMix OSC Bridge"></p>
 
-## Why this exists
+## Why
 
-If you run analog hardware through RME TotalMix, your sends are configured and left alone. You patch a synth into a reverb, dial in the level, move on. But sometimes the send itself is part of the performance: a synth that blooms into the room on a specific bar, a delay return that opens for a breakdown and closes again. TotalMix has no way to do that. You either reach for the fader or you skip it.
+In a hardware-heavy studio the sends are set once and left alone. But
+sometimes the send *is* the performance: a synth that blooms into the room on
+a specific bar, a delay return that opens for the breakdown. TotalMix has no
+way to do that from a controller, and MIDI CC is too coarse for an analog
+send. This bridge adds the missing layer, and an LFO is just a very small
+goblin turning the knob at exactly the right rate.
 
-This bridge adds the missing layer. One MIDI trigger fires a macro: load the right workspace and snapshot, then ramp a send over N bars in time with your sequencer clock. No fader touch required. The signal path becomes something you compose with, not just configure.
+## The three pieces
 
-**On OSC vs MIDI for this:** MIDI CC is 7-bit, 128 steps. A ramp over MIDI is 128 discrete jumps, audible on a hardware send. OSC carries 32-bit floats. Ramps are smooth at any resolution. For automation into analog hardware the difference is real and audible.
-
----
-
-## Signal chain
-
-```
-MIDI controller -> USB -> Browser (Web MIDI API)
-  -> WebSocket -> FastAPI server
-  -> bridge.run_macro() -> operations (ramp / LFO)
-  -> UDP OSC -> TotalMix FX
-```
-
-Any standard MIDI controller works. The bridge responds to CC, Note On, and Note Off.
-
-MQTT is optional. If you run Home Assistant or a similar home automation stack, the bridge can publish state and receive macro triggers over MQTT. Without a broker, everything works over the WebSocket and REST API.
-
----
-
-## Features
-
-- **MIDI triggers** — bind CC, Note On, or Note Off (any number, any channel) to a macro
-- **Fire modes** — `ignore`, `queue`, or `restart` when a macro is already running
-- **Workspace and snapshot switching** — macros declare target by name; the bridge resolves slot numbers and switches via OSC only when needed
-- **BPM-synced ramp and LFO** — smooth fader moves over musical time (`bars x BPM`); use `"bpm": "clock"` to follow live MIDI clock
-- **Live web UI** — macro cards with progress bars, five-state LED indicators, real-time WebSocket updates
-- **Macro manager** — create, duplicate, edit, and delete macros entirely in the browser; pick routing targets from your discovered channel map instead of typing OSC addresses; changes write to disk and hot-reload without a restart
-- **MIDI clock BPM display** — reads `0xF8` timing clock messages and shows live BPM
-- **Device capture + channel-map discovery** — the bridge listens to TotalMix's OSC feedback and builds `ufx2_channel_map.json` by walking the submixes itself (`POST /api/device/discover`)
-- **MQTT integration** — optional; Home Assistant can trigger macros and receive workspace state
-- **Auto-backup** — every config save writes a timestamped copy to `backups/`
-- **Background MIDI agent (tray)** — a signed, dependency-free Windows tray app that drives your MIDI mapping **without a browser open**; it auto-discovers the bridge on the LAN, and coexists with an open browser (which stays a live monitor). See [agent/README.md](agent/README.md)
-
----
+| Piece | What it is | Where |
+|---|---|---|
+| **Bridge** (server) | Python service: macro + knob engine, Global OSC transport, web UI, REST/WebSocket API, MQTT | `tmosc/`, `web/` |
+| **Tray agent** (client) | Native, dependency-free Windows/Linux program that reads your MIDI controller and drives the bridge with no browser open | `agent/` |
+| **Installer** | One signed `tmosc-setup-<version>.exe`: Client, Server, or Both, with a config wizard | `installer/` |
 
 ## Quick start
 
-### Option A: Local (laptop, no server required)
+### Windows installer (no Python, no Docker)
+
+Download `tmosc-setup-<version>.exe` from
+[Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases),
+run it, pick **Client**, **Server**, or **Both**. The wizard asks for
+TotalMix's IP and ports (server) and finds the bridge on your LAN and lists
+your MIDI inputs (client). Everything is Authenticode-signed.
+
+### Docker (always-on server)
 
 ```bash
 git clone https://github.com/auntiepickle/totalmix-osc-bridge.git
 cd totalmix-osc-bridge
-
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-cp mappings.example.json mappings.json
-cp ufx2_channel_map.example.json ufx2_channel_map.json
-cp ufx2_snapshot_map.example.json ufx2_snapshot_map.json
-
-export OSC_IP=127.0.0.1
-uvicorn web.web_client:app --host 0.0.0.0 --port 8080
+cp deploy/docker-compose.example.yml docker-compose.yml   # set OSC_IP at minimum
+cp examples/mappings.example.json mappings.json
+cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
+docker compose build && docker compose up -d
 ```
 
-Open `http://localhost:8080`. Point TotalMix OSC output to `127.0.0.1`. MIDI works on localhost without HTTPS.
-
-### Option B: Docker (always-on server)
+### From source
 
 ```bash
-cp docker-compose.example.yml docker-compose.yml
-# Set OSC_IP at minimum; see docs/setup.md for all options
-
-cp mappings.example.json mappings.json
-cp ufx2_channel_map.example.json ufx2_channel_map.json
-
-docker compose build --no-cache && docker compose up -d
-docker compose logs -f
+python -m venv .venv && source .venv/bin/activate     # .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+cp examples/mappings.example.json mappings.json
+OSC_IP=127.0.0.1 python -m tmosc                       # web UI on http://localhost:8088
 ```
 
-HTTPS is required for Web MIDI on a real IP. See [docs/setup.md](docs/setup.md#https).
+Then point TotalMix at the bridge: **Settings > OSC**, enable a remote, port
+incoming `7001`, port outgoing `9001`, remote IP = the bridge machine. For the
+Global OSC transport (TotalMix FX 2.1+, the standard) see
+[docs/setup.md](docs/setup.md#totalmix-osc-configuration-the-canonical-client-setup).
 
-### Option C: Windows installer (no Python, no Docker)
+## How it fits together
 
-Download `tmosc-setup-<version>.exe` from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases) and pick what this PC should be:
+```
+MIDI controller ─┬─ tray agent (native, headless) ──┐
+                 └─ browser (Web MIDI, optional)  ──┤ HTTP / WebSocket
+                                                    v
+Home Assistant ── MQTT ──────────────────────>  BRIDGE  ── Global OSC (UDP) ──> TotalMix FX
+                                                    ^                               │
+                                          web UI <──┴──── feedback listener <───────┘
+```
 
-| Choice | What you get |
-|---|---|
-| **Client** | the signed tray MIDI agent; the wizard finds the bridge on your LAN and lists your MIDI inputs |
-| **Server** | the bridge as a standalone exe; the wizard asks for TotalMix's IP, ports, transport and optional MQTT and writes `%APPDATA%\tmosc-bridge\config.env` |
-| **Both** | the single-PC studio: TotalMix, bridge and controller on one machine |
+- The **bridge** resolves macro targets by *name* ("AN 3 -> RE-150 In") against
+  a channel map it learns from the device, so nothing breaks when strips move.
+- **Knobs** are continuous controls with a range guard, section auto-enable,
+  device-side sync (move the fader in TotalMix and every view follows), and a
+  retained MQTT state topic for a phone slider.
+- The **tray agent** owns the MIDI port; an open browser yields to it and
+  stays a live monitor. Both find the bridge by LAN auto-discovery.
 
-Everything is Authenticode-signed. Server state (your `mappings.json`, channel/snapshot maps, backups, logs) lives in `%APPDATA%\tmosc-bridge`, and the Start Menu gets a "TotalMix OSC Web UI" link. Details in [docs/setup.md](docs/setup.md#windows-installer).
+## Features
 
----
+- **Macros** with ramp and LFO operations timed in bars against the live MIDI
+  clock, fire modes (`ignore`, `queue`, `restart`), workspace and snapshot
+  switching that only switches when needed.
+- **Knobs**: EQ, cuts, gain, pan, sends, VCA-style send groups, sidechain
+  ducking, filter-curve display, and the Home Assistant slider.
+- **Live web UI** with card, rack, and the MODUL instrument layout; every
+  change is hot-reloaded and auto-backed up.
+- **Device discovery**: the bridge reads TotalMix's feedback and builds the
+  channel map itself.
+- **MQTT / Home Assistant**: trigger macros, follow workspace state, control
+  knobs from a dashboard.
+- **Signed, dependency-free Windows builds** for both client and server.
 
-## Config files
+## Configuration
 
 | File | Purpose |
 |---|---|
-| `mappings.json` | Macro definitions: steps, MIDI triggers, fire modes, operations |
-| `ufx2_snapshot_map.json` | Workspace names to TotalMix Quick Select slots and snapshot names |
-| `ufx2_channel_map.json` | OSC address to human name map for routing labels on cards |
+| `mappings.json` | Macro and knob definitions (`examples/mappings.example.json`) |
+| `ufx2_channel_map.json` | Channel names and the measured physical table |
+| `ufx2_snapshot_map.json` | Workspace names to Quick Select slots and snapshot names |
+| `config.env` or environment | `OSC_IP`, ports, transport, MQTT - see [docs/setup.md](docs/setup.md#environment-variables) |
 
-All three have `*.example.json` counterparts. The real files are git-ignored so live edits survive `git pull`; the Windows installer build keeps them in `%APPDATA%\tmosc-bridge` instead (`app_paths.py`). Full schema in [docs/config.md](docs/config.md).
+From source and in Docker these live in the repo root; the Windows installer
+keeps them in `%APPDATA%\tmosc-bridge`. Schemas: [docs/config.md](docs/config.md).
 
----
+## Repository layout
+
+```
+tmosc/            the server package (python -m tmosc): bridge.py engine, api/ (FastAPI),
+                  OSC transports + listeners, MQTT, discovery, duck engine, app_paths
+web/              browser UI (web/static) + the web.web_client compatibility shim
+agent/            native C MIDI client: portable core, Linux daemon, Windows tray
+installer/        Inno Setup unified installer (Client / Server / Both)
+deploy/           Docker compose example, entrypoint, Caddy HTTPS front, Home Assistant package
+examples/         *.example.json templates
+tools/            dev + hardware helpers, frozen-build smoke test, manual rig scripts
+tests/            pytest suite (no hardware needed)
+docs/             setup, config, architecture, security, Home Assistant, design notes, history
+Dockerfile        server image (Tailwind build stage + Python runtime)
+tmosc-bridge.spec PyInstaller spec for the frozen Windows server
+```
+
+## Development
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                                   # 270+ tests, ~30 s, no hardware
+docker build -t tmosc .                  # what CI builds
+pip install -r requirements-frozen.txt && pyinstaller --noconfirm tmosc-bridge.spec
+pwsh tools/smoke_frozen.ps1              # boots dist/tmosc-bridge/tmosc-bridge.exe and checks it
+```
+
+Releases: push a tag `v1.2.3`; `.github/workflows/release.yml` builds and
+signs the agent, the frozen bridge, and the installer, then publishes them.
 
 ## Documentation
 
 | Doc | Contents |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Signal flow, component responsibilities, TotalMix OSC gotchas, thread model, frontend patterns |
-| [docs/config.md](docs/config.md) | Full schema for all three config files with examples |
-| [docs/setup.md](docs/setup.md) | Local and Docker deployment, env vars, HTTPS, MQTT and Home Assistant |
-| [agent/README.md](agent/README.md) | The background MIDI tray agent — install, config, how it coexists with the browser, building from source |
+| [docs/setup.md](docs/setup.md) | Windows installer, Docker, source install, env vars, HTTPS, TotalMix OSC settings |
+| [docs/config.md](docs/config.md) | Full schema of the three config files |
+| [docs/architecture.md](docs/architecture.md) | Modules, transports, thread model, frontend patterns |
+| [docs/home-assistant.md](docs/home-assistant.md) | MQTT topics and the phone knob |
+| [docs/security.md](docs/security.md) | Locking the control API down (`API_TOKEN`) |
+| [docs/known-limitations.md](docs/known-limitations.md) | Honest edges |
+| [agent/README.md](agent/README.md) | The tray agent: install, config, coexistence, build |
+| [CHANGELOG.md](CHANGELOG.md) | What changed, and why |
+
+## Status
+
+Used daily on a UFX II rig with the Global OSC transport. The classic OSC
+transport (TotalMix's remote 1, relative addressing) is kept for workspace and
+snapshot switching and device sweeps but is legacy for everything else.
+License: not yet chosen; open an issue if you need one before it lands.

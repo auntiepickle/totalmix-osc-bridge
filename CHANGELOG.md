@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — 2026-09-10 · Repo restructure (#27)
+
+- The server is now a package, `tmosc/` (bridge, `api/`, both OSC transports
+  and listeners, MQTT, discovery, duck engine, config, app_paths), with
+  `python -m tmosc` as the entry. `uvicorn tmosc.api.app:app` replaces
+  `uvicorn web.web_client:app`; `web/web_client.py` stays as a shim so Docker
+  images built before the move keep starting until they are rebuilt.
+  `web/static` did not move.
+- Root tidied: templates in `examples/`, deployment glue in `deploy/` (compose
+  example, entrypoint, Caddyfile, Home Assistant package), helper scripts in
+  `tools/` (rig scripts in `tools/manual/`; classic-era scripts removed), dated
+  review docs in `docs/history/`, `docs/known-limitations.md`.
+- New READMEs: the root front door, `docs/README.md`, and one each for
+  `tools/`, `deploy/`, `examples/`, `installer/`; `docs/architecture.md`
+  module map refreshed for the Global-first design.
+- Build hygiene: Tailwind pinned to 4.3.3 in the Dockerfile and the release
+  workflow (an unpinned @latest made `style.css` differ between builds) and
+  its inert `--config` flag dropped; the Docker image now ships the server
+  code; `/api/test` counts the live mappings instead of the boot-time copy.
+
 ## Unreleased — 2026-09-09 · Windows installer: Client / Server / Both
 
 - **One signed Windows installer** (`tmosc-setup-<version>.exe`, built by

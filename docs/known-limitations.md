@@ -1,0 +1,79 @@
+# Known limitations
+
+Honest edges, kept so nobody re-discovers them. Most entries date from the
+classic-transport era; with Global OSC as the standard some only apply to the
+remaining classic paths (workspace/snapshot switching, sweep, probe).
+
+## Hardware-untested branches
+- **Page-2 silence refusal** ("no page-2 dump followed the row-mirror
+  nudge"): needs a dead device to exercise; unit-tested only. If it fires
+  in the wild, apply the freeze protocol — first question is whether the
+  rack is powered.
+- **Ramp/LFO mid-run trajectories**: park values are hardware-verified;
+  the in-flight shape can't be sampled without diverting row-scoped writes
+  (forced-dump toggle limitation). Verified by unit tests + the math.
+- **Review batch fixes** (device lock, ordered ingestion, freshness
+  floors): unit-tested; a hardware regression round is queued with the
+  server agent.
+- **Hidden channels (Channel Layout presets)**: the physical table was
+  measured with all channels visible. Classic OSC skips hidden channels
+  in STRIP numbering (community-documented); whether hiding also shifts
+  the hardware-offset commands we aim with (`/setBankStart`,
+  `/setSubmix`) has never been measured. Accepted unmeasured by user
+  decision (2026-08-21): this rig hides nothing, and the Global OSC
+  migration (#25) resolves it properly via its "Receive to hidden
+  channels" option. If you start hiding channels before #25 lands,
+  re-run the sweep experiment first.
+
+## By design / device constraints
+- The **discovery walk cannot be replaced** — submix name→index is not
+  queryable from feedback (order is derivable, spacing is not, and a
+  mispredicted `/setSubmix` is the crash operation). Run a walk after
+  layout changes.
+- **TotalMix does not echo OSC-originated changes** — live-value UI would
+  need forced dumps (constraint recorded on #6).
+- **Widths and layouts are snapshot-dependent** — new layouts need their
+  input widths posted (`POST /api/device/widths`) or a fingerprint
+  derivation (#16 phase 2, not built) before input EQ/dynamics aim there.
+  Output aiming needs no widths.
+- Concurrent macros serialize at step granularity behind the device-aim
+  lock — a long ramp makes a simultaneously fired macro wait. Correctness
+  over parallelism; finer-grained locking is future work.
+- **Ramp "parked at start" means the ramp trajectory's start** (the sweep
+  floor), not the channel's pre-ramp value. Natural for a volume fade;
+  on an EQ-gain ramp it reads as "slammed to the floor and left there".
+  Restore-to-prior-value and editor wording are #19 design-half work.
+- A `/setSubmix` to the already-selected submix (every stereo pair's
+  second index) is a **total no-op — zero feedback**. The walk
+  disambiguates silence from a crash with a row-toggle probe.
+- **`/3/reverbEnable` and `/3/echoEnable` are momentary toggle buttons**
+  (1.0 flips, 0.0 is ignored) — the bridge sets them by reading fresh
+  state and pressing only on difference, and modulates them by pressing
+  only on 0/1 edges. The `/2/` enables (eq/dyn/alev/lowcut/phase) are
+  **unverified** and assumed value-settable until a hardware round
+  discriminates press-vs-set for them.
+
+## Not exposed
+- `/2/reverbSend` — constant sentinel (−3.615/−oo) on every channel;
+  not a real control on this device.
+- `/2/select` — persistent Select-button state, not a parameter.
+- EQ band 2 type — the device has none (band 2 is always Bell).
+- Page-2 input-stage extras (phantom, pad, instrument, refLevel, width,
+  msProc, loopback, recordEnable) — inventoried, shippable on request.
+
+## Open feature board
+- #6 live-fed routing picker (channel state only; the map stays for
+  indices), #8 channel identify, #9 simple patch mode, #16 phase 2 width
+  auto-derivation, #19 design half (rate/curve controls in the editor,
+  mode descriptions, SET/SWEEP/WOBBLE naming).
+
+## Device quirks (documented, not ours to fix)
+- Output names cap around **11 characters** and the device may pad with a
+  trailing space — a longer rename can truncate into a name whose
+  stripped form is IDENTICAL to the original, making the rename a no-op
+  from the layout system's point of view. Layout tests should use short,
+  obviously-different names and verify the live name-set.
+- A strip reports `RE-!50 Out` (device-side typo).
+- Page-2 low-cut frequencies read back quantised (250 → 260 Hz).
+- Number of Faders per Bank and other OSC settings are per-workspace and
+  revert on workspace load unless the workspace is re-saved.

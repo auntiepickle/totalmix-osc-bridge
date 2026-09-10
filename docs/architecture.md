@@ -1,55 +1,76 @@
 # Architecture
 
-The bridge is a single Python process: one FastAPI server, one asyncio event loop, one optional MQTT client in a background thread, and a pool of daemon threads for macro execution. All state lives in one singleton, `bridge` in `bridge.py`.
+The bridge is one Python process: a FastAPI app on one asyncio loop, a handful
+of daemon threads (OSC feedback listeners, macro runs, the knob watcher, the
+duck supervisor, MQTT), and one shared singleton, `bridge` in
+`tmosc/bridge.py`. The browser UI and the native tray agent are clients of its
+REST + WebSocket API.
 
 ---
 
 ## Signal flow
 
 ```
-MIDI controller -> USB -> Browser (Web MIDI API)
-  -> midi.js -> WebSocket -> POST /api/trigger/{name}
-  -> daemon thread -> bridge.run_macro()
-      +-- workspace/snapshot switch via OSC (if needed)
-      +-- operation steps (ramp / LFO, blocking and cancellable)
-      +-- osc_client.send_message() -> UDP -> TotalMix FX
-
-TotalMix FX -> MQTT (if configured)
-  -> mqtt_handler.on_message()
-      +-- bridge.update_workspace/snapshot()
-      +-- broadcast -> all WebSocket clients -> browser
+MIDI controller --+-- tray agent (agent/, native)  -- POST /api/knob, /api/trigger --+
+                  +-- browser (web/static/midi.js) -- WebSocket {"type":"knob"} -----+
+                                                                                    v
+Home Assistant -- MQTT totalmix/macro/<name>, totalmix/knob/<name> -->  bridge.run_macro / knob_set
+                                                                                    |
+                                 Global OSC writers (tmosc/global_transport.py)     | UDP 7002
+                                                                                    v
+                                                                               TotalMix FX
+                                                                                    | UDP 9002 feedback
+                                 tmosc/global_listener.py (device state)  <---------+
+                                    |                     |
+                        WebSocket broadcasts       MQTT retained state (knob / workspace / snapshot)
+                                    v
+                                 web UI
 ```
 
-The browser is not a thin relay. MIDI input, BPM clock detection, LED animation, fire timing, and UI state all run in the browser. Macros already in flight on the server keep running if the tab closes.
+Two OSC transports exist. **Global** (TotalMix FX 2.1+ "Remote 2", absolute
+addresses such as `/output/0/volume`) is the standard: knobs, name-targeted
+macro steps, ducking, meters and device sync all go through it. **Classic**
+(Remote 1, relative page addresses, aim-then-write) is legacy and remains only
+for workspace/snapshot switching, the physical-table sweep and the liveness
+probe. Several sections further down describe classic-era mechanics; they are
+still accurate for those remaining paths.
 
 ---
 
-## File responsibilities
+## Modules
 
-### Python
-
-| File | Owns |
+| Module | Owns |
 |---|---|
-| `bridge.py` | `TotalMixOSCBridge` class, macro execution, OSC client, state singleton |
-| `web/web_client.py` | FastAPI app, all REST endpoints, WebSocket endpoint, startup wiring |
-| `mqtt_handler.py` | MQTT subscriptions, workspace/snapshot state routing, snapshot map file watcher |
-| `operations.py` | `OperationRegistry`: pluggable ramp and LFO implementations |
-| `config.py` | Env var loading, `snapshot_num_to_osc_index()` |
-| `osc.py` | Shared OSC socket cache — one `SimpleUDPClient` per `(ip, port)`, used by both `bridge.py` and `mqtt_handler`. |
-| `osc_listener.py` | Structured OSC feedback listener: parses TotalMix pushes into queryable `DeviceState` (submixes, channel names, fader values). On by default. |
-| `discovery.py` | Channel-map discovery walker: `/setSubmix 1..N`, capture feedback, build a `ufx2_channel_map.json` draft. |
-| `osc_monitor.py` | Legacy log-only UDP listener. Superseded by `osc_listener.py`; enable with `ENABLE_OSC_MONITOR=true` (conflicts with the listener on the same port). |
+| `tmosc/bridge.py` | `TotalMixOSCBridge`: macro runner, knob engine (device sync, hold, VCA groups, MQTT knob state), workspace/snapshot switching, MIDI-owner state, WebSocket broadcast plumbing, classic aiming, sweep and probe |
+| `tmosc/api/app.py` | FastAPI app: every REST endpoint, `/ws`, config persistence (atomic writes + auto-backup), uploads, startup wiring. Run with `uvicorn tmosc.api.app:app`; `web/web_client.py` is a compatibility shim for older Docker images |
+| `tmosc/__main__.py` | `python -m tmosc` and the frozen exe entry: `app_paths.prepare()`, then in-process uvicorn |
+| `tmosc/global_transport.py` | Global OSC writers: name to address resolution through the physical table, unit transforms, heartbeat/liveness |
+| `tmosc/global_listener.py` | Global OSC feedback into `GlobalDeviceState` (params, names, mix sends, levels, snapshots, human-change log) |
+| `tmosc/global_units.py` | Per-parameter unit map and the RME fader law (`fader_lin` / `fader_db`) |
+| `tmosc/osc.py`, `osc_listener.py`, `osc_monitor.py` | Classic client cache, classic feedback `DeviceState`, legacy log-only monitor |
+| `tmosc/physical_table.py` | Measured strip / hardware-offset alias table shared by both transports |
+| `tmosc/operations.py` | `OperationRegistry` (ramp, LFO) and `shape_value` / `unshape_value` range mapping |
+| `tmosc/duck_engine.py` | Sidechain duck supervisor (25 Hz) with restore-on-exit |
+| `tmosc/mqtt_handler.py` | MQTT subscriptions (macros, knobs, workspace/snapshot) and the snapshot-map watcher |
+| `tmosc/discovery.py` | LAN auto-discovery UDP responder (`TMOSC-DISCOVER?` answered with `TMOSC-BRIDGE <port>`) |
+| `tmosc/config.py` | Environment into settings; `snapshot_num_to_osc_index()` |
+| `tmosc/app_paths.py` | Where state lives (repo root from source and Docker, `%APPDATA%/tmosc-bridge` when frozen) and the `config.env` loader |
 
 ### Frontend
 
-Load order: `api.js` -> `app.js` -> `ui.js` -> `midi.js`.
+Load order: `api.js` -> `app.js` -> `ui.js` -> `midi.js` (plus `modul/knob.js`, `modul/graph.js` and vendored uPlot).
 
 | File | Owns |
 |---|---|
-| `api.js` | `window.API.*`: centralized fetch layer. All HTTP calls go through here. Nothing else calls `fetch()` directly. |
-| `app.js` | Global state, WebSocket handler, macro loading, LED helpers, nav dropdowns, health polling |
-| `ui.js` | Card rendering, progress animation, macro editor (create/duplicate/edit/delete, step + trigger management, routing picker fed by the discovered channel map), macro firing, settings menu, file upload |
-| `midi.js` | Web MIDI init, CC/Note message handling, BPM clock detection, device selector |
+| `api.js` | `window.API.*`: the fetch layer for `/api/...` |
+| `app.js` | Global state, WebSocket handler, knob stream, health polling, skins |
+| `ui.js` | Card / rack / MODUL rendering, macro editor, routing picker, MIDI matrix, knob curves |
+| `midi.js` | Web MIDI, learn, BPM clock, emulator, tray coexistence (yield and relay) |
+
+Server/client mirrors that must change together: `RUNTIME_FIELDS` and
+`MACRO_NAME_RE` (`tmosc/api/app.py` and `ui.js`), the fader law
+(`global_units.py` and `ui.js`), and the trigger matcher in the native agent
+(a port of `midi.js`).
 
 ---
 
