@@ -168,6 +168,11 @@ class TotalMixOSCBridge:
         self.global_transport = None        # GlobalTransport (#25) — active or shadow
         self.duck = None                    # DuckSupervisor — sidechain engine
         self.state_confirmed = None         # last commanded switch confirmed by device feedback?
+        # #30: what the DEVICE says about snapshots (Global /snapshot/load/N feed):
+        # the active slot and whether it is modified. Display + MQTT only - never
+        # a reason to skip a commanded switch (the workspace is unobservable).
+        self.device_snapshot_slot = None
+        self.snapshot_modified = None
         self.last_probe = None              # result of the last device liveness probe
         self._midi_owner = None             # {"id","host","last_seen"} — external agent (tray) holding the MIDI port
         self._midi_owner_lock = threading.Lock()  # coexistence: browser yields Web MIDI while an agent owns it
@@ -212,6 +217,9 @@ class TotalMixOSCBridge:
                 state = {
                     "current_snapshot": getattr(self, "current_snapshot", "unknown"),
                     "current_workspace": getattr(self, "current_workspace", "unknown"),
+                    "state_confirmed": getattr(self, "state_confirmed", None),
+                    "device_snapshot_slot": getattr(self, "device_snapshot_slot", None),
+                    "snapshot_modified": getattr(self, "snapshot_modified", None),
                     "macro_update": macro_update,
                     "macro_event": macro_event,
                 }
@@ -2357,13 +2365,69 @@ class TotalMixOSCBridge:
                 if last is None or abs(kv - last) > self.KNOB_MQTT_DEVICE_EPS:
                     self._mqtt_knob_state(name, kv)
 
+    def _snapshot_name_for_slot(self, workspace, slot):
+        """Snapshot name for a slot in a workspace of the snapshot map (both
+        map shapes), or None."""
+        entry = (self.snapshot_map or {}).get(workspace)
+        if not isinstance(entry, dict):
+            return None
+        snaps = entry.get("snapshots", {}) or {}
+        val = snaps.get(str(slot))
+        if val is None:
+            for k, v in snaps.items():
+                if isinstance(v, dict) and str(v.get("index")) == str(slot):
+                    val = v
+                    break
+        if isinstance(val, dict):
+            val = val.get("name")
+        return str(val).strip() if val else None
+
+    def _sync_snapshot_from_device(self):
+        """#30: follow snapshot recalls made IN TOTALMIX. The Global feed
+        reports /snapshot/load/N per slot (0 off, 2 active, 3 active but
+        modified). When exactly one slot is active, map it through the
+        believed workspace's snapshot map and adopt the name for the header
+        and the retained MQTT state. The workspace itself is never reported
+        over OSC, so this is belief-for-display only: state_confirmed stays
+        as it was and run_macro still performs its own switch."""
+        listener = self.global_listener
+        if listener is None:
+            return
+        snaps = dict(listener.state.snapshots)
+        active = [int(n) for n, v in snaps.items() if v is not None and float(v) >= 2.0]
+        if len(active) != 1:
+            return
+        slot = active[0]
+        modified = float(snaps[slot]) >= 3.0
+        changed = slot != self.device_snapshot_slot or modified != self.snapshot_modified
+        if not changed:
+            return
+        self.device_snapshot_slot = slot
+        self.snapshot_modified = modified
+        name = self._snapshot_name_for_slot(self.current_workspace, slot)
+        if name and name.lower() != (self.current_snapshot or ""):
+            logger.info(f"device snapshot -> slot {slot} '{name}'"
+                        f"{' (modified)' if modified else ''} (Global feedback)")
+            self.current_snapshot = name.lower()
+            if self.mqtt_client:
+                try:
+                    self.mqtt_client.publish("totalmix/snapshot", str(slot), retain=True)
+                except Exception:
+                    pass
+        self.broadcast_state()
+
     def _knob_watch_loop(self):
         """Device → browser sync (#user report): someone flips EQ off IN
         TOTALMIX and the chip must follow. The Global listener already holds
         the truth (change broadcasts update its state); this 1 Hz differ
         pushes a knob_update whenever a knob's displayed state changed
-        without us writing it - and, since #28, the MQTT knob state too."""
+        without us writing it - and, since #28, the MQTT knob state too.
+        Since #30 it also follows snapshot recalls made on the device."""
         while not self._knob_watch_stop.wait(1.0):
+            try:
+                self._sync_snapshot_from_device()
+            except Exception as e:
+                logger.debug(f"snapshot sync failed: {e}")
             try:
                 self._knob_watch_tick()
             except Exception as e:

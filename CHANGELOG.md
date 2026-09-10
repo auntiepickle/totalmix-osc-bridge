@@ -2,6 +2,15 @@
 
 ## Unreleased — 2026-09-09 · Repo restructure (#27)
 
+- **Header follows the device (#30)**: the bridge now reads TotalMix's
+  `/snapshot/load/N` Global feedback and adopts the active slot as the
+  current snapshot (name via the snapshot map of the believed workspace),
+  republishing the retained `totalmix/snapshot` state, and flags a
+  snapshot that was edited after the recall as *modified*. Display and
+  MQTT only: it never skips a commanded switch. Because TotalMix never
+  reports the workspace over OSC, the header now renders unconfirmed
+  belief as such (dashed, dimmed, explained in the tooltip) instead of
+  presenting a stale "Blank / Default" as fact.
 - The server is now a package, `tmosc/` (bridge, `api/`, both OSC transports
   and listeners, MQTT, discovery, duck engine, config, app_paths), with
   `python -m tmosc` as the entry. `uvicorn tmosc.api.app:app` replaces

@@ -23,6 +23,12 @@
 let macros = {};
 let currentWorkspace = '—';
 let currentSnapshot = '—';
+// #30: is the belief above confirmed by the device? TotalMix never reports the
+// workspace over OSC, so it stays 'last known' until a bridge-side switch is
+// confirmed; the snapshot becomes real once the Global feed reports a slot.
+let stateConfirmed = null;
+let deviceSnapshotSlot = null;
+let snapshotModified = null;
 let midiConnectedDevice = '';
 let lastFiredMacro = null;  // { name, ts }
 
@@ -89,6 +95,14 @@ function _onWSMessage(event) {
     (data.current_snapshot && data.current_snapshot !== currentSnapshot);
   if (data.current_workspace) currentWorkspace = data.current_workspace;
   if (data.current_snapshot) currentSnapshot = data.current_snapshot;
+  const flagsChanged =
+    ('state_confirmed' in data && data.state_confirmed !== stateConfirmed) ||
+    ('snapshot_modified' in data && data.snapshot_modified !== snapshotModified) ||
+    ('device_snapshot_slot' in data && data.device_snapshot_slot !== deviceSnapshotSlot);
+  if ('state_confirmed' in data) stateConfirmed = data.state_confirmed;
+  if ('snapshot_modified' in data) snapshotModified = data.snapshot_modified;
+  if ('device_snapshot_slot' in data) deviceSnapshotSlot = data.device_snapshot_slot;
+  if (layoutChanged || flagsChanged) _updateNavDropdowns();
   // #22: a switch re-pairs/renames channels — refresh the picker inventory
   // and recompute every card's validity icon against the NEW layout
   if (layoutChanged) _scheduleValidityRefresh();
@@ -401,6 +415,28 @@ function _updateNavDropdowns() {
     ssValues.map(ss =>
       `<option value="${_esc(ss)}"${ss.toLowerCase() === (currentSnapshot || '').toLowerCase() ? ' selected' : ''}>${_esc(ss)}</option>`
     ).join('');
+
+  // #30: unconfirmed belief must not look like fact (user report: header said
+  // Blank / Default while TotalMix sat on another snapshot). Inline styles on
+  // purpose: a pull-and-restart deploy does not rebuild the Tailwind CSS.
+  const wsUnconfirmed = stateConfirmed !== true;
+  const ssUnconfirmed = wsUnconfirmed && deviceSnapshotSlot == null;
+  _markUnconfirmed(wsSel, wsUnconfirmed,
+    'Last known workspace — TotalMix does not report it over OSC. Pick one to switch and re-sync.',
+    'The mixer\'s current workspace — pick another to switch TotalMix to it');
+  _markUnconfirmed(ssSel, ssUnconfirmed,
+    'Last known snapshot — not yet confirmed by the device. Pick one to recall and re-sync.',
+    deviceSnapshotSlot != null
+      ? `Snapshot slot ${deviceSnapshotSlot} as reported by TotalMix — pick another to recall it`
+      : 'The mixer\'s current snapshot — pick another to recall it');
+  const mod = document.getElementById('snapshot-modified');
+  if (mod) mod.classList.toggle('hidden', snapshotModified !== true);
+}
+
+function _markUnconfirmed(sel, on, hintOn, hintOff) {
+  sel.style.borderStyle = on ? 'dashed' : '';
+  sel.style.opacity = on ? '0.65' : '';
+  sel.title = on ? hintOn : hintOff;
 }
 
 // Called when either nav dropdown changes — fires POST /api/switch.
@@ -857,6 +893,9 @@ async function prefillBridgeState() {
     const s = await API.getStatus();
     if (s.workspace) currentWorkspace = s.workspace;
     if (s.snapshot)  currentSnapshot  = s.snapshot;
+    stateConfirmed     = s.state_confirmed ?? null;
+    snapshotModified   = s.snapshot_modified ?? null;
+    deviceSnapshotSlot = s.device_snapshot_slot ?? null;
     _updateNavDropdowns();
     updateStatusHeader();
   } catch (_) {}

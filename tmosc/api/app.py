@@ -265,6 +265,10 @@ async def get_status():
         # workspace/snapshot below are the bridge's commanded belief;
         # state_confirmed says whether the device confirmed the last switch
         "state_confirmed": getattr(bridge, "state_confirmed", None),
+        # #30: what the device reports about snapshots (Global feed); the
+        # workspace is never reported, so it stays belief
+        "device_snapshot_slot": getattr(bridge, "device_snapshot_slot", None),
+        "snapshot_modified": getattr(bridge, "snapshot_modified", None),
         # Live-vs-map drift (output side): False drives the UI banner
         # #24: no drift concept — per-write confirmations carry correctness.
         # The physical table summary + sweep status are the honest surface.
