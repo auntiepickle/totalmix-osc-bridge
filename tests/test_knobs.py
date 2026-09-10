@@ -489,10 +489,12 @@ def test_master_move_in_totalmix_reaches_ha_and_browser(rig):
     lo, hi = MASTER["steps"][0]["operation"]["range"]
     expected = min(1.0, gu.fader_lin(-40.0) / (hi - lo))
     assert 0.0 < expected < 1.0                        # a real mid-range position
-    assert b.mqtt_client.published[-1] == ("totalmix/knob/master/state", f"{expected:.4f}", True)
+    topic, payload, retained = b.mqtt_client.published[-1]
+    assert (topic, retained) == ("totalmix/knob/master/state", True)
+    assert float(payload) == pytest.approx(expected, abs=2e-4)   # snapshot rounds to 4 dp
     ev = [e["event"] for e in b.events if e["event"] and e["event"]["type"] == "knob_update"][-1]
     assert ev["source"] == "device"
-    assert ev["device_value"] == pytest.approx(gu.fader_lin(-40.0))
+    assert ev["device_value"] == pytest.approx(gu.fader_lin(-40.0), abs=1e-4)   # 4 dp snapshot
 
 
 # == Send groups (#user request: one knob moves several faders) ==========
