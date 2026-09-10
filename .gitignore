@@ -34,3 +34,9 @@ web/static/style.css
 build/
 dist/
 VERSION
+
+# local Tailwind / signing scratch (CI creates these in its workspace)
+node_modules/
+package.json
+package-lock.json
+sign-stage/
