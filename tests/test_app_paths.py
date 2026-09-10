@@ -6,8 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-import app_paths
-
+import tmosc.app_paths as app_paths
 REPO = Path(__file__).resolve().parent.parent
 
 
@@ -17,7 +16,7 @@ def test_source_mode_keeps_everything_in_repo_root(monkeypatch):
     assert app_paths.bundle_dir() == REPO
     assert app_paths.data_dir() == REPO
     assert app_paths.data_path("mappings.json") == str(REPO / "mappings.json")
-    assert app_paths.example_path("mappings.example.json") == str(REPO / "mappings.example.json")
+    assert app_paths.example_path("mappings.example.json") == str(REPO / "examples" / "mappings.example.json")
     assert app_paths.static_dir() == str(REPO / "web" / "static")
     cwd = os.getcwd()
     assert app_paths.prepare() == REPO
@@ -27,7 +26,8 @@ def test_source_mode_keeps_everything_in_repo_root(monkeypatch):
 def test_frozen_windows_redirects_state_to_appdata(monkeypatch, tmp_path):
     bundle = tmp_path / "app" / "_internal"
     (bundle / "web" / "static").mkdir(parents=True)
-    (bundle / "mappings.example.json").write_text("{}")
+    (bundle / "examples").mkdir()
+    (bundle / "examples" / "mappings.example.json").write_text("{}")
     appdata = tmp_path / "Roaming"
     appdata.mkdir()
     monkeypatch.delenv("TMOSC_DATA_DIR", raising=False)
@@ -42,7 +42,7 @@ def test_frozen_windows_redirects_state_to_appdata(monkeypatch, tmp_path):
     # state -> appdata, templates + static -> bundle
     assert app_paths.data_path("mappings.json") == str(expected / "mappings.json")
     assert app_paths.data_path("bridge.log") == str(expected / "bridge.log")
-    assert app_paths.example_path("mappings.example.json") == str(bundle / "mappings.example.json")
+    assert app_paths.example_path("mappings.example.json") == str(bundle / "examples" / "mappings.example.json")
     assert app_paths.static_dir() == str(bundle / "web" / "static")
     # prepare() creates the data dir on first run
     assert not expected.exists()
@@ -68,7 +68,7 @@ def test_override_wins_in_any_mode(monkeypatch, tmp_path):
     assert d.is_dir()
     assert os.getcwd() == cwd, "from source the CWD is never touched, override or not"
     # templates are still read from the bundle (repo root), not the override
-    assert app_paths.example_path("mappings.example.json") == str(REPO / "mappings.example.json")
+    assert app_paths.example_path("mappings.example.json") == str(REPO / "examples" / "mappings.example.json")
 
 
 def test_config_env_loader(tmp_path):
@@ -101,9 +101,8 @@ def test_web_layer_persists_into_data_dir(monkeypatch, tmp_path):
     """The web save path (mappings + auto-backup) follows app_paths at call
     time - this is the redirect the frozen build relies on, proven from
     source via the TMOSC_DATA_DIR override."""
-    import web.web_client as wc
-    import bridge as bridge_module
-
+    import tmosc.api.app as wc
+    import tmosc.bridge as bridge_module
     monkeypatch.setenv("TMOSC_DATA_DIR", str(tmp_path))
     b = bridge_module.bridge
     saved = (b.mappings, b.mappings_is_example, b.mappings_source)

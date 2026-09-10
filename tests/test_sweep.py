@@ -6,7 +6,7 @@ Fake device serves per-(row, offset) tracknames incl. the measured
 saturation behavior past the hardware end."""
 import pytest
 
-from osc_listener import OSCListener
+from tmosc.osc_listener import OSCListener
 
 
 class SweepFakeTotalMix:
@@ -109,7 +109,7 @@ def test_sweep_reset_clears_the_row_first(sweep_bridge, monkeypatch):
     b, _ = sweep_bridge
     monkeypatch.setattr(b, "_persist_channel_map_file", lambda cm: None)
     b.run_sweep(rows=("inputs",), settle_s=0)
-    import physical_table as pt
+    import tmosc.physical_table as pt
     pt.merge_observation(b.channel_map["physical_table"], "inputs", 2, "OLD NAME")
     b.run_sweep(rows=("inputs",), settle_s=0, reset=True)
     assert b.channel_map["physical_table"]["rows"]["inputs"]["2"] == ["RE-101"]

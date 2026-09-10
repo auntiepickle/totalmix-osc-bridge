@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import mqtt_handler
-from mqtt_handler import setup_mqtt
+import tmosc.mqtt_handler as mqtt_handler
+from tmosc.mqtt_handler import setup_mqtt
 
 
 class FakeMQTTClient:

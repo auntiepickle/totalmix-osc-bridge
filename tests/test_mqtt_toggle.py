@@ -1,7 +1,5 @@
 """ENABLE_MQTT=False must leave the bridge without a client (installer "MQTT off")."""
-import bridge as bridge_module
-
-
+import tmosc.bridge as bridge_module
 def test_enable_mqtt_false_creates_no_client(monkeypatch):
     b = bridge_module.bridge
     saved = b.mqtt_client

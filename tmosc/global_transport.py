@@ -19,9 +19,8 @@ import logging
 import threading
 import time
 
-import global_units as gu
-import physical_table as pt
-
+import tmosc.global_units as gu
+import tmosc.physical_table as pt
 logger = logging.getLogger(__name__)
 
 ROW_WORDS = {"1": "input", "2": "playback", "3": "output"}

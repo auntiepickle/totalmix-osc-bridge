@@ -2,8 +2,8 @@
 # validate_capture.sh — end-to-end check of OSC device capture + discovery.
 # Run on the server that hosts the bridge container.
 #
-#   ./scripts/validate_capture.sh            # validate + run discovery walk
-#   ./scripts/validate_capture.sh --apply    # ...and promote the result to
+#   ./tools/validate_capture.sh            # validate + run discovery walk
+#   ./tools/validate_capture.sh --apply    # ...and promote the result to
 #                                            # the live ufx2_channel_map.json
 #
 # Exits non-zero at the first failed step with a diagnosis.
@@ -113,6 +113,6 @@ if [ "${1:-}" = "--apply" ]; then
   say "Applying to live ufx2_channel_map.json (auto-backup first)"
   curl -sf -X POST "$BASE/api/device/discovery/apply" | json || fail "apply failed"
 else
-  echo "Happy with it? Promote it:  ./scripts/validate_capture.sh --apply"
+  echo "Happy with it? Promote it:  ./tools/validate_capture.sh --apply"
   echo "                       or:  curl -X POST $BASE/api/device/discovery/apply"
 fi

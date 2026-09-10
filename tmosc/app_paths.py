@@ -4,7 +4,7 @@ One rule, two modes - live STATE lives in ``data_dir()``, shipped RESOURCES
 (templates, static web files) live in ``bundle_dir()``:
 
 * SOURCE / DOCKER (the live Linux server): both are the repo root - the
-  folder holding bridge.py - exactly where every file has always lived.
+  folder above the tmosc/ package - exactly where every file has always lived.
   Nothing moves and nothing is redirected, so an existing deployment behaves
   byte-for-byte as before.
 
@@ -48,7 +48,7 @@ def bundle_dir() -> Path:
     frozen."""
     if is_frozen():
         return Path(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)))
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parent.parent      # tmosc/ -> repo root
 
 
 def _platform_data_home() -> Path:
@@ -78,8 +78,8 @@ def data_path(name: str) -> str:
 
 
 def example_path(name: str) -> str:
-    """Absolute path of a shipped ``*.example.json`` template (read-only)."""
-    return str(bundle_dir() / name)
+    """Absolute path of a shipped ``examples/*.example.json`` template (read-only)."""
+    return str(bundle_dir() / "examples" / name)
 
 
 def static_dir() -> str:

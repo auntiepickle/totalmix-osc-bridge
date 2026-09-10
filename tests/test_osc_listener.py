@@ -3,7 +3,7 @@ import time
 import pytest
 from pythonosc.udp_client import SimpleUDPClient
 
-from osc_listener import DeviceState, OSCListener, UNKNOWN_SUBMIX
+from tmosc.osc_listener import DeviceState, OSCListener, UNKNOWN_SUBMIX
 
 
 def feed(state, *messages):

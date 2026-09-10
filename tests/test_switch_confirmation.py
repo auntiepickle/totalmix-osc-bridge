@@ -6,7 +6,7 @@ feedback that marks each transition and proceeds the moment it arrives.
 """
 import time
 
-from osc_listener import OSCListener
+from tmosc.osc_listener import OSCListener
 
 
 SWITCH_MACRO = {

@@ -129,7 +129,7 @@ class DuckSupervisor:
         step = step or self._step_for(name)
         if step is None or not self.bridge._global_active():
             return
-        import global_units as gu
+        import tmosc.global_units as gu
         try:
             writer, _, status = \
                 self.bridge.global_transport.resolve_step(step["target"])
@@ -172,7 +172,7 @@ class DuckSupervisor:
         b = self.bridge
         if not b._global_active():
             return
-        import global_units as gu
+        import tmosc.global_units as gu
         active = set()
         for name, macro in list(b.mappings.get("macros", {}).items()):
             step = b._knob_step(macro)

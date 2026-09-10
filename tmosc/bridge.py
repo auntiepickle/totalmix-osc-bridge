@@ -7,15 +7,14 @@ import threading
 import paho.mqtt.client as mqtt
 import re
 import asyncio
-from config import *
-import app_paths
-from osc import get_client
-from mqtt_handler import setup_mqtt
-from osc_monitor import osc_monitor
-from operations import OperationRegistry, shape_value, unshape_value
-import physical_table as pt
-import global_units as gu
-
+from tmosc.config import *
+import tmosc.app_paths as app_paths
+from tmosc.osc import get_client
+from tmosc.mqtt_handler import setup_mqtt
+from tmosc.osc_monitor import osc_monitor
+from tmosc.operations import OperationRegistry, shape_value, unshape_value
+import tmosc.physical_table as pt
+import tmosc.global_units as gu
 ROW_KEYS_BY_WORD = {"input": "inputs", "playback": "playbacks", "output": "outputs"}
 
 # === CENTRAL LOGGING ===
@@ -1766,7 +1765,7 @@ class TotalMixOSCBridge:
         if not ENABLE_OSC_LISTENER:
             logger.info("OSC listener disabled (ENABLE_OSC_LISTENER=false)")
             return
-        from osc_listener import OSCListener
+        from tmosc.osc_listener import OSCListener
         listener = OSCListener(
             OSC_LISTEN_PORT,
             broadcast_cb=lambda: self.broadcast_state(
@@ -1802,8 +1801,8 @@ class TotalMixOSCBridge:
         listener observes and learns names while classic keeps writing."""
         if not ENABLE_GLOBAL_OSC_LISTENER:
             return
-        from global_listener import GlobalOSCListener
-        from global_transport import GlobalTransport
+        from tmosc.global_listener import GlobalOSCListener
+        from tmosc.global_transport import GlobalTransport
         listener = GlobalOSCListener(GLOBAL_OSC_LISTEN_PORT)
         if not listener.start():
             logger.error("Global OSC listener failed to start — "
@@ -1820,7 +1819,7 @@ class TotalMixOSCBridge:
         threading.Thread(target=self._knob_watch_loop, daemon=True).start()
         # Sidechain duck engine (#user idea): key-channel meters drive gain
         # reduction on duck-enabled knob targets. Shares the knob-watch stop.
-        from duck_engine import DuckSupervisor
+        from tmosc.duck_engine import DuckSupervisor
         self.duck = DuckSupervisor(self)
         threading.Thread(target=self.duck.run,
                          args=(self._knob_watch_stop,), daemon=True).start()

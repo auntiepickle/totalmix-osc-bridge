@@ -10,10 +10,10 @@ on:
     tags: ['v*']
     branches: [main]
     paths:
-      - 'bridge_main.py'
+      - 'tmosc/__main__.py'
       - 'tmosc-bridge.spec'
       - 'requirements-frozen.txt'
-      - 'app_paths.py'
+      - 'tmosc/app_paths.py'
       - 'tools/smoke_frozen.ps1'
       - 'installer/**'
       - '.github/workflows/release.yml'

@@ -9,8 +9,8 @@ import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
-from web.web_client import app  # noqa: E402
-import bridge as bridge_module  # noqa: E402
+from tmosc.api.app import app  # noqa: E402
+import tmosc.bridge as bridge_module  # noqa: E402
 
 client = fastapi_testclient.TestClient(app)
 
@@ -83,7 +83,7 @@ def test_device_state_503_without_listener():
 @pytest.fixture
 def macro_crud(monkeypatch):
     """Isolate macro CRUD tests: no disk writes, mappings restored after."""
-    import web.web_client as wc
+    import tmosc.api.app as wc
     persisted = []
     monkeypatch.setattr(wc, "_persist_mappings", lambda: persisted.append(True))
     saved = {k: dict(v) for k, v in bridge_module.bridge.mappings.get("macros", {}).items()}
@@ -134,7 +134,7 @@ def test_macro_create_rejects_non_object_body(macro_crud):
 def test_upsert_strips_runtime_fields(macro_crud):
     """run_macro merges runtime fields into the browser's macros{} object, so
     editor saves round-tripped them into mappings.json — strip on save."""
-    from web.web_client import RUNTIME_FIELDS
+    from tmosc.api.app import RUNTIME_FIELDS
     body = {
         "description": "keep me",
         "steps": [{"osc": "/1/volume1", "value": "0.5"}],
@@ -168,7 +168,7 @@ def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
     _strip_runtime only hit the incoming macro. _persist_mappings must
     sanitize the WHOLE in-memory mappings on every write."""
     import json as _json
-    import web.web_client as wc
+    import tmosc.api.app as wc
     monkeypatch.setattr(wc, "backup_json_files", lambda *a, **k: None)
     out = tmp_path / "mappings.json"
     monkeypatch.setattr(wc, "_atomic_write_json",
@@ -195,7 +195,7 @@ def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
 def test_sanitize_mappings_pure():
     """_sanitize_mappings strips runtime fields per macro without mutating
     its input (the whole-file save path passes the request body through it)."""
-    from web.web_client import _sanitize_mappings
+    from tmosc.api.app import _sanitize_mappings
     original = {"macros": {"m1": {"steps": [], "progress": 1, "value": 0.2},
                            "weird": "not-a-dict"},
                 "other_key": True}
@@ -240,7 +240,7 @@ def test_map_strip_count_counts_input_row_only(monkeypatch):
 def test_reorder_macros_in_place(monkeypatch):
     """Drag-to-reorder: new order persists, dict identity survives (held
     references stay valid), and a partial/wrong list is rejected."""
-    import web.web_client as wc
+    import tmosc.api.app as wc
     monkeypatch.setattr(wc, "_persist_mappings", lambda: None)
     b = bridge_module.bridge
     macros = b.mappings.setdefault("macros", {})
@@ -263,7 +263,7 @@ def test_reorder_macros_in_place(monkeypatch):
 
 def test_rename_macro_moves_key_and_state(monkeypatch):
     """Rename keeps dict order, carries runtime state, rejects collisions."""
-    import web.web_client as wc
+    import tmosc.api.app as wc
     monkeypatch.setattr(wc, "_persist_mappings", lambda: None)   # no disk writes
     b = bridge_module.bridge
     macros = b.mappings.setdefault("macros", {})
@@ -285,14 +285,14 @@ def test_rename_macro_moves_key_and_state(monkeypatch):
 
 def test_auth_off_by_default_allows_writes():
     # API_TOKEN unset (default) -> the gate is a pass-through
-    import web.web_client as wc
+    import tmosc.api.app as wc
     assert wc.API_TOKEN == ""
     r = client.post("/api/trigger/does_not_exist")
     assert r.status_code in (404, 409, 503)   # reached the handler, not 401
 
 
 def test_auth_blocks_unauthenticated_write_when_set(monkeypatch):
-    import web.web_client as wc
+    import tmosc.api.app as wc
     monkeypatch.setattr(wc, "API_TOKEN", "s3cret")
     # a mutating request WITHOUT the token is refused before the handler
     r = client.post("/api/trigger/whatever")
@@ -309,7 +309,7 @@ def test_auth_blocks_unauthenticated_write_when_set(monkeypatch):
 
 def test_midi_bindings_tsv(monkeypatch):
     """/api/midi/bindings emits the agent's trigger table as TSV."""
-    import bridge as bridge_module
+    import tmosc.bridge as bridge_module
     saved = bridge_module.bridge.mappings
     try:
         bridge_module.bridge.mappings = {"macros": {

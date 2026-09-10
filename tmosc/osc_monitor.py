@@ -4,7 +4,7 @@ import time
 import logging
 import logging.handlers
 import os
-from config import *
+from tmosc.config import *
 
 # Guaranteed file + rotation
 logger = logging.getLogger("OSCMonitor")

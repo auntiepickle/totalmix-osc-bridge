@@ -10,12 +10,12 @@ import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
-import bridge as bridge_module  # noqa: E402
-import global_units as gu  # noqa: E402
-import physical_table as pt  # noqa: E402
-from global_listener import GlobalOSCListener  # noqa: E402
-from global_transport import GlobalTransport  # noqa: E402
-from web.web_client import app, _strip_runtime  # noqa: E402
+import tmosc.bridge as bridge_module  # noqa: E402
+import tmosc.global_units as gu  # noqa: E402
+import tmosc.physical_table as pt  # noqa: E402
+from tmosc.global_listener import GlobalOSCListener  # noqa: E402
+from tmosc.global_transport import GlobalTransport  # noqa: E402
+from tmosc.api.app import app, _strip_runtime  # noqa: E402
 
 client = fastapi_testclient.TestClient(app)
 

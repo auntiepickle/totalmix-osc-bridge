@@ -1,13 +1,13 @@
-"""Entry point for the frozen (PyInstaller) Windows build of the bridge.
+"""Entry point for `python -m tmosc` and the frozen (PyInstaller) Windows build.
 
-    tmosc-bridge.exe             run the server (the same app as `uvicorn web.web_client:app`)
+    tmosc-bridge.exe             run the server (the same app as `uvicorn tmosc.api.app:app`)
     tmosc-bridge.exe --version   print the build version
     tmosc-bridge.exe --data-dir  print where live state lives
 
 Live state (mappings.json, ufx2_*.json, backups/, logs, config.env) lives in
 app_paths.data_dir() - %APPDATA%/tmosc-bridge on Windows. Configuration is
 read from <data_dir>/config.env (written by the installer wizard); real
-environment variables win. Runs from source too: `python bridge_main.py`.
+environment variables win. Runs from source too: `python -m tmosc`.
 """
 import multiprocessing
 import os
@@ -16,7 +16,7 @@ import sys
 
 def version() -> str:
     """Build version - a VERSION file bundled by CI from the release tag."""
-    import app_paths
+    import tmosc.app_paths as app_paths
     try:
         return (app_paths.bundle_dir() / "VERSION").read_text(encoding="utf-8").strip() or "dev"
     except OSError:
@@ -37,7 +37,7 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     multiprocessing.freeze_support()
     _utf8_console()
-    import app_paths
+    import tmosc.app_paths as app_paths
     data = app_paths.prepare()          # data dir + config.env + chdir (frozen)
     if "--version" in argv:
         print(version())
@@ -47,7 +47,7 @@ def main(argv=None) -> int:
         return 0
 
     import uvicorn
-    from web.web_client import app, WEB_PORT
+    from tmosc.api.app import app, WEB_PORT
     host = os.getenv("WEB_HOST", "0.0.0.0")
     print(f"tmosc-bridge {version()} | data: {data} | http://{host}:{WEB_PORT}", flush=True)
     # In-process app object (no import-string / reload / worker machinery -

@@ -9,11 +9,11 @@ import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
-import bridge as bridge_module  # noqa: E402
-import global_units as gu  # noqa: E402
-from global_listener import GlobalOSCListener  # noqa: E402
-from global_transport import GlobalTransport  # noqa: E402
-from web.web_client import app  # noqa: E402
+import tmosc.bridge as bridge_module  # noqa: E402
+import tmosc.global_units as gu  # noqa: E402
+from tmosc.global_listener import GlobalOSCListener  # noqa: E402
+from tmosc.global_transport import GlobalTransport  # noqa: E402
+from tmosc.api.app import app  # noqa: E402
 
 client = fastapi_testclient.TestClient(app)
 
@@ -125,7 +125,7 @@ class FakeGlobalClient:
 
 @pytest.fixture
 def global_bridge(monkeypatch):
-    import physical_table as pt
+    import tmosc.physical_table as pt
     b = bridge_module.bridge
     table = pt.empty_table()
     pt.merge_observation(table, "inputs", 0, "Mic 1")

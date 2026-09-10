@@ -6,7 +6,7 @@ when the human moves the fader externally. The old tests wrongly simulated
 an echo (dev_db = out) and so passed over a defect that collapsed the duck
 and ratcheted the fader up (critical-review HIGH-1); these encode the truth.
 """
-from duck_engine import duck_tick, FLOOR_DB
+from tmosc.duck_engine import duck_tick, FLOOR_DB
 
 
 CFG = {"enabled": True, "threshold": -30.0, "depth": 12.0,

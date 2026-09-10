@@ -1,9 +1,7 @@
 """global_units — the RME fader curve (spec-fixed points) + transforms."""
 import pytest
 
-import global_units as gu
-
-
+import tmosc.global_units as gu
 def test_fader_curve_spec_fixed_points():
     assert gu.fader_db(1.0) == pytest.approx(6.0, abs=0.01)          # top = +6 dB
     assert gu.fader_db(649.0 / 1023.0) == pytest.approx(-6.0, abs=0.01)  # breakpoint

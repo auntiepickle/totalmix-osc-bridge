@@ -41,7 +41,10 @@ COPY --from=tailwind-builder /build/web/static ./web/static
 # Final debug
 RUN echo "=== FINAL IMAGE STATIC FILES ===" && ls -la /app/web/static/ && echo "=== END FINAL DEBUG ==="
 
-COPY --from=tailwind-builder /build/*.py ./
+# Server code (the live server bind-mounts the repo over /app anyway)
+COPY tmosc ./tmosc
+COPY web/__init__.py web/web_client.py ./web/
+COPY examples ./examples
 
 ARG WEB_PORT=8088
 ENV WEB_PORT=${WEB_PORT}
@@ -51,8 +54,8 @@ EXPOSE ${WEB_PORT}
 # Protect built assets for dev volume mounts
 COPY --from=tailwind-builder /build/web/static/style.css /static-assets/style.css
 
-COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY deploy/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-CMD ["sh", "-c", "uvicorn web.web_client:app --host 0.0.0.0 --port ${WEB_PORT} --log-level info"]
+CMD ["sh", "-c", "uvicorn tmosc.api.app:app --host 0.0.0.0 --port ${WEB_PORT} --log-level info"]

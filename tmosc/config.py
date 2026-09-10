@@ -1,6 +1,5 @@
 import os
-import app_paths as _app_paths
-
+import tmosc.app_paths as _app_paths
 # Frozen exe: create the per-user data dir (%APPDATA%/tmosc-bridge on Windows),
 # load its config.env, chdir into it. From source / Docker this is a no-op
 # (see app_paths.py).

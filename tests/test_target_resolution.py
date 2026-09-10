@@ -7,7 +7,7 @@ strip LIVE from OSC feedback at fire time, not trust a captured map.
 import threading
 import time
 
-from osc_listener import OSCListener
+from tmosc.osc_listener import OSCListener
 
 
 CHANNEL_MAP = {
@@ -655,7 +655,7 @@ MIXED_BANK_INPUTS = {
 
 
 def _eq_bridge(make_bridge, fake_osc, macro, inputs=MIXED_BANK_INPUTS):
-    from osc_listener import OSCListener
+    from tmosc.osc_listener import OSCListener
     listener = OSCListener(0)
     b = make_bridge({"m": macro})
     b.channel_map = cmap(extra_inputs=inputs)
@@ -918,7 +918,7 @@ def test_dynamics_params_share_eq_aiming(make_bridge, fake_osc):
     assert ("/setBankStart", 4.0) in fake_osc.sent
     assert ("/2/compexpGain", 0.7) in fake_osc.sent
     # and the whole class is registered
-    from bridge import TotalMixOSCBridge
+    from tmosc.bridge import TotalMixOSCBridge
     for p in ("dyn_gain", "alev_enable", "alev_headroom", "alev_maxgain",
               "input_gain", "input_gain_r", "phase", "phase_r"):
         assert p in TotalMixOSCBridge.CHANNEL_DETAIL_PARAMS
@@ -989,7 +989,7 @@ def test_page2_aim_silence_refuses_write(make_bridge, fake_osc):
 
 
 def test_tranche2_dynamics_params_registered():
-    from bridge import TotalMixOSCBridge
+    from tmosc.bridge import TotalMixOSCBridge
     for p in ("dyn_enable", "comp_thresh", "comp_ratio", "exp_thresh",
               "exp_ratio", "dyn_attack", "dyn_release", "alev_risetime",
               "lowcut_enable", "lowcut_grade"):

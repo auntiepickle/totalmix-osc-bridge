@@ -3,8 +3,8 @@ import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
-import bridge as bridge_module  # noqa: E402
-from web.web_client import app, _strip_runtime  # noqa: E402
+import tmosc.bridge as bridge_module  # noqa: E402
+from tmosc.api.app import app, _strip_runtime  # noqa: E402
 
 client = fastapi_testclient.TestClient(app)
 
@@ -69,8 +69,8 @@ def test_get_macros_merges_last_fire():
 def test_global_endpoint_light_by_default():
     """The header polls /api/device/global — the default read must send NO
     probe traffic and report heartbeat age only."""
-    from global_listener import GlobalOSCListener
-    from global_transport import GlobalTransport
+    from tmosc.global_listener import GlobalOSCListener
+    from tmosc.global_transport import GlobalTransport
 
     class FakeClient:
         def __init__(self):

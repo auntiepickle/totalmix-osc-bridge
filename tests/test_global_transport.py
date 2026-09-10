@@ -5,9 +5,9 @@ import os
 
 import pytest
 
-import global_transport as gt
-import physical_table as pt
-from global_listener import GlobalOSCListener
+import tmosc.global_transport as gt
+import tmosc.physical_table as pt
+from tmosc.global_listener import GlobalOSCListener
 
 
 class FakeClient:
@@ -199,7 +199,7 @@ def test_uncalibrated_param_refused(rig, monkeypatch):
     tr, client, *_ = rig
     # the map is fully measured now — synthesize an uncalibrated param to
     # prove the refusal path stays wired
-    import global_units as gu
+    import tmosc.global_units as gu
     monkeypatch.setattr(gu.GLOBAL_PARAM_MAP["input_gain"], "to_wire", None)
     w, _, status = tr.resolve_step({"channel": "Mic 1", "param": "input_gain"})
     assert (w, status) == (None, "uncalibrated_param")
@@ -296,7 +296,7 @@ def test_start_bootstraps_with_sendall_and_stop_joins(rig):
 # ── config selection (WI-6) ────────────────────────────────────────
 
 def test_config_transport_selection(monkeypatch):
-    import config
+    import tmosc.config as config
     monkeypatch.delenv("OSC_TRANSPORT", raising=False)
     monkeypatch.delenv("ENABLE_GLOBAL_OSC_LISTENER", raising=False)
     importlib.reload(config)

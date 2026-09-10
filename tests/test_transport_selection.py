@@ -3,10 +3,10 @@ The Global transport gets its own fake client so tests can assert which
 wire each write went out on."""
 import pytest
 
-import bridge as bridge_mod
-import physical_table as pt
-from global_listener import GlobalOSCListener
-from global_transport import GlobalTransport
+import tmosc.bridge as bridge_mod
+import tmosc.physical_table as pt
+from tmosc.global_listener import GlobalOSCListener
+from tmosc.global_transport import GlobalTransport
 
 
 class FakeGlobalClient:
@@ -82,7 +82,7 @@ def test_global_refusal_emits_skip_event(global_rig, fake_osc):
 
 def test_uncalibrated_param_refused_end_to_end(global_rig, fake_osc,
                                                monkeypatch):
-    import global_units as gu
+    import tmosc.global_units as gu
     monkeypatch.setattr(gu.GLOBAL_PARAM_MAP["input_gain"], "to_wire", None)
     b, gclient, _ = global_rig({"eq": {"steps": [{
         "target": {"channel": "Mic 1", "param": "input_gain"},

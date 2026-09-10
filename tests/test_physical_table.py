@@ -2,9 +2,7 @@
 
 Ground truth: trackname-sweep-CONFIRMED.md — starts are invariant across
 snapshots; a pair's display name appears at BOTH member offsets."""
-import physical_table as pt
-
-
+import tmosc.physical_table as pt
 def _table(rows):
     t = pt.empty_table()
     t["rows"] = rows

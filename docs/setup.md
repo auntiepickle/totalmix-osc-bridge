@@ -52,13 +52,13 @@ source .venv/bin/activate       # macOS / Linux
 
 pip install -r requirements.txt
 
-cp mappings.example.json mappings.json
-cp ufx2_channel_map.example.json ufx2_channel_map.json
-cp ufx2_snapshot_map.example.json ufx2_snapshot_map.json
+cp examples/mappings.example.json mappings.json
+cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
+cp examples/ufx2_snapshot_map.example.json ufx2_snapshot_map.json
 
 export OSC_IP=127.0.0.1         # TotalMix on same machine; use LAN IP if remote
 export OSC_PORT=7001
-uvicorn web.web_client:app --host 0.0.0.0 --port 8080 --reload
+uvicorn tmosc.api.app:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 Open `http://localhost:8080`. Select your MIDI input in the header. Macro cards load from `mappings.json`.
@@ -68,7 +68,7 @@ Open `http://localhost:8080`. Select your MIDI input in the header. Macro cards 
 **Finding OSC addresses:** move a fader in TotalMix while the monitor runs. The address appears in `osc_monitor.log`.
 
 ```bash
-ENABLE_OSC_MONITOR=true uvicorn web.web_client:app --host 0.0.0.0 --port 8080
+ENABLE_OSC_MONITOR=true uvicorn tmosc.api.app:app --host 0.0.0.0 --port 8080
 ```
 
 ---
@@ -128,9 +128,9 @@ MQTT_PASS=yourpassword
 ### Deploy
 
 ```bash
-cp docker-compose.example.yml docker-compose.yml
-cp mappings.example.json mappings.json
-cp ufx2_channel_map.example.json ufx2_channel_map.json
+cp deploy/docker-compose.example.yml docker-compose.yml
+cp examples/mappings.example.json mappings.json
+cp examples/ufx2_channel_map.example.json ufx2_channel_map.json
 
 docker compose build --no-cache
 docker compose up -d
@@ -167,9 +167,9 @@ The bridge polls `/app/config/ufx2_snapshot_map.json` every 5 seconds and reload
 
 The Web MIDI API requires a secure context on real IPs. `localhost` is exempt.
 
-The included `Caddyfile` uses `nip.io` for automatic DNS and Let's Encrypt TLS. `nip.io` maps any `IP.nip.io` hostname to that IP, giving you a valid HTTPS cert for a LAN address without DNS setup.
+The included `deploy/Caddyfile` uses `nip.io` for automatic DNS and Let's Encrypt TLS. `nip.io` maps any `IP.nip.io` hostname to that IP, giving you a valid HTTPS cert for a LAN address without DNS setup.
 
-Edit `Caddyfile` to match your server IP:
+Edit `deploy/Caddyfile` to match your server IP:
 
 ```
 192.168.1.x.nip.io {
@@ -230,7 +230,7 @@ It covers macro execution (fire modes, debounce, param clamping, workspace/snaps
 
 GitHub Actions runs the suite plus a Docker image build on every push to `main` and every PR (`.github/workflows/ci.yml`). **Deploy flow: push, wait for the green check, then `git pull` + `docker compose build` on the server.** A red X means the server should not pull.
 
-Hardware-in-the-loop scripts (real MQTT broker, real UFX II) live in `tests/manual/` — see the README there. pytest ignores that directory.
+Hardware-in-the-loop scripts (real MQTT broker, real UFX II) live in `tools/manual/` — see the README there. pytest ignores that directory.
 
 ---
 

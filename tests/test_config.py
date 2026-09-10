@@ -1,4 +1,4 @@
-from config import snapshot_num_to_osc_index
+from tmosc.config import snapshot_num_to_osc_index
 
 
 def test_snapshot_index_is_inverted():

@@ -5,10 +5,9 @@ import threading
 import paho.mqtt.client as mqtt
 from pathlib import Path
 
-from osc import send_osc
-from config import snapshot_num_to_osc_index
-import app_paths
-
+from tmosc.osc import send_osc
+from tmosc.config import snapshot_num_to_osc_index
+import tmosc.app_paths as app_paths
 logger = logging.getLogger(__name__)
 
 # ── Snapshot map — loaded from SMB-mounted config share ───────────────────────

@@ -54,7 +54,7 @@ def make_bridge(fake_osc, snapshot_map):
     broadcast_state is replaced with a recorder so tests can assert on
     macro_start / macro_complete / macro_skipped events without an event loop.
     """
-    from bridge import TotalMixOSCBridge
+    from tmosc.bridge import TotalMixOSCBridge
 
     def _make(macros, snap_map=None):
         b = TotalMixOSCBridge(

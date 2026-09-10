@@ -1,6 +1,6 @@
 import threading
 
-from operations import OperationRegistry
+from tmosc.operations import OperationRegistry
 
 
 def run_op(name, fake_osc, config, cancel=None):
@@ -82,7 +82,7 @@ def test_lfo_threshold_gates_binary_params(fake_osc):
 
 
 def test_range_then_threshold_compose(fake_osc):
-    from operations import shape_value
+    from tmosc.operations import shape_value
     # range maps 0..1 → 0.4..0.6; threshold 0.5 splits the middle
     assert shape_value(0.0, {"range": ["0.4", "0.6"], "threshold": 0.5}) == 0.0
     assert shape_value(1.0, {"range": ["0.4", "0.6"], "threshold": 0.5}) == 1.0
@@ -93,7 +93,7 @@ def test_unshape_value_inverts_shape_value():
     """#28: the device value must map back to the knob position the web UI
     would show (range inverse + clamp; threshold knobs are binary)."""
     import pytest
-    from operations import shape_value, unshape_value
+    from tmosc.operations import shape_value, unshape_value
     cfg = {"range": [0.2, 0.8]}
     for v in (0.0, 0.25, 0.5, 0.9, 1.0):
         assert unshape_value(shape_value(v, cfg), cfg) == pytest.approx(v)

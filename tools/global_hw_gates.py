@@ -25,8 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pythonosc.udp_client import SimpleUDPClient
 
-import global_units as gu
-from global_listener import GlobalOSCListener
+import tmosc.global_units as gu
+from tmosc.global_listener import GlobalOSCListener
 
 HOST = os.getenv("GLOBAL_OSC_IP", "192.168.1.61")
 GLOBAL_PORT = int(os.getenv("GLOBAL_OSC_PORT", "7002"))
