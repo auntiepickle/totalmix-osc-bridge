@@ -44,6 +44,21 @@ def shape_value(val: float, config: dict) -> float:
     return val
 
 
+def unshape_value(val: float, config: dict) -> float:
+    """Inverse of shape_value: a device (param-norm) value back to the 0..1
+    knob position - the same math the web UI uses (ui.js _knobNormOf), so a
+    Home Assistant slider and the card agree on where the knob is (#28).
+    threshold configs are binary on the device: on -> 1.0, off -> 0.0."""
+    val = float(val)
+    if config.get("threshold") is not None:
+        return 1.0 if val >= 0.5 else 0.0
+    rng = config.get("range")
+    if rng:
+        lo, hi = float(rng[0]), float(rng[1])
+        val = (val - lo) / ((hi - lo) or 1.0)
+    return max(0.0, min(1.0, val))
+
+
 # ====================== BUILT-IN OPERATIONS ======================
 
 @OperationRegistry.register("ramp")

@@ -12,7 +12,7 @@ import app_paths
 from osc import get_client
 from mqtt_handler import setup_mqtt
 from osc_monitor import osc_monitor
-from operations import OperationRegistry, shape_value
+from operations import OperationRegistry, shape_value, unshape_value
 import physical_table as pt
 import global_units as gu
 
@@ -152,6 +152,7 @@ class TotalMixOSCBridge:
         self._knob_trailing_timers = {}  # name -> Timer (trailing-edge flush)
         self._knob_readback_timers = {} # name -> Timer (settle readback)
         self._knob_last_pushed = {}     # name -> snapshot tuple (device-sync differ)
+        self._mqtt_knob_published = {}  # name -> last value sent to totalmix/knob/<name>/state (#28)
         self._knob_watch_stop = threading.Event()
         self._knob_enable_sent = {}     # name -> ts of last auto-enable write
         self.channel_map = None
@@ -2233,18 +2234,21 @@ class TotalMixOSCBridge:
             self._schedule_knob_trailing(macro_name, step, source)
         return {"status": status, "value": self.knob_values.get(macro_name)}
 
-    def _mqtt_knob_state(self, name):
+    def _mqtt_knob_state(self, name, value=None):
         """Retained knob state for Home Assistant (#mqtt-knob): rides the
         same throttle as the WS broadcast, so an MQTT slider tracks every
-        source of change (iPhone, MIDI, UI, snapshot re-assert)."""
+        source of change (iPhone, MIDI, UI, snapshot re-assert). `value`
+        overrides the bridge's own last-written value - the device watcher
+        passes the knob position derived from TotalMix feedback (#28)."""
         if not self.mqtt_client:
             return
-        v = self.knob_values.get(name)
+        v = self.knob_values.get(name) if value is None else value
         if v is None:
             return
         try:
             self.mqtt_client.publish(f"totalmix/knob/{name}/state",
                                      f"{float(v):.4f}", retain=True)
+            self._mqtt_knob_published[name] = float(v)
         except Exception:
             pass
 
@@ -2290,28 +2294,45 @@ class TotalMixOSCBridge:
                              for k, v in self.knob_companions(step).items()))
         return (None if dv is None else round(dv, 4), en, comps)
 
+    # A device echo of our own write differs from the published value only
+    # by quantization; below this (1% of knob travel) it is not a user move.
+    KNOB_MQTT_DEVICE_EPS = 0.01
+
+    def _knob_watch_tick(self):
+        """One pass of the device -> browser/MQTT differ (see _knob_watch_loop)."""
+        for name, macro in list(self.mappings.get("macros", {}).items()):
+            step = self._knob_step(macro)
+            if step is None or not self._global_active():
+                continue
+            snap = self._knob_snapshot(step)
+            if snap == self._knob_last_pushed.get(name):
+                continue
+            self._knob_last_pushed[name] = snap
+            self.broadcast_state(macro_event={
+                "type": "knob_update", "name": name, "status": "resolved",
+                "value": self.knob_values.get(name),
+                "device_value": snap[0], "enable_value": snap[1],
+                "companions": dict(self.knob_companions(step)),
+                "source": "device"})
+            # #28: Home Assistant only ever heard our OWN writes, so a fader
+            # moved in TotalMix left the HA knob stale. Publish the device's
+            # value as the knob position (inverse-mapped through the range),
+            # skipping mere echoes of what we last published.
+            if snap[0] is not None:
+                kv = unshape_value(snap[0], step["operation"])
+                last = self._mqtt_knob_published.get(name)
+                if last is None or abs(kv - last) > self.KNOB_MQTT_DEVICE_EPS:
+                    self._mqtt_knob_state(name, kv)
+
     def _knob_watch_loop(self):
         """Device → browser sync (#user report): someone flips EQ off IN
         TOTALMIX and the chip must follow. The Global listener already holds
         the truth (change broadcasts update its state); this 1 Hz differ
         pushes a knob_update whenever a knob's displayed state changed
-        without us writing it."""
+        without us writing it - and, since #28, the MQTT knob state too."""
         while not self._knob_watch_stop.wait(1.0):
             try:
-                for name, macro in list(self.mappings.get("macros", {}).items()):
-                    step = self._knob_step(macro)
-                    if step is None or not self._global_active():
-                        continue
-                    snap = self._knob_snapshot(step)
-                    if snap == self._knob_last_pushed.get(name):
-                        continue
-                    self._knob_last_pushed[name] = snap
-                    self.broadcast_state(macro_event={
-                        "type": "knob_update", "name": name, "status": "resolved",
-                        "value": self.knob_values.get(name),
-                        "device_value": snap[0], "enable_value": snap[1],
-                        "companions": dict(self.knob_companions(step)),
-                        "source": "device"})
+                self._knob_watch_tick()
             except Exception as e:
                 logger.debug(f"knob watch tick failed: {e}")
 

@@ -89,6 +89,22 @@ def test_range_then_threshold_compose(fake_osc):
     assert shape_value(0.5, {}) == 0.5  # no shaping config = passthrough
 
 
+def test_unshape_value_inverts_shape_value():
+    """#28: the device value must map back to the knob position the web UI
+    would show (range inverse + clamp; threshold knobs are binary)."""
+    import pytest
+    from operations import shape_value, unshape_value
+    cfg = {"range": [0.2, 0.8]}
+    for v in (0.0, 0.25, 0.5, 0.9, 1.0):
+        assert unshape_value(shape_value(v, cfg), cfg) == pytest.approx(v)
+    assert unshape_value(0.5, {}) == 0.5                     # passthrough
+    assert unshape_value(0.1, cfg) == 0.0                    # below the window -> clamp
+    assert unshape_value(0.95, cfg) == 1.0                   # above -> clamp
+    assert unshape_value(1.0, {"range": [0.4, 0.6], "threshold": 0.5}) == 1.0
+    assert unshape_value(0.0, {"threshold": 0.5}) == 0.0
+    assert unshape_value(0.3, {"range": [0.5, 0.5]}) == 0.0  # degenerate range, no ZeroDivision
+
+
 def test_ramp_linear_parks_at_destination(fake_osc):
     """A linear ramp is a transition — it must STAY at the sweep ceiling,
     not snap back to the floor on the final send (#19, user-reported)."""

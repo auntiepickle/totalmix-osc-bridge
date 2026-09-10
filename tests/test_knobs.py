@@ -415,6 +415,48 @@ def test_device_side_change_pushes_knob_update(rig):
     assert evs[-1]["enable_value"] is False and evs[-1]["source"] == "device"
 
 
+class FakeMqtt:
+    def __init__(self):
+        self.published = []
+
+    def publish(self, topic, payload, retain=False, **kw):
+        self.published.append((topic, payload, retain))
+
+
+def test_device_side_move_publishes_mqtt_knob_state(rig):
+    """#28: the Home Assistant knob must follow a fader moved IN TOTALMIX.
+    Only knob_set published totalmix/knob/<name>/state, so device-side
+    moves left the HA slider stale until the next bridge-side write."""
+    b, g, listener = rig({"locut": KNOB})
+    b.mqtt_client = FakeMqtt()
+    listener.state.ingest("/output/0/lowcut/enable", (1.0,))
+    listener.state.ingest("/output/0/lowcut/freq", (100.0,))   # log taper 20..500 -> 0.5
+    b._knob_watch_tick()                              # boot: device truth reaches HA
+    assert b.mqtt_client.published[-1] == ("totalmix/knob/locut/state", "0.5000", True)
+    n = len(b.mqtt_client.published)
+    b._knob_watch_tick()                              # nothing changed -> nothing sent
+    assert len(b.mqtt_client.published) == n
+    listener.state.ingest("/output/0/lowcut/freq", (500.0,))   # dragged to the top in TotalMix
+    b._knob_watch_tick()
+    assert b.mqtt_client.published[-1] == ("totalmix/knob/locut/state", "1.0000", True)
+    # an echo of our own last published value (quantization-level diff) is not a move
+    b._mqtt_knob_published["locut"] = 0.5
+    listener.state.ingest("/output/0/lowcut/freq", (100.5,))
+    b._knob_watch_tick()
+    assert b.mqtt_client.published[-1][1] == "1.0000"
+
+
+def test_device_side_move_respects_knob_range(rig):
+    """A ranged knob publishes its POSITION, not the raw device value."""
+    ranged = {**KNOB, "steps": [{**KNOB["steps"][0],
+                                 "operation": {"type": "knob", "hold": True, "range": [0.0, 0.5]}}]}
+    b, g, listener = rig({"locut": ranged})
+    b.mqtt_client = FakeMqtt()
+    listener.state.ingest("/output/0/lowcut/freq", (100.0,))   # device 0.5 = top of a 0..0.5 window
+    b._knob_watch_tick()
+    assert b.mqtt_client.published[-1] == ("totalmix/knob/locut/state", "1.0000", True)
+
+
 # == Send groups (#user request: one knob moves several faders) ==========
 
 VOL_KNOB = {"steps": [{
