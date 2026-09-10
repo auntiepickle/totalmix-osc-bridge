@@ -457,6 +457,44 @@ def test_device_side_move_respects_knob_range(rig):
     assert b.mqtt_client.published[-1] == ("totalmix/knob/locut/state", "1.0000", True)
 
 
+MASTER = {"steps": [{
+    "target": {"channel": "Main", "row": 3},          # the output's own fader
+    "value": "{{param}}",
+    "operation": {"type": "knob", "hold": True, "range": [0.0, 0.275493636169092]},
+}]}
+
+
+def test_output_fader_device_value_reads_volume_feedback(rig):
+    """#28 root cause: TotalMix reports an output's own fader move as
+    /output/<hw>/volume (dB); the knob only ever read '.../fader', so every
+    row-3 volume knob (the speaker-volume slider) had no device value."""
+    b, g, listener = rig({"master": MASTER})
+    step = b._knob_step(MASTER)
+    assert b.knob_device_value(step) is None
+    listener.state.ingest("/output/0/volume", (-20.0,))
+    assert b.knob_device_value(step) == pytest.approx(gu.fader_lin(-20.0))
+    # both shapes present -> the freshest report wins
+    listener.state.ingest("/output/0/fader", (-6.0,))
+    assert b.knob_device_value(step) == pytest.approx(gu.fader_lin(-6.0))
+
+
+def test_master_move_in_totalmix_reaches_ha_and_browser(rig):
+    """The reported case: the Main fader moved IN TOTALMIX must reach the
+    browser (knob_update) AND the retained MQTT knob state, as a position
+    within the knob's capped range."""
+    b, g, listener = rig({"master": MASTER})
+    b.mqtt_client = FakeMqtt()
+    listener.state.ingest("/output/0/volume", (-40.0,))
+    b._knob_watch_tick()
+    lo, hi = MASTER["steps"][0]["operation"]["range"]
+    expected = min(1.0, gu.fader_lin(-40.0) / (hi - lo))
+    assert 0.0 < expected < 1.0                        # a real mid-range position
+    assert b.mqtt_client.published[-1] == ("totalmix/knob/master/state", f"{expected:.4f}", True)
+    ev = [e["event"] for e in b.events if e["event"] and e["event"]["type"] == "knob_update"][-1]
+    assert ev["source"] == "device"
+    assert ev["device_value"] == pytest.approx(gu.fader_lin(-40.0))
+
+
 # == Send groups (#user request: one knob moves several faders) ==========
 
 VOL_KNOB = {"steps": [{

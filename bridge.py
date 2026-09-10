@@ -1913,8 +1913,18 @@ class TotalMixOSCBridge:
             parts = addr.strip("/").split("/")
             row_word, hw, path = parts[0], int(parts[1]), "/".join(parts[2:])
             if path == "faderlin":
-                e = st.get_param(ROW_KEYS_BY_WORD[row_word], hw, "fader")
-                return gu.fader_lin(e[0]) if e else None
+                # Feedback for a channel's own fader arrives in dB - as
+                # .../fader on some rows but as .../volume on the OUTPUT row
+                # (wire-observed 2026-09-10: a Main fader move reports
+                # /output/0/volume). Reading only "fader" left every row-3
+                # volume knob without a device value, so neither the card
+                # nor the HA slider could follow TotalMix (#28). Freshest wins.
+                row_key = ROW_KEYS_BY_WORD[row_word]
+                cands = [c for c in (st.get_param(row_key, hw, "fader"),
+                                     st.get_param(row_key, hw, "volume")) if c]
+                if not cands:
+                    return None
+                return gu.fader_lin(max(cands, key=lambda c: c[1])[0])
             e = st.get_param(ROW_KEYS_BY_WORD[row_word], hw, path)
             if e is None:
                 return None
