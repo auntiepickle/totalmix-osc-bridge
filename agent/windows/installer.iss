@@ -125,11 +125,11 @@ begin
   Page := CreateCustomPage(wpSelectDir, 'Bridge connection',
     'Point the agent at your TotalMix OSC bridge and pick the MIDI controller on this PC.');
 
-  AddLabel('Bridge host or IP (auto-detected if the bridge is running):', 0);
+  AddLabel('Bridge host or IP (auto = find it on the LAN at every start):', 0);
   EditHost := TNewEdit.Create(Page);
   EditHost.Parent := Page.Surface;
   EditHost.Top := 16; EditHost.Width := Page.SurfaceWidth;
-  EditHost.Text := '192.168.1.41';
+  EditHost.Text := 'auto';
 
   AddLabel('Bridge port:', 48);
   EditPort := TNewEdit.Create(Page);

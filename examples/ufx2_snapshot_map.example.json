@@ -1,5 +1,5 @@
 {
-  "_SETUP_REQUIRED": "Fill in real slot numbers from TotalMix Quick Select before use. bridge.py loads this file for workspace/snapshot switching. mqtt_handler.py loads from /app/config/ufx2_snapshot_map.json (SMB mount) — keep them in sync.",
+  "_SETUP_REQUIRED": "Fill in real slot numbers from TotalMix Quick Select before use, then copy this file to ufx2_snapshot_map.json in the state dir (repo root from source or Docker, %APPDATA%/tmosc-bridge when installed). A copy mounted at /app/config/ufx2_snapshot_map.json takes precedence and hot-reloads. tools/scrape_totalmix_snapshots.* can generate it.",
   "Pill_setup": {
     "slot": 0,
     "snapshots": {

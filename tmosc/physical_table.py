@@ -48,10 +48,12 @@ def resolve_start(table: dict, row: str, name: str):
     left/first channel). Exact match wins over case-insensitive. None when
     the name has never been observed in this row."""
     rows = (table or {}).get("rows", {}).get(row, {}) or {}
-    exact = [int(k) for k, aliases in rows.items() if name in aliases]
+    # list() snapshots the dict view atomically: the sweep, the Global
+    # name-sync and macro threads insert keys while we iterate
+    exact = [int(k) for k, aliases in list(rows.items()) if name in aliases]
     if exact:
         return min(exact)
-    ci = [int(k) for k, aliases in rows.items() if _alias_has(aliases, name)]
+    ci = [int(k) for k, aliases in list(rows.items()) if _alias_has(aliases, name)]
     return min(ci) if ci else None
 
 

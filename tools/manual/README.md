@@ -8,7 +8,7 @@ the macro topic. Edit the constants at the top of the scripts first.
 
 | Script | What it does |
 |---|---|
-| `test_macro.py <name> [param]` | Publish a macro trigger on `totalmix/macro/<name>` over MQTT |
+| `trigger_macro.py <name> [param]` | Publish a macro trigger on `totalmix/macro/<name>` over MQTT |
 | `ramp_test.py` | Drive a 2-bar triangle ramp over MQTT via `mosquitto_pub` |
 
 The classic-transport scripts that used to live here (raw `/setSubmix` fader

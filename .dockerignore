@@ -1,0 +1,20 @@
+# Keep the build context to what the image needs: no build output, state,
+# logs, caches, secrets or the Windows-only trees.
+.git
+.claude
+.pytest_cache
+__pycache__
+*.pyc
+dist/
+build/
+backups/
+*.log
+*.log.*
+node_modules/
+.env
+agent/build/
+agent/out/
+agent/stage/
+mappings.json
+ufx2_channel_map.json
+ufx2_snapshot_map.json

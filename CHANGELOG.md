@@ -2,6 +2,22 @@
 
 ## Unreleased — 2026-09-09 · Repo restructure (#27)
 
+- Review follow-ups (fourth audit pass): the sweep endpoint claims its
+  running state before starting the worker (two quick POSTs started two
+  sweeps); group capture runs on the event loop like every other mappings
+  writer; one malformed knob no longer silently stops device sync for all
+  knobs (warned once, isolated); physical-table lookups iterate a
+  snapshot; pytest never recurses into tools/ or agent/ (a manual rig
+  script matched the test glob and acted at import - renamed to
+  `trigger_macro.py`). Agent: HTTP recv/send timeouts (a hung bridge
+  froze MIDI handling), MIDI drained while offline (no burst of replayed
+  fires on reconnect), bend/aftertouch relay throttled like CC, non-2xx
+  answers logged (the token gate's 401 was invisible), a device read
+  error exits non-zero, config keys trimmed, single-instance tray, quit
+  cannot race the device open, bindings parser enforces its contiguity
+  invariant and accepts 64-character names. Installers default the bridge
+  host to `auto` (LAN discovery) instead of a fixed IP. `.dockerignore`
+  added; the inert `tailwind.config.js` removed.
 - Dependencies: `mido[rtmidi]` dropped from `requirements.txt` (nothing in the
   server imports it - MIDI enters through the browser or the tray agent), and
   with it the `libasound2-dev` build package in the Dockerfile and CI. Smaller
@@ -34,8 +50,8 @@
   `uvicorn web.web_client:app`; `web/web_client.py` stays as a shim so Docker
   images built before the move keep starting until they are rebuilt.
   `web/static` did not move.
-- Root tidied: templates in `examples/`, deployment glue in `deploy/` (compose
-  example, entrypoint, Caddyfile, Home Assistant package), helper scripts in
+- Root tidied: templates in `examples/`, deployment glue in `deploy/` (entrypoint,
+  Caddyfile, Home Assistant package), helper scripts in
   `tools/` (rig scripts in `tools/manual/`; classic-era scripts removed), dated
   review docs in `docs/history/`, `docs/known-limitations.md`. The compose
   example stays at the root, runnable in place (`docker compose -f

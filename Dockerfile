@@ -7,7 +7,6 @@ WORKDIR /build
 
 COPY web/static/ ./web/static/
 COPY web/ ./web/
-COPY tailwind.config.js ./
 
 RUN npm init -y
 # Pinned: an unpinned @latest made style.css differ from build to build

@@ -116,7 +116,7 @@ static void load_config(void)
                 char *eq = strchr(line, '=');
                 char *nl, *k, *v;
                 if (!eq) continue;
-                *eq = '\0'; k = line; v = eq + 1;
+                *eq = '\0'; k = trim_value(line); v = eq + 1;   /* 'host = x' and '# notes' parse */
                 nl = strpbrk(v, "\r\n"); if (nl) *nl = '\0';
                 v = trim_value(v);
                 if      (!strcmp(k, "host")) set_str(g_host, sizeof(g_host), v);
@@ -187,6 +187,7 @@ static DWORD WINAPI worker(LPVOID arg)
             for (i = 0; i < 30 && !g_quit; i++) Sleep(100);  /* ~3s, wake fast on quit */
             continue;
         }
+        if (g_quit) { tm_midi_win_close(m); break; }   /* Quit raced the open: do not start the runner */
         PostMessage(g_hwnd, WM_SETSTATUS, ST_OK, 0);
         src.read = win_read;
         src.wait = win_wait;
@@ -258,6 +259,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdline, int show)
     MSG msg;
     (void)hPrev; (void)cmdline; (void)show;
 
+    /* one tray per session: the installer's Startup shortcut and the tray's
+     * own Run-key toggle can both launch us at sign-in */
+    CreateMutexA(NULL, FALSE, "Local\\TmoscAgentTray");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     load_config();
 
     memset(&wc, 0, sizeof(wc));

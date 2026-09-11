@@ -100,6 +100,12 @@ int tm_bindings_parse(tm_bindings *b, const char *tsv, int len)
             mi = macro_slot(b, f[0], (int)(fe[0] - f[0]), is_knob);
             if (mi < 0) { overflow = 1; continue; }
             if (b->trig_used >= TM_MAX_TRIGGERS) { overflow = 1; continue; }
+            /* enforce the contiguity invariant below instead of trusting the
+             * feed: a macro line reappearing after another started would
+             * otherwise extend the wrong block (review finding) */
+            if (b->macros[mi].triggers + b->macros[mi].trigger_count != &b->triggers[b->trig_used]) {
+                overflow = 1; continue;
+            }
 
             /* triggers for a macro must be contiguous; we only ever append to
              * the macro created/extended most recently. Enforce by requiring

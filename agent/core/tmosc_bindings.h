@@ -23,7 +23,7 @@ extern "C" {
 #define TM_MAX_TRIGGERS 512
 #endif
 #ifndef TM_NAME_LEN
-#define TM_NAME_LEN 64
+#define TM_NAME_LEN 80   /* the bridge allows 64-char names; +NUL and headroom */
 #endif
 
 typedef struct {

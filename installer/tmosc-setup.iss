@@ -251,7 +251,7 @@ begin
   // -- Client page --
   CliPage := CreateCustomPage(MqttPage.ID, 'Tray agent',
     'Point the agent at your bridge and pick the MIDI controller on this PC.');
-  AddLabel(CliPage, 'Bridge host or IP (auto-detected if the bridge is running):', 0);
+  AddLabel(CliPage, 'Bridge host or IP (blank = find it on the LAN at every start):', 0);
   EHost := AddEdit(CliPage, 16, 0, 0, ReadKey(CliCfg, 'host', ''));
   AddLabel(CliPage, 'Bridge port:', 48);
   EPort := AddEdit(CliPage, 64, 0, 110, ReadKey(CliCfg, 'port', '8088'));
@@ -313,7 +313,6 @@ begin
   end
   else if CurPageID = CliPage.ID then
   begin
-    if Trim(EHost.Text) = '' then begin MsgBox('Enter the bridge host or IP.', mbError, MB_OK); Result := False; exit; end;
     if not IsPort(EPort.Text) then begin MsgBox('The bridge port must be a number between 1 and 65535.', mbError, MB_OK); Result := False; exit; end;
   end;
 end;
@@ -352,11 +351,13 @@ end;
 
 procedure WriteClientConfig;
 var
-  Dir, Cfg: String;
+  Dir, Cfg, Host: String;
 begin
   Dir := ExpandConstant('{userappdata}\tmosc-agent');
   ForceDirectories(Dir);
-  Cfg := 'host=' + Trim(EHost.Text) + #13#10 +
+  Host := Trim(EHost.Text);
+  if Host = '' then Host := 'auto';
+  Cfg := 'host=' + Host + #13#10 +
          'port=' + Trim(EPort.Text) + #13#10 +
          'midi=' + MidiValue + #13#10;
   if Trim(EHttps.Text) <> '' then

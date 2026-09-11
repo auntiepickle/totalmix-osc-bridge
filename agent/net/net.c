@@ -67,6 +67,16 @@ int tm_net_connect(tm_net *n, const char *host, int port)
     if (fd == SOCK_BAD) return -1;
 
     { int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, SOCKOPT_CAST &one, sizeof(one)); }
+    {   /* a hung response must never freeze MIDI handling: bound recv/send
+         * (only bites while a request is in flight; idle keep-alive is fine) */
+#ifdef _WIN32
+        DWORD tmo = 3000;
+#else
+        struct timeval tmo; tmo.tv_sec = 3; tmo.tv_usec = 0;
+#endif
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, SOCKOPT_CAST &tmo, sizeof(tmo));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, SOCKOPT_CAST &tmo, sizeof(tmo));
+    }
     n->fd = (intptr_t)fd;
     return 0;
 }

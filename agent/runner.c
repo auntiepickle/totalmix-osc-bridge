@@ -36,6 +36,7 @@ static char g_agent_host[64];
  * have different numbers) all reach the browser, instead of latest-wins
  * coalescing that clobbered the pair. Notes/PC/etc relay immediately. */
 static double g_cc_last[128];
+static double g_st_last[2];             /* bend, aftertouch relay throttle */
 
 void tm_runner_stop(void) { g_stop = 1; }
 
@@ -98,6 +99,19 @@ static int load_bindings(tm_net *net)
     return 0;
 }
 
+/* Log a non-2xx answer once per status change - the bridge's token gate
+ * answers 401 to every POST and the agent otherwise looked healthy. */
+static void note_status(const char *what, int status)
+{
+    static int last = 0;
+    if (status < 400 || status == last) return;
+    last = status;
+    fprintf(stderr, "[agent] bridge answered %d to %s%s\n", status, what,
+            (status == 401 || status == 403)
+                ? " - it requires an API token, which this agent cannot send yet"
+                : "");
+}
+
 static int post_trigger(tm_net *net, const char *name, float param, int bpm)
 {
     char path[256], body[64], resp[512];
@@ -105,6 +119,7 @@ static int post_trigger(tm_net *net, const char *name, float param, int bpm)
     if (tm_proto_trigger_path(path, sizeof(path), name) < 0) return 0;
     if (tm_proto_trigger_body(body, sizeof(body), param, bpm) < 0) return 0;
     rc = tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    if (rc == 0) note_status("trigger", status);
     if (g_verbose) fprintf(stderr, "[agent] fire %-20s param=%.3f bpm=%d [%d]%s\n",
                            name, param, bpm, status, rc ? " NET-ERR" : "");
     return rc;
@@ -117,6 +132,7 @@ static int post_knob(tm_net *net, const char *name, float value)
     if (tm_proto_knob_path(path, sizeof(path), name) < 0) return 0;
     if (tm_proto_knob_body(body, sizeof(body), value) < 0) return 0;
     rc = tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    if (rc == 0) note_status("knob", status);
     if (g_verbose) fprintf(stderr, "[agent] knob %-20s <- %.3f [%d]%s\n",
                            name, value, status, rc ? " NET-ERR" : "");
     return rc;
@@ -168,6 +184,7 @@ static int post_owner(tm_net *net, const char *path)
     int rlen, status = 0, rc;
     snprintf(body, sizeof(body), "{\"id\":\"%s\",\"host\":\"%s\"}", g_agent_id, g_agent_host);
     rc = tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
+    if (rc == 0) note_status(path, status);
     if (g_verbose && rc == 0 && status != 200)
         fprintf(stderr, "[agent] owner %s [%d]\n", path, status);
     return rc;
@@ -214,6 +231,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
     tm_clock clock;
     double last_flush = 0, last_refresh = 0, last_reconnect = 0, last_heartbeat = 0;
     int connected = 0;
+    int rc = 0;                                  /* 0 clean stop, 2 device error */
 
     g_verbose = verbose;
     g_stop = 0;
@@ -222,6 +240,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
     tm_match_state_init(&g_mstate);
     memset(g_dirty, 0, sizeof(g_dirty));
     memset(g_cc_last, 0, sizeof(g_cc_last));
+    memset(g_st_last, 0, sizeof(g_st_last));
 
     while (!g_stop) {
         double t = now_ms();
@@ -229,6 +248,9 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
         int n, a, any_pending = 0, k, timeout;
 
         if (!connected) {
+            /* keep draining the device while offline: otherwise every queued
+             * note/CC replays as a burst of fires the moment we reconnect */
+            { tm_midi_msg drop[256]; while (src->read(ctx, drop, 256) > 0) {} }
             if (t - last_reconnect < RECONNECT_MS) { sleep_ms(50); continue; }
             last_reconnect = t;
             if (tm_net_connect(&net, host, port) == 0 && load_bindings(&net) == 0) {
@@ -247,7 +269,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
         src->wait(ctx, timeout);
 
         n = src->read(ctx, batch, 256);
-        if (n < 0) { fprintf(stderr, "[agent] MIDI read error\n"); break; }
+        if (n < 0) { fprintf(stderr, "[agent] MIDI read error\n"); rc = 2; break; }
         for (a = 0; a < n; a++) {
             tm_midi_msg msg = batch[a];
             tm_action acts[16];
@@ -260,6 +282,12 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
                     double tn = now_ms();
                     if (tn - g_cc_last[d1] < ACTIVITY_MIN_MS) relay = 0;
                     else g_cc_last[d1] = tn;
+                } else if ((msg.status & 0xF0) == 0xE0 || (msg.status & 0xF0) == 0xD0) {
+                    /* pitch bend / aftertouch: continuous streams, same throttle */
+                    int si = ((msg.status & 0xF0) == 0xE0) ? 0 : 1;
+                    double tn = now_ms();
+                    if (tn - g_st_last[si] < ACTIVITY_MIN_MS) relay = 0;
+                    else g_st_last[si] = tn;
                 }
                 if (relay && connected && post_activity(&net, &msg) != 0) connected = 0;
             }
@@ -300,5 +328,5 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
         tm_net_close(&rn);
     }
     tm_net_close(&net);
-    return 0;
+    return rc;
 }

@@ -113,7 +113,7 @@ class _EdgeToggleClient:
             self._on = want
 
 
-# === WEBSOCKET CLIENTS (shared between bridge.py and web_client.py) ===
+# === WEBSOCKET CLIENTS (shared between bridge.py and tmosc/api/app.py) ===
 ws_clients = []  # list of active FastAPI WebSocket connections
 
 class TotalMixOSCBridge:
@@ -153,6 +153,7 @@ class TotalMixOSCBridge:
         self._knob_readback_timers = {} # name -> Timer (settle readback)
         self._knob_last_pushed = {}     # name -> snapshot tuple (device-sync differ)
         self._mqtt_knob_published = {}  # name -> last value sent to totalmix/knob/<name>/state (#28)
+        self._knob_watch_failed = set()  # knobs whose device sync raised (warned once)
         self._knob_watch_stop = threading.Event()
         self._persist_lock = threading.Lock()   # channel-map file writes (3 threads can race)
         self._knob_enable_sent = {}     # name -> ts of last auto-enable write
@@ -2340,30 +2341,42 @@ class TotalMixOSCBridge:
     KNOB_MQTT_DEVICE_EPS = 0.01
 
     def _knob_watch_tick(self):
-        """One pass of the device -> browser/MQTT differ (see _knob_watch_loop)."""
+        """One pass of the device -> browser/MQTT differ (see _knob_watch_loop).
+        Each knob is isolated: one malformed knob config (a bad `range`, say)
+        must not silently stop device sync for every other knob."""
         for name, macro in list(self.mappings.get("macros", {}).items()):
-            step = self._knob_step(macro)
-            if step is None or not self._global_active():
-                continue
-            snap = self._knob_snapshot(step)
-            if snap == self._knob_last_pushed.get(name):
-                continue
-            self._knob_last_pushed[name] = snap
-            self.broadcast_state(macro_event={
-                "type": "knob_update", "name": name, "status": "resolved",
-                "value": self.knob_values.get(name),
-                "device_value": snap[0], "enable_value": snap[1],
-                "companions": dict(self.knob_companions(step)),
-                "source": "device"})
-            # #28: Home Assistant only ever heard our OWN writes, so a fader
-            # moved in TotalMix left the HA knob stale. Publish the device's
-            # value as the knob position (inverse-mapped through the range),
-            # skipping mere echoes of what we last published.
-            if snap[0] is not None:
-                kv = unshape_value(snap[0], step["operation"])
-                last = self._mqtt_knob_published.get(name)
-                if last is None or abs(kv - last) > self.KNOB_MQTT_DEVICE_EPS:
-                    self._mqtt_knob_state(name, kv)
+            try:
+                self._knob_watch_one(name, macro)
+            except Exception as e:
+                if name not in self._knob_watch_failed:
+                    self._knob_watch_failed.add(name)
+                    logger.warning(f"knob '{name}': device sync skipped ({e}) - fix its config")
+            else:
+                self._knob_watch_failed.discard(name)
+
+    def _knob_watch_one(self, name, macro):
+        step = self._knob_step(macro)
+        if step is None or not self._global_active():
+            return
+        snap = self._knob_snapshot(step)
+        if snap == self._knob_last_pushed.get(name):
+            return
+        self._knob_last_pushed[name] = snap
+        self.broadcast_state(macro_event={
+            "type": "knob_update", "name": name, "status": "resolved",
+            "value": self.knob_values.get(name),
+            "device_value": snap[0], "enable_value": snap[1],
+            "companions": dict(self.knob_companions(step)),
+            "source": "device"})
+        # #28: Home Assistant only ever heard our OWN writes, so a fader
+        # moved in TotalMix left the HA knob stale. Publish the device's
+        # value as the knob position (inverse-mapped through the range),
+        # skipping mere echoes of what we last published.
+        if snap[0] is not None:
+            kv = unshape_value(snap[0], step["operation"])
+            last = self._mqtt_knob_published.get(name)
+            if last is None or abs(kv - last) > self.KNOB_MQTT_DEVICE_EPS:
+                self._mqtt_knob_state(name, kv)
 
     def _snapshot_name_for_slot(self, workspace, slot):
         """Snapshot name for a slot in a workspace of the snapshot map (both
@@ -2427,11 +2440,11 @@ class TotalMixOSCBridge:
             try:
                 self._sync_snapshot_from_device()
             except Exception as e:
-                logger.debug(f"snapshot sync failed: {e}")
+                logger.warning(f"snapshot sync failed: {e}")
             try:
                 self._knob_watch_tick()
             except Exception as e:
-                logger.debug(f"knob watch tick failed: {e}")
+                logger.warning(f"knob watch tick failed: {e}")
 
     def _schedule_knob_readback(self, name, step, address):
         """Own Global writes never echo (re-send OFF), so after a knob
@@ -2511,7 +2524,7 @@ bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
 logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
 logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegistry + WebSocket live updates for Web Client v1")
 
-# === BRIDGE STARTUP — CENTRALIZED MODE (for python bridge.py) ===
+# === BRIDGE STARTUP — HEADLESS MODE (python -m tmosc.bridge: MQTT/OSC only, no web UI) ===
 if __name__ == "__main__":
     bridge.start_mqtt()   # re-uses the same function
     bridge.start_osc_listener()

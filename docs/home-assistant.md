@@ -14,7 +14,10 @@ The bridge exposes every KNOB macro over MQTT:
 
 Make a knob in the web UI aimed at your speaker output (row 3 volume,
 e.g. channel `Main` - cap the range below unity so a fat-fingered
-slider can't hurt you), then in Home Assistant's `configuration.yaml`:
+slider can't hurt you), then in Home Assistant's `configuration.yaml`
+(or take the ready-made package with entities and automations,
+[deploy/ha_config/packages/totalmix.yaml](../deploy/ha_config/packages/totalmix.yaml),
+and drop it into your `packages/` folder):
 
 ```yaml
 mqtt:

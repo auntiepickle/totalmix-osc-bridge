@@ -445,7 +445,10 @@ def get_meters():
 
 
 @app.post("/api/knobs/{name}/group_capture")
-def knob_group_capture(name: str):
+async def knob_group_capture(name: str):
+    # async on purpose: this mutates bridge.mappings and persists it, which
+    # every other writer does on the event-loop thread - a threadpool copy
+    # raced _persist_mappings' rebind (review finding). Nothing here blocks.
     """Re-capture a send group's balance (#groups): for every member,
     offset_db = member's CURRENT level minus the primary's - the mixer
     as it sounds right now becomes the stored balance. Members whose
@@ -710,6 +713,10 @@ async def start_sweep(body: SweepBody = SweepBody()):
         raise HTTPException(status_code=503, detail="OSC listener not running")
     if bridge.sweep_state.get("status") == "running":
         raise HTTPException(status_code=409, detail="Sweep already running")
+    # Claim the state HERE (event-loop thread), not in the worker: two quick
+    # POSTs both passed the check above and started two sweeps (review finding).
+    bridge.sweep_state = {"status": "running", "progress": 0, "total": 0,
+                          "rows": list(body.rows)}
     threading.Thread(
         target=bridge.run_sweep,
         kwargs={"rows": tuple(body.rows), "settle_s": body.settle_s,

@@ -51,8 +51,9 @@ def load_table():
             return json.load(r)
     except Exception:
         pass
-    for p in ("ufx2_channel_map.json", "ufx2_channel_map.example.json"):
-        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), p)
+    import tmosc.app_paths as app_paths
+    for path in (app_paths.data_path("ufx2_channel_map.json"),
+                 app_paths.example_path("ufx2_channel_map.example.json")):
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 return json.load(f).get("physical_table")
