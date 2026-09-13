@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-09-09 · Repo restructure (#27)
+## v0.4.0 — 2026-09-13 · Repo restructure (#27), unified installer, five audit passes
 
 - **LICENSE**: MIT (#33).
 - **Installer keeps hand-edited config (#41)**: an upgrade rewrites
