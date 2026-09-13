@@ -1,7 +1,7 @@
 # Smoke test for the frozen bridge (dist/tmosc-bridge/tmosc-bridge.exe).
 # Starts the exe from a foreign working directory with state redirected to a
 # temp dir, then checks: /api/health, example-template fallback on a fresh data
-# dir, static UI served from the bundle, a config write landing in the data
+# dir, static UI (index.html + built style.css) served from the bundle, a config write landing in the data
 # dir, and a WebSocket handshake on /ws. Exit code 0 = PASS.
 param(
   [string]$Exe = "dist/tmosc-bridge/tmosc-bridge.exe",
@@ -46,6 +46,10 @@ try {
   $idx = Invoke-WebRequest "http://127.0.0.1:$Port/static/index.html" -TimeoutSec 5 -UseBasicParsing
   if ($idx.StatusCode -ne 200 -or $idx.Content -notmatch "midi-status") { throw "static index.html not served from the bundle" }
   "static: index.html served ($($idx.Content.Length) bytes)"
+
+  $css = Invoke-WebRequest "http://127.0.0.1:$Port/static/style.css" -TimeoutSec 5 -UseBasicParsing
+  if ($css.StatusCode -ne 200 -or $css.Content.Length -lt 1024) { throw "static style.css not served from the bundle (unstyled UI)" }
+  "static: style.css served ($($css.Content.Length) bytes)"
 
   Invoke-RestMethod -Method Post "http://127.0.0.1:$Port/api/config/mappings/init-from-example" -TimeoutSec 5 | Out-Null
   if (-not (Test-Path (Join-Path $data "mappings.json"))) { throw "mappings.json was not written into TMOSC_DATA_DIR" }

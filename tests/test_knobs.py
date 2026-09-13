@@ -365,6 +365,21 @@ def test_off_at_min_toggles_section(rig):
     assert g.writes_to("/output/0/lowcut/enable") == [0.0, 1.0]
 
 
+def test_hold_reapply_reasserts_off_end_after_recall(rig, fake_osc):
+    """Knob parked at its OFF end + hold: a recall that turned the section
+    back on must get 'enable 0' again, not just the freq (audit run 5)."""
+    knob = {**KNOB, "steps": [{**KNOB["steps"][0], "operation": {
+        "type": "knob", "hold": True, "off_at": "min"}}]}
+    b, g, listener = rig({"locut": knob, "go": {"workspace": "Pill_setup",
+                                                "snapshot": "Reset", "steps": []}})
+    listener.state.ingest("/output/0/lowcut/enable", (1.0,))
+    b.knob_set("locut", 0.0)
+    assert g.writes_to("/output/0/lowcut/enable") == [0.0]
+    listener.state.ingest("/output/0/lowcut/enable", (1.0,))   # recall: ON again
+    assert b.reapply_held_knobs() == 1
+    assert g.writes_to("/output/0/lowcut/enable") == [0.0, 0.0]
+
+
 def test_off_at_max_for_high_cut(rig):
     hicut = {"steps": [{"target": {"channel": "Main", "row": 3, "param": "eq_freq_3"},
                         "value": "{{param}}",

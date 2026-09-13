@@ -1,5 +1,8 @@
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 import threading
 
 import pytest
@@ -7,9 +10,21 @@ import pytest
 # Repo root on sys.path so tests import modules the same way uvicorn does
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# The suite gets its own empty state dir: from source data_dir() is the repo
+# root, so without this a developer's repo-root config.env (gitignored, loaded
+# at import of tmosc.config AFTER the pop below) could hand the suite a real
+# OSC_IP, and mappings.json / bridge.log in the checkout would leak into and
+# out of the tests. With no config.env in the temp dir the bundled examples
+# are the deterministic fallback. Must happen before any module under test is
+# imported.
+_STATE_DIR = tempfile.mkdtemp(prefix="tmosc-tests-")
+os.environ["TMOSC_DATA_DIR"] = _STATE_DIR
+atexit.register(shutil.rmtree, _STATE_DIR, True)
+
 # Never let the suite talk to a real interface, even if a .env leaked into the
-# environment. Must happen before any module under test is imported.
+# environment.
 os.environ.pop("OSC_IP", None)
+os.environ.setdefault("OSC_TRANSPORT", "classic")   # never start the Global transport
 os.environ["ENABLE_OSC_MONITOR"] = "False"
 
 

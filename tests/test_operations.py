@@ -31,6 +31,14 @@ def test_ramp_duration_from_bars_and_bpm(fake_osc):
     assert 8 <= len(fake_osc.sent) <= 14
 
 
+def test_zero_bars_or_bpm_completes_instead_of_dividing_by_zero(fake_osc):
+    run_op("ramp", fake_osc, {"bars": 0, "bpm": 240, "steps_per_sec": 30})
+    assert fake_osc.sent and fake_osc.sent[-1][1] == 0.0
+    fake_osc.sent.clear()
+    run_op("lfo", fake_osc, {"bars": 1, "bpm": 0, "steps_per_sec": 30})
+    assert fake_osc.sent and fake_osc.sent[-1][1] == 0.0
+
+
 def test_ramp_cancel_stops_immediately_and_zeroes(fake_osc):
     cancel = threading.Event()
     cancel.set()

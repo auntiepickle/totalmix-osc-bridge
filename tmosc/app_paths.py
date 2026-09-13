@@ -91,13 +91,20 @@ def load_config_env(path=None) -> int:
     """Load ``KEY=VALUE`` lines from ``<data_dir>/config.env`` (or ``path``)
     into os.environ. Real environment variables always win. Blank lines and
     ``#`` comments (whole-line or inline after a space) are skipped; surrounding
-    quotes are stripped. Returns the
-    number of keys applied; a missing file is 0, never an error."""
+    quotes are stripped and protect a ``#`` inside the value. Returns the
+    number of keys applied; a missing or undecodable file is never an error."""
     p = Path(path) if path else data_dir() / CONFIG_ENV
     try:
-        text = p.read_text(encoding="utf-8-sig")
+        raw_bytes = p.read_bytes()
     except OSError:
         return 0
+    # The installer (and Notepad on older Windows) may write the file in the
+    # ANSI code page; a stray non-UTF-8 byte must never be fatal at startup.
+    try:
+        text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        fallback = "cp1252" if _PLATFORM == "win32" else "latin-1"
+        text = raw_bytes.decode(fallback, errors="replace")
     applied = 0
     for raw in text.splitlines():
         line = raw.strip()
@@ -105,10 +112,10 @@ def load_config_env(path=None) -> int:
             continue
         key, _, val = line.partition("=")
         key, val = key.strip(), val.strip()
-        if " #" in val:                      # inline comment, .env style
-            val = val.split(" #", 1)[0].rstrip()
         if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-            val = val[1:-1]
+            val = val[1:-1]                  # quoted: taken verbatim, '#' included
+        elif " #" in val:                    # inline comment, .env style
+            val = val.split(" #", 1)[0].rstrip()
         if key and key not in os.environ:
             os.environ[key] = val
             applied += 1
@@ -117,6 +124,11 @@ def load_config_env(path=None) -> int:
 
 def prepare(chdir: bool = True) -> Path:
     """Idempotent startup hook (see module docstring). Returns the data dir."""
+    # A relative TMOSC_DATA_DIR is pinned to an absolute path once, here:
+    # data_dir() is re-read on every call, and after the frozen chdir below a
+    # relative value would resolve inside itself (state/state/bridge.log).
+    if os.environ.get("TMOSC_DATA_DIR", "").strip():
+        os.environ["TMOSC_DATA_DIR"] = str(data_dir().resolve())
     d = data_dir()
     if d.resolve() != bundle_dir().resolve():
         d.mkdir(parents=True, exist_ok=True)

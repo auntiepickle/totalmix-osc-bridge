@@ -1,9 +1,26 @@
 #!/bin/sh
 set -e
 
-# Dynamic commit from git (works in Docker build)
+# Commit of the bind-mounted checkout, read straight from .git: the slim
+# runtime image has no git binary, so `git rev-parse` would always say unknown.
+# HEAD -> ref file -> packed-refs (a detached HEAD holds the SHA itself).
 if [ -d "/app/.git" ]; then
-  GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  GIT_COMMIT="unknown"
+  head=$(cat /app/.git/HEAD 2>/dev/null || true)
+  case "$head" in
+    ref:*)
+      ref=${head#ref: }
+      if [ -f "/app/.git/$ref" ]; then
+        GIT_COMMIT=$(cut -c1-7 "/app/.git/$ref")
+      elif [ -f /app/.git/packed-refs ]; then
+        GIT_COMMIT=$(grep " $ref\$" /app/.git/packed-refs | cut -c1-7)
+      fi
+      ;;
+    *)
+      [ -n "$head" ] && GIT_COMMIT=$(printf '%s' "$head" | cut -c1-7)
+      ;;
+  esac
+  [ -n "$GIT_COMMIT" ] || GIT_COMMIT="unknown"
 else
   GIT_COMMIT="docker-build"
 fi

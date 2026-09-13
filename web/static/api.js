@@ -33,7 +33,10 @@ window.API = (function () {
 
   async function _postForm(path, formData) {
     const res = await fetch(path, { method: 'POST', body: formData });
-    if (!res.ok) throw new Error(`POST ${path} → HTTP ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || `POST ${path} → HTTP ${res.status}`);
+    }
     return res.json().catch(() => ({}));
   }
 
@@ -110,9 +113,6 @@ window.API = (function () {
 
     /** POST /api/device/probe → { alive, elapsed_s, … } */
     probeDevice() { return _post('/api/device/probe'); },
-
-    /** POST /api/config/macros/{name}/rename → rename a macro/knob in place */
-    renameMacro(name, newName) { return _post(`/api/config/macros/${encodeURIComponent(name)}/rename`, { new_name: newName }); },
 
     /** POST /api/knob/{name}/param → write a companion param (low-cut slope, EQ type) */
     setKnobParam(name, param, value) { return _post(`/api/knob/${encodeURIComponent(name)}/param`, { param, value }); },

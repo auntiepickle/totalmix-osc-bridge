@@ -59,6 +59,17 @@ def unshape_value(val: float, config: dict) -> float:
     return max(0.0, min(1.0, val))
 
 
+MIN_DURATION_S = 0.05
+
+
+def _musical_duration(config: dict) -> float:
+    """bars @ bpm -> seconds, never zero: bars=0 or bpm=0 from the editor
+    used to divide by zero inside the trigger thread (no health record)."""
+    bpm = float(config.get("bpm", 140) or 140)
+    bars = float(config.get("bars", 2))
+    return max(MIN_DURATION_S, (bars * 4 * 60.0) / bpm)
+
+
 # ====================== BUILT-IN OPERATIONS ======================
 
 @OperationRegistry.register("ramp")
@@ -68,9 +79,7 @@ def ramp_op(osc_client, osc_addr: str, param: float, config: dict,
     if "duration" in config:
         duration = float(config["duration"])
     else:
-        bars = config.get("bars", 2)
-        bpm = config.get("bpm", 140)
-        duration = (bars * 4 * 60.0) / bpm
+        duration = _musical_duration(config)
 
     curve = config.get("curve", "triangle")
     steps_per_sec = config.get("steps_per_sec", 20)
@@ -119,16 +128,16 @@ def lfo_op(osc_client, osc_addr: str, param: float, config: dict,
     floor was a jump; user-reported as "cycles don't return to their
     initial value". Threshold-gated params (mute) keep starting AND
     resting un-tripped for free, matching the #13 hardware round."""
-    bpm = config.get("bpm", 140)
-    bars = config.get("bars", 2)
+    bpm = float(config.get("bpm", 140) or 140)
+    bars = float(config.get("bars", 2))
     depth = config.get("depth", 1.0)
     rate = float(config.get("rate", 1.0))
-    duration = (bars * 4 * 60.0) / bpm
+    duration = _musical_duration(config)
     cycles = max(1, round(bars * 4 * rate))
     steps_per_sec = config.get("steps_per_sec", 30)
 
     logger.info(f"   → Starting LFO on {osc_addr} ({depth:.1f} depth, "
-                f"{cycles} cycles = {rate:g}/beat) for {bars} bars @ {bpm} BPM")
+                f"{cycles} cycles = {rate:g}/beat) for {bars:g} bars @ {bpm:g} BPM")
 
     start_t = time.time()
     total_steps = int(duration * steps_per_sec) + 1

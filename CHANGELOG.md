@@ -2,6 +2,32 @@
 
 ## Unreleased — 2026-09-09 · Repo restructure (#27)
 
+- Fifth audit pass (frontend, macro/knob engine, packaging). Duck engine:
+  a bridge-side knob move on a ducked send now seeds the new base (it
+  used to release to the OLD level and revert the performer's move every
+  cycle); echoes of the engine's own write (settle readback, `/sendall`,
+  re-send ON) no longer ratchet the base down; a playback-row duck key
+  resolves (names and meters use different row keys); one malformed duck
+  config no longer freezes every other duck. Knobs: a mix PAN knob no
+  longer reports the send FADER as its device value; a hold knob parked
+  at its OFF end re-asserts the OFF after a recall; `bars=0`/`bpm=0` no
+  longer divide by zero in a trigger thread, and an operation error is
+  recorded as a partial fire instead of killing the thread. Web UI: the
+  "not pinned" companion option no longer saves as a pin at Bell / 6
+  dB/oct; changing the submix in the simple editor keeps the channel
+  (it re-targeted the first input); workspace groups collapse again;
+  the OSC dot shows the amber stale band; upload failures are reported
+  and the file input resets; strip sliders get double-click reset and
+  release the drag on `pointercancel`; MIDI-learn is disarmed when the
+  drawer closes; MIDI start/stop reset the clock BPM window; the
+  emulator detaches every physical input; the WS/SS dropdowns are not
+  rebuilt on every WebSocket message; labels are escaped; dead client
+  code removed. Packaging: `config.env` survives ANSI bytes and keeps
+  quoted `#`; a relative `TMOSC_DATA_DIR` is pinned before the frozen
+  chdir; the freeze fails fast without `style.css`; `release.yml` runs
+  on real freeze inputs; the container logs the real commit without a
+  git binary; the test suite runs in a temp state dir (never the
+  developer's `config.env`/`mappings.json`).
 - Review follow-ups (fourth audit pass): the sweep endpoint claims its
   running state before starting the worker (two quick POSTs started two
   sweeps); group capture runs on the event loop like every other mappings

@@ -72,7 +72,8 @@ def test_override_wins_in_any_mode(monkeypatch, tmp_path):
 
 
 def test_config_env_loader(tmp_path):
-    keys = ("TMOSC_T_IP", "TMOSC_T_PORT", "TMOSC_T_PORT2", "TMOSC_T_BROKER", "TMOSC_T_EXISTING")
+    keys = ("TMOSC_T_IP", "TMOSC_T_PORT", "TMOSC_T_PORT2", "TMOSC_T_BROKER",
+            "TMOSC_T_EXISTING", "TMOSC_T_PASS")
     cfg = tmp_path / "config.env"
     cfg.write_text(
         "# TotalMix bridge config\n"
@@ -81,22 +82,59 @@ def test_config_env_loader(tmp_path):
         'TMOSC_T_PORT = "8090"\n'
         "TMOSC_T_BROKER='broker'\n"
         "TMOSC_T_PORT2=7001              # TotalMix Remote 1 port incoming\n"
+        'TMOSC_T_PASS="a #b"\n'
         "not a key value line\n"
         "TMOSC_T_EXISTING=from_file\n",
         encoding="utf-8",
     )
     os.environ["TMOSC_T_EXISTING"] = "from_env"
     try:
-        assert app_paths.load_config_env(cfg) == 4
+        assert app_paths.load_config_env(cfg) == 5
         assert os.environ["TMOSC_T_PORT2"] == "7001"   # inline comment stripped
         assert os.environ["TMOSC_T_IP"] == "192.168.1.50"
         assert os.environ["TMOSC_T_PORT"] == "8090"      # quotes stripped
         assert os.environ["TMOSC_T_BROKER"] == "broker"
+        assert os.environ["TMOSC_T_PASS"] == "a #b"     # quotes protect the '#'
         assert os.environ["TMOSC_T_EXISTING"] == "from_env"  # real env wins
         assert app_paths.load_config_env(tmp_path / "missing.env") == 0
     finally:
         for k in keys:
             os.environ.pop(k, None)
+
+
+def test_config_env_loader_survives_ansi_bytes(monkeypatch, tmp_path):
+    """The installer writes the wizard text in the ANSI code page; a 'ü' in an
+    MQTT password must not kill the frozen bridge at startup."""
+    cfg = tmp_path / "config.env"
+    cfg.write_bytes(b"TMOSC_T_ANSI=p\xfcss\n")
+    monkeypatch.setattr(app_paths, "_PLATFORM", "win32")
+    monkeypatch.delenv("TMOSC_T_ANSI", raising=False)
+    try:
+        assert app_paths.load_config_env(cfg) == 1
+        assert os.environ["TMOSC_T_ANSI"] == "püss"
+    finally:
+        os.environ.pop("TMOSC_T_ANSI", None)
+
+
+def test_relative_override_is_pinned_before_frozen_chdir(monkeypatch, tmp_path):
+    """A relative TMOSC_DATA_DIR + the frozen chdir must not make data paths
+    resolve inside themselves (state/state/bridge.log)."""
+    cwd = os.getcwd()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TMOSC_DATA_DIR", "state")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "bundle"), raising=False)
+    try:
+        d = app_paths.prepare(chdir=True)
+        assert d == (tmp_path / "state").resolve()
+        assert d.is_dir()
+        assert Path(os.getcwd()).resolve() == d
+        log = Path(app_paths.data_path("bridge.log"))
+        assert log.is_absolute()
+        assert log.parent == d
+        assert Path(os.environ["TMOSC_DATA_DIR"]).is_absolute()
+    finally:
+        os.chdir(cwd)
 
 
 def test_web_layer_persists_into_data_dir(monkeypatch, tmp_path):

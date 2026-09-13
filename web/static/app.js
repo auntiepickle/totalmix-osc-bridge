@@ -320,8 +320,10 @@ async function initMappingsFromExample() {
 
 // ── Status header + WS/SS nav dropdowns ──────────────────────────────────────
 function updateStatusHeader() {
-  _updateNavDropdowns();
-
+  // The WS/SS dropdowns are NOT rebuilt here: this runs on every WebSocket
+  // message (~10×/s while a knob streams) and tearing the <select>s down
+  // that often defeated the change guard in _onWSMessage. Every site that
+  // changes what they show calls _updateNavDropdowns() itself.
   const pill  = document.getElementById('midi-status');
   const dot   = document.getElementById('midi-status-dot');
   const icon  = document.getElementById('midi-status-icon');
@@ -624,19 +626,9 @@ function updateKnobCard(name, moveSlider = true) {
   });
 }
 
-// Companion chip click: step the enum to its next option on the device.
-// If the knob PINS this param, the pin follows the choice (and is saved),
-// otherwise the next knob move would snap it back.
-window.cycleKnobParam = async function (name, param, count) {
-  const m = macros[name];
-  if (!m) return;
-  const cur = parseFloat((m.companions || {})[param]);
-  const idx = Number.isFinite(cur) ? Math.round(cur * (count - 1)) : -1;
-  return setKnobParam(name, param, (idx + 1) % count, count);
-};
-
 // Direct enum choice (the type/slope DROPDOWNS — #user request: pick from a
-// list instead of tap-cycling). Same write + pin-follow path as cycling.
+// list instead of tap-cycling). If the knob PINS this param, the pin follows
+// the choice (and is saved), otherwise the next knob move would snap it back.
 window.setKnobParam = async function (name, param, idx, count) {
   const m = macros[name];
   if (!m) return;
@@ -1025,8 +1017,13 @@ async function pollGlobalTransport() {
     if (dot) {
       const fresh = age != null && age < 5;
       const staleish = age != null && age < 30;
-      dot.classList.remove('bg-green-400', 'bg-amber-400', 'bg-red-500', 'bg-zinc-700');
+      // pollHealth's _applyHealthDot paints bg-green-500 + a green glow on
+      // this same dot; in the compiled CSS green-500 outranks amber-400, so
+      // strip those too or the amber "stale heartbeat" band never shows
+      dot.classList.remove('bg-green-500', 'shadow-[0_0_5px_#22c55e]',
+                           'bg-green-400', 'bg-amber-400', 'bg-red-500', 'bg-zinc-700');
       dot.classList.add(fresh ? 'bg-green-400' : staleish ? 'bg-amber-400' : 'bg-red-500');
+      dot.classList.toggle('shadow-[0_0_5px_#22c55e]', fresh);
       dot.title = `Global OSC (${g.transport} transport) — device heartbeat ` +
         (age != null ? `${age.toFixed(1)}s ago` : 'never received') +
         (g.status && g.status.device ? ` · ${g.status.device}` : '');

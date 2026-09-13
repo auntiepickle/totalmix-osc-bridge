@@ -23,8 +23,12 @@
     const size = opts.size === 'mini' ? 24 : 44;
     const cls = opts.size === 'mini' ? 'mk mk-mini' : 'mk';
     const suffix = opts.suffix ? `-${opts.suffix}` : '';
+    // the label is free text (renames allow any characters) — escape it or a
+    // quote ends the attribute and the rest lands in the markup
+    const label = String(opts.label || name)
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     return `<svg id="mknob-${name}${suffix}" class="${cls}" width="${size}" height="${size}" viewBox="0 0 36 36"
-        tabindex="0" role="slider" aria-label="${opts.label || name}">
+        tabindex="0" role="slider" aria-label="${label}">
       <path class="mk-track" d="${arcPath(A0, A1)}"/>
       <path id="mknob-arc-${name}${suffix}" class="mk-arc" d=""/>
       <circle class="mk-cap" cx="${CX}" cy="${CY}" r="10.5"/>

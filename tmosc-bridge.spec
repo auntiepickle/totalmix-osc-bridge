@@ -16,6 +16,13 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = SPECPATH  # the repo root (directory of this spec)
 
+# style.css is gitignored and produced by the Tailwind step (release.yml /
+# Dockerfile); datas copies whatever is on disk, so a fresh clone would freeze
+# an unstyled UI that still passes /api/health. Refuse instead of shipping it.
+_css = os.path.join(ROOT, "web", "static", "style.css")
+if not os.path.exists(_css) or os.path.getsize(_css) < 1024:
+    raise SystemExit("web/static/style.css missing or empty - run the Tailwind build first (see release.yml)")
+
 datas = [
     (os.path.join(ROOT, "web", "static"), os.path.join("web", "static")),
     (os.path.join(ROOT, "examples"), "examples"),

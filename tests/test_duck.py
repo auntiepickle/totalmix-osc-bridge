@@ -85,3 +85,55 @@ def test_floor_clamp():
     rt = {}
     last = _hold(cfg, rt, key_db=0.0, base_db=-30.0, ticks=120)
     assert last is not None and last >= FLOOR_DB - 1e-9
+
+
+# ── audit run 5: echoes of our own write are not external moves ──────────
+
+def test_echo_of_own_write_does_not_rebase():
+    """Row-3 settle readback / sendall / sendstate re-report the value WE
+    wrote. Treating that as the human's level ratcheted the base down by a
+    full depth per report; the release then settled 12 dB low."""
+    rt = {}
+    _hold(CFG, rt, key_db=-10.0, base_db=-20.0, ticks=80)   # ducked at -32
+    duck_tick(CFG, rt, key_db=-10.0, dev_db=-32.0, dt=0.04)  # readback echo
+    assert abs(rt["base"] - (-20.0)) < 0.01
+    last = _hold(CFG, rt, key_db=-100.0, base_db=-32.0, ticks=120)
+    assert abs(last - (-20.0)) < 0.2                          # release -> base
+
+
+def test_resend_on_holds_base_and_depth():
+    """TotalMix 'Re-send' ON echoes every write: dev_db == out each tick.
+    Base must hold and the send settle at base - depth, not FLOOR_DB."""
+    rt = {}
+    dev = -20.0
+    last = None
+    for _ in range(120):
+        out = duck_tick(CFG, rt, key_db=-10.0, dev_db=dev, dt=0.04)
+        if out is not None:
+            last, dev = out, out
+    assert abs(rt["base"] - (-20.0)) < 0.01
+    assert abs(last - (-32.0)) < 0.2
+
+
+def test_bridge_side_knob_move_seeds_new_base():
+    """knob_set on a ducked send: under re-send OFF the write never echoes,
+    so the engine must be told (DuckSupervisor.seed) or it releases to the
+    OLD level and reverts the performer's move every cycle."""
+    from tmosc.duck_engine import DuckSupervisor
+    rt = {}
+    _hold(CFG, rt, key_db=-10.0, base_db=-20.0, ticks=80)    # ducked at -32
+    sup = DuckSupervisor(bridge=None)
+    sup.rt["x"] = rt
+    sup.seed("x", -13.2)                                      # knob -> -13.2 dB
+    for _ in range(5):
+        duck_tick(CFG, rt, key_db=-10.0, dev_db=-20.0, dt=0.04)   # stale cache
+    assert abs(rt["written"] - (-25.2)) < 0.3                 # -13.2 - 12
+    last = _hold(CFG, rt, key_db=-100.0, base_db=-20.0, ticks=120)
+    assert abs(last - (-13.2)) < 0.2                          # NOT -20
+
+
+def test_malformed_numeric_config_falls_back_to_defaults():
+    cfg = dict(CFG, threshold="", depth="abc", attack=None)
+    rt = {}
+    last = _hold(cfg, rt, key_db=-10.0, base_db=-20.0, ticks=80)
+    assert abs(last - (-32.0)) < 0.2                          # default depth 12

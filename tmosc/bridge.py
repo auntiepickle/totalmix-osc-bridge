@@ -889,14 +889,21 @@ class TotalMixOSCBridge:
                             continue
                         op_client = _EdgeToggleClient(self.osc_client,
                                                       osc_addr, initial)
-                    OperationRegistry.execute(
-                        op_config["type"],
-                        op_client,
-                        osc_addr,
-                        value,
-                        op_config,
-                        cancel_event=cancel_event,
-                    )
+                    try:
+                        OperationRegistry.execute(
+                            op_config["type"],
+                            op_client,
+                            osc_addr,
+                            value,
+                            op_config,
+                            cancel_event=cancel_event,
+                        )
+                    except Exception:
+                        # an operation bug must not kill the trigger thread
+                        # before the fire is recorded (#22 health)
+                        logger.exception(f"   → operation {op_config.get('type')!r} "
+                                         f"failed on {osc_addr}")
+                        skip_reasons.append("operation_error")
                     if _restore_bank:
                         self.osc_client.send_message("/setBankStart", 0.0)
                         _bank_dirty = False
@@ -1899,9 +1906,14 @@ class TotalMixOSCBridge:
             # Global switches are absolute sets (no edge-toggle shim
             # needed): the writer's to_wire threshold turns the 0..1
             # stream into clean 0/1 writes.
-            OperationRegistry.execute(
-                op_config["type"], writer, writer.address, value,
-                op_config, cancel_event=cancel_event)
+            try:
+                OperationRegistry.execute(
+                    op_config["type"], writer, writer.address, value,
+                    op_config, cancel_event=cancel_event)
+            except Exception:
+                logger.exception(f"   → operation {op_config.get('type')!r} "
+                                 f"failed on {writer.address}")
+                return "operation_error"   # fire recorded as partial, not lost
         else:
             step_val = value if step.get("value") == "{{param}}" else step.get("value")
             try:
@@ -1939,7 +1951,14 @@ class TotalMixOSCBridge:
         addr = getattr(writer, "address", "")
         try:
             if addr.startswith("/mix/"):
-                _, _, src, in_hw, out_hw, _ = addr.split("/")
+                _, _, src, in_hw, out_hw, path = addr.split("/")
+                # Only the send LEVEL has wire-verified feedback (.../fader,
+                # dB). A mix pan knob used to be answered with that fader
+                # through the fader curve - wrong parameter, wrong units -
+                # and the card/HA slider jumped on every level change.
+                # Unknown beats wrong until pan feedback is observed.
+                if path != "faderlin":
+                    return None
                 e = st.get_mix(src, int(in_hw), int(out_hw), "fader")
                 return gu.fader_lin(e[0]) if e else None
             parts = addr.strip("/").split("/")
@@ -2236,6 +2255,9 @@ class TotalMixOSCBridge:
             self._assert_pins(macro_name, step)
             shaped = shape_value(value, step["operation"])
             writer.send_message("knob", shaped)
+            if self.duck is not None:
+                # a ducked send: this is the performer's new un-ducked level
+                self.duck.seed(macro_name, gu.fader_db(shaped))
             self._write_group_members(macro_name, step, shaped)
             self.knob_values[macro_name] = value
             self._schedule_knob_readback(macro_name, step, writer.address)
@@ -2491,6 +2513,13 @@ class TotalMixOSCBridge:
             macro = self.mappings.get("macros", {}).get(name)
             step = self._knob_step(macro) if macro else None
             if step and step["operation"].get("hold"):
+                # The recall may have flipped the section switch and the
+                # pinned companions too; forget the crossing memo and the
+                # 2 s throttles so the OFF end / enable / pins are written
+                # again, not just the value (a knob parked at its off end
+                # otherwise re-wrote the freq and left the cut engaged).
+                for key in (name, f"{name}:offmin", f"{name}:pins"):
+                    self._knob_enable_sent.pop(key, None)
                 if self.knob_set(name, value, source="hold")["status"] == "resolved":
                     n += 1
         if n:

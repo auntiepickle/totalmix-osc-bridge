@@ -12,9 +12,22 @@ let _lastCCTime = null;   // epoch ms
 // ── MIDI clock BPM detection ──────────────────────────────────────────────────
 // Cirklon (and most DAWs) sends 0xF8 timing clock at 24 pulses per quarter note
 let _clockTicks = [];     // timestamps of recent clock ticks
+const CLOCK_GAP_MS = 500; // a pause longer than this (stop/restart) is not tempo
+
+function _resetMIDIClock(clearBadge) {
+  _clockTicks = [];
+  if (!clearBadge) return;
+  window._detectedBPM = null;
+  const el = document.getElementById('midi-bpm');
+  if (el) el.textContent = '— BPM';
+}
 
 function _processMIDIClock() {
   const now = Date.now();
+  // a transport restart after a pause would fold the silence into the
+  // average (1 s gap + 23 real ticks → 40 BPM passes the sanity gate)
+  const last = _clockTicks[_clockTicks.length - 1];
+  if (last !== undefined && now - last > CLOCK_GAP_MS) _clockTicks = [];
   _clockTicks.push(now);
   if (_clockTicks.length > 25) _clockTicks.shift();
   if (_clockTicks.length < 4) return;
@@ -160,8 +173,12 @@ window.injectRelayedMidi = (m) => {
 function handleMIDIMessage(message) {
   const [status, data1, data2] = message.data;
 
-  // MIDI Clock (0xF8) — detect BPM from Cirklon/DAW timing clock
+  // MIDI Clock (0xF8) — detect BPM from Cirklon/DAW timing clock.
+  // Start/Continue (0xFA/0xFB) restart the tick window; Stop (0xFC) also
+  // clears the badge so a stale tempo is not sent with the next fire.
   if (status === 0xF8) { _processMIDIClock(); return; }
+  if (status === 0xFA || status === 0xFB) { _resetMIDIClock(false); return; }
+  if (status === 0xFC) { _resetMIDIClock(true); return; }
 
   // MIDI-learn (#7, #23): an armed learn callback consumes the next
   // CC/note/PC/bend/aftertouch instead of firing macros — works with real
@@ -252,6 +269,7 @@ window.MIDIEmu = {
   _clockTimer: null,
 
   connect() {
+    _detachAll();   // all-inputs mode: the other physical inputs must stop firing too
     if (midiInput) midiInput.onmidimessage = null;
     midiInput = null;
     midiConnectedDevice = 'MIDI Emulator';

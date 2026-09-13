@@ -18,10 +18,12 @@ Config lives on the knob step, next to the knob operation:
     }
 
 The engine only ever writes the knob's own volume target (base - gr).
-Base tracking: the device's fader IS the base until we write; any
-external move (knob drag, TotalMix, another UI) shows up as a device
-value that differs from our last write and re-derives the base under
-the current reduction - so riding the send while it ducks Just Works.
+Base tracking: the device's fader IS the base until we write; a NEW
+device report that differs from our last write (a fader move in
+TotalMix, a settle readback of someone else's change) re-derives the
+base under the current reduction, and a bridge-side knob move seeds it
+directly (bridge.knob_set) because under re-send OFF that write never
+echoes - so riding the send while it ducks Just Works either way.
 """
 
 import logging
@@ -35,22 +37,37 @@ EXTERNAL_EPS_DB = 0.75    # device vs last-write mismatch = external move
 WRITE_EPS_DB = 0.05       # don't spam sub-0.05dB writes
 RESTORE_MIN_DB = 0.1      # restore base on disable only if still reduced
 
-_ROW_KEYS = {1: "inputs", 2: "playback", 3: "outputs"}
+# Row -> (names/stereo key, meter key). The listener files channel names and
+# the physical table under "playbacks" but meters arrive as /level/pb/<hw>
+# and are filed under "playback"; one shared key made every playback-row
+# duck key resolve to nothing (audit run 5).
+_ROW_KEYS = {1: ("inputs", "inputs"),
+             2: ("playbacks", "playback"),
+             3: ("outputs", "outputs")}
+
+
+def _num(cfg, key, default):
+    """cfg numeric with a fallback: a hand-edited "" or "abc" must not turn
+    into a ValueError that aborts the tick."""
+    try:
+        return float(cfg.get(key, default))
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def duck_tick(cfg, rt, key_db, dev_db, dt):
     """One control-rate step - PURE except for mutating rt (runtime dict).
 
     cfg: the operation.duck dict. rt: per-macro runtime {gr, base,
-    written, applied}. key_db: key channel level in dB (None = no meter
-    data -> treat as silent). dev_db: target's current device level in
-    dB (None = unknown -> envelope still runs, nothing written).
+    written, applied, dev_seen}. key_db: key channel level in dB (None =
+    no meter data -> treat as silent). dev_db: target's current device
+    level in dB (None = unknown -> envelope still runs, nothing written).
     Returns the dB value to write, or None.
     """
-    depth = max(0.0, min(40.0, float(cfg.get("depth", 12.0))))
-    thr = float(cfg.get("threshold", -30.0))
-    atk_s = max(1.0, float(cfg.get("attack", 20.0))) / 1000.0
-    rel_s = max(10.0, float(cfg.get("release", 250.0))) / 1000.0
+    depth = max(0.0, min(40.0, _num(cfg, "depth", 12.0)))
+    thr = _num(cfg, "threshold", -30.0)
+    atk_s = max(1.0, _num(cfg, "attack", 20.0)) / 1000.0
+    rel_s = max(10.0, _num(cfg, "release", 250.0)) / 1000.0
 
     over = key_db is not None and key_db > thr
     target = depth if over else 0.0
@@ -67,9 +84,16 @@ def duck_tick(cfg, rt, key_db, dev_db, dt):
     # duck for free. Deriving base from our own writes (the old code) misread
     # every write as an external move, ratcheted the fader UP a little each
     # cycle and collapsed the reduction to <1 dB (critical-review HIGH-1). We
-    # no longer do that: base = the freshest external device level, full stop.
-    if dev_db is not None:
-        rt["base"] = dev_db
+    # no longer do that: base = the freshest EXTERNAL device level. A report
+    # is external only when it is new (not the same value we already took
+    # into account) and not an echo of our own last write - echoes DO happen
+    # (row-3 settle readback, /sendall, /sendstate, re-send ON) and adopting
+    # one as the base ratchets the send down by a full depth per cycle.
+    if dev_db is not None and dev_db != rt.get("dev_seen"):
+        rt["dev_seen"] = dev_db
+        written = rt.get("written")
+        if written is None or abs(dev_db - written) > EXTERNAL_EPS_DB:
+            rt["base"] = dev_db
     base = rt.get("base")
     if base is None:
         return None                        # level unknown yet - nothing to write
@@ -100,6 +124,20 @@ class DuckSupervisor:
         self.bridge = bridge
         self.rt = {}
         self.status = {}
+        self._failed = set()   # macros whose tick raised (warned once)
+
+    def seed(self, name, level_db):
+        """The bridge just wrote this knob's target itself (knob_set). Under
+        re-send OFF that write never comes back as a device report, so the
+        engine would keep ducking from - and releasing to - the OLD level,
+        silently reverting the performer's move. Adopt it as the new base;
+        the next tick re-applies the current reduction on top of it."""
+        rt = self.rt.get(name)
+        if rt is None:
+            return
+        rt["base"] = level_db
+        rt["written"] = level_db
+        rt["applied"] = 0.0
 
     def run(self, stop_event):
         dt = 1.0 / self.RATE_HZ
@@ -148,10 +186,10 @@ class DuckSupervisor:
             row = int(key.get("row", 1) or 1)
         except (TypeError, ValueError):
             row = 1
-        rk = _ROW_KEYS.get(row, "inputs")
+        name_key, meter_key = _ROW_KEYS.get(row, _ROW_KEYS[1])
         gt = self.bridge.global_transport
         try:
-            hw = gt._hw_for_name(rk, ch)
+            hw = gt._hw_for_name(name_key, ch)
         except Exception:
             hw = None
         if hw is None:
@@ -159,11 +197,11 @@ class DuckSupervisor:
         st = self.bridge.global_listener.state
         now = time.time()
         with st._lock:
-            hws = (hw, hw + 1) if st.stereo.get(rk, {}).get(hw) else (hw,)
+            hws = (hw, hw + 1) if st.stereo.get(name_key, {}).get(hw) else (hw,)
             vals = [v[0] for h in hws
-                    for v in [st.levels.get((rk, h))]
+                    for v in [st.levels.get((meter_key, h))]
                     if v and now - v[1] < 8.0]
-            row_alive = any(k[0] == rk for k in st.levels)
+            row_alive = any(k[0] == meter_key for k in st.levels)
         if vals:
             return max(vals)
         return -100.0 if row_alive else None   # silent vs no-meter-data
@@ -172,39 +210,53 @@ class DuckSupervisor:
         b = self.bridge
         if not b._global_active():
             return
-        import tmosc.global_units as gu
         active = set()
         for name, macro in list(b.mappings.get("macros", {}).items()):
-            step = b._knob_step(macro)
-            duck = ((step or {}).get("operation") or {}).get("duck")
-            if step is None or not isinstance(duck, dict):
-                continue
-            # duck rides the fader law - volume targets only
-            if str(step.get("target", {}).get("param", "volume")) != "volume":
-                continue
-            if not duck.get("enabled"):
-                if name in self.rt:
-                    self._restore(name, step)
-                continue
-            active.add(name)
-            dev = b.knob_device_value(step)
-            dev_db = gu.fader_db(dev) if dev is not None else None
-            rt = self.rt.setdefault(name, {})
-            kdb = self._key_db(duck)
-            out = duck_tick(duck, rt, kdb, dev_db, dt)
-            self.status[name] = {
-                "gr": round(rt.get("gr", 0.0), 1),
-                "key_db": None if kdb is None else round(kdb, 1),
-            }
-            if out is not None:
-                try:
-                    writer, _, status = \
-                        b.global_transport.resolve_step(step["target"])
-                    if status == "resolved":
-                        writer.send_message("duck", gu.fader_lin(out))
-                except Exception:
-                    logger.exception("duck write failed for %s", name)
+            # Each macro is isolated (as _knob_watch_tick does): one broken
+            # duck config must not freeze every other duck's envelope with
+            # its send left reduced, nor log the same traceback 25x a second.
+            try:
+                self._tick_one(name, macro, dt, active)
+            except Exception as e:
+                if name not in self._failed:
+                    self._failed.add(name)
+                    logger.warning(f"duck '{name}': tick skipped ({e}) - fix its config")
+            else:
+                self._failed.discard(name)
         # macros deleted while ducked: restore what we can, drop the rest
         for name in list(self.rt):
             if name not in active:
                 self._restore(name)
+
+    def _tick_one(self, name, macro, dt, active):
+        b = self.bridge
+        import tmosc.global_units as gu
+        step = b._knob_step(macro)
+        duck = ((step or {}).get("operation") or {}).get("duck")
+        if step is None or not isinstance(duck, dict):
+            return
+        # duck rides the fader law - volume targets only
+        if str(step.get("target", {}).get("param", "volume")) != "volume":
+            return
+        if not duck.get("enabled"):
+            if name in self.rt:
+                self._restore(name, step)
+            return
+        active.add(name)
+        dev = b.knob_device_value(step)
+        dev_db = gu.fader_db(dev) if dev is not None else None
+        rt = self.rt.setdefault(name, {})
+        kdb = self._key_db(duck)
+        out = duck_tick(duck, rt, kdb, dev_db, dt)
+        self.status[name] = {
+            "gr": round(rt.get("gr", 0.0), 1),
+            "key_db": None if kdb is None else round(kdb, 1),
+        }
+        if out is not None:
+            try:
+                writer, _, status = \
+                    b.global_transport.resolve_step(step["target"])
+                if status == "resolved":
+                    writer.send_message("duck", gu.fader_lin(out))
+            except Exception:
+                logger.exception("duck write failed for %s", name)

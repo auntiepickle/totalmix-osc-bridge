@@ -66,9 +66,9 @@ function calculateDurationMs(macro) {
   return Math.round((op.bars || 2) * (240000 / bpm));
 }
 
-function getMidiTriggerLabel(m) {
-  const t = m.midi_triggers && m.midi_triggers[0];
-  if (!t) return '';
+// One trigger → its badge text. Shared by the card badge (first trigger) and
+// the DETAILS panel (every trigger) so the #23 types read the same in both.
+function _triggerLabel(t) {
   const type = t.type || 'control_change';
   if (type === 'note_on')  return `NOTE ON ${t.note ?? '?'} · ch${t.channel}`;
   if (type === 'note_off') return `NOTE OFF ${t.note ?? '?'} · ch${t.channel}`;
@@ -76,7 +76,12 @@ function getMidiTriggerLabel(m) {
   if (type === 'control_change_14') return `CC14:${t.number ?? '?'} · ch${t.channel}`;
   if (type === 'pitch_bend')        return `BEND · ch${t.channel}`;
   if (type === 'aftertouch')        return `AT · ch${t.channel}`;
-  return `CC${t.number} · ch${t.channel}`;
+  return `CC${t.number ?? '?'} · ch${t.channel}`;
+}
+
+function getMidiTriggerLabel(m) {
+  const t = m.midi_triggers && m.midi_triggers[0];
+  return t ? _triggerLabel(t) : '';
 }
 
 // ── Card HTML ─────────────────────────────────────────────────────────────────
@@ -188,22 +193,6 @@ function _shapeKnob(v, op) {
   return rng ? parseFloat(rng[0]) + v * (parseFloat(rng[1]) - parseFloat(rng[0])) : v;
 }
 
-// Live knob on the card: drag it here, or let MIDI drive it — the slider
-// follows either way; the small line shows what the DEVICE reports
-function _knobCardHTML(name, m, step) {
-  const param = (step.target && step.target.param) || 'volume';
-  const v = _knobNormOf(m, step.operation);
-  const dev = Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : null;
-  return `<div class="flex gap-2 items-center mb-1">
-      <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
-          class="flex-1 accent-orange-500" title="Drag to set — MIDI moves it too"
-          oninput="knobInput('${name}', this.value)" ondblclick="resetKnobToDefault('${name}')"
-          onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null">
-      <span id="knob-val-${name}" onclick="startKnobValEdit('${name}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
-    </div>
-    <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>`;
-}
-
 // Section switch behind a continuous param (mirrors global_units.ENABLE_FOR):
 // a low-cut knob is inaudible while low cut is off, so the strip shows the
 // switch and the knob can flip it on with the first move.
@@ -257,7 +246,8 @@ function _companionSlidersHTML(name, m, step) {
       <input id="knob-cps-${name}-${cp}" type="range" min="0" max="1" step="0.002" value="${val ?? 0.5}"
           class="flex-1 min-w-0 accent-zinc-400" title="${_esc(def.label || cp)} on the device — live"
           oninput="companionInput('${name}','${cp}',this.value)" ondblclick="resetCompToDefault('${name}','${cp}')"
-          onpointerdown="window._knobDrag='${name}:${cp}'" onpointerup="window._knobDrag=null">
+          onpointerdown="window._knobDrag='${name}:${cp}'" onpointerup="window._knobDrag=null"
+          onpointercancel="window._knobDrag=null" onlostpointercapture="window._knobDrag=null">
       <span id="knob-cpv-${name}-${cp}" onclick="startCompValEdit('${name}','${cp}')" title="tap to type a value" class="text-[10px] text-zinc-400 font-mono w-12 text-center shrink-0 cursor-text">${val == null ? '?' : (def.fmt ? def.fmt(val) : Math.round(val * 100) + '%')}</span>
     </div>`;
   }).join('');
@@ -318,9 +308,10 @@ function _knobStripHTML(name, m, step) {
     ${_graphsEnabled() && _graphKindOf(param) ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
     <div class="flex gap-2 items-center mb-1 min-w-0">
         <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
-            class="flex-1 min-w-0 accent-orange-500" title="Drag to set — MIDI moves it too"
-            oninput="knobInput('${name}', this.value)"
-            onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null">
+            class="flex-1 min-w-0 accent-orange-500" title="Drag to set — MIDI moves it too · double-click resets to default"
+            oninput="knobInput('${name}', this.value)" ondblclick="resetKnobToDefault('${name}')"
+            onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null"
+            onpointercancel="window._knobDrag=null" onlostpointercapture="window._knobDrag=null">
         <span id="knob-val-${name}" onclick="startKnobValEdit('${name}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0 cursor-text">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
     </div>
     <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>
@@ -621,7 +612,7 @@ function _groupHTML(name, m, step) {
   const param = (step.target && step.target.param) || 'volume';
   if (param !== 'volume') return '';
   const grp = _groupOf(m);
-  const chip = `<button onclick="toggleGroup('${name}')"
+  const chip = `<button onclick="toggleSendGroup('${name}')"
       class="mduck-chip${grp && grp.length ? ' on' : grp ? ' cfg' : ''}"
       title="send group - this knob moves every member fader at its stored dB offset (VCA-style)">GRP${grp && grp.length ? ' ' + grp.length : ''}</button>`;
   if (!grp) return `<span class="mdg-sec">${chip}</span>`;
@@ -653,7 +644,9 @@ function _groupHTML(name, m, step) {
   </span>`;
 }
 
-window.toggleGroup = function (name) {
+// (named apart from toggleGroup above, which collapses a WORKSPACE group in
+// the macro grid — assigning this over it made that header button a no-op)
+window.toggleSendGroup = function (name) {
   const m = macros[name];
   const step = m && _knobStepOf(m);
   if (!step || !step.operation) return;
@@ -996,7 +989,6 @@ async function _persistKnobOrder(knobOrder) {
       body: JSON.stringify({ order: full }),
     });
     if (!res.ok) throw new Error(await res.text());
-    window._lastLocalSave = { name: '__order__', ts: Date.now() };
   } catch (e) {
     console.warn('[UI] reorder failed:', e.message);
     loadMacros();   // re-sync to server truth
@@ -1201,12 +1193,11 @@ function createMacroCardHTML(name, m) {
     ${_modulWaveStepsOf(m, knobStep).map(({ s, i }) =>
       `<div id="mwave-${name}-${i}" class="mwave"><span id="mwaveval-${name}-${i}" class="mwave-val">${_mwaveIdleText(s)}</span></div>`).join('')}
     <!-- Progress bar -->
-    <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3${knobStep ? ' hidden' : ''}">
+    <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3">
       <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
     </div>
-    ${knobStep ? _knobCardHTML(name, m, knobStep) : ''}
     <!-- Action buttons -->
-    <div class="grid grid-cols-3 gap-2${knobStep ? ' hidden' : ''}">
+    <div class="grid grid-cols-3 gap-2">
         <button onclick="fireMacro('${name}',1.0,false)"
             class="fire-btn col-span-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 active:scale-95 active:bg-zinc-600 text-zinc-400 hover:text-white font-medium py-2.5 rounded-xl text-xs tracking-widest transition-all">
             FIRE
@@ -1462,7 +1453,7 @@ function _detailHTML(name, m) {
         html += `<div class="flex items-center gap-2 font-mono bg-zinc-900/60 px-2.5 py-1.5 rounded-lg">
           <span class="text-zinc-500 text-xs">⚡</span>
           <span class="text-orange-300 text-xs flex-1 truncate">${addr}</span>
-          <span class="text-zinc-400 text-xs">= ${val}</span>
+          <span class="text-zinc-400 text-xs">= ${_esc(val)}</span>
         </div>`;
       }
     });
@@ -1475,12 +1466,7 @@ function _detailHTML(name, m) {
       <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">MIDI Triggers</div>
       <div class="flex flex-wrap gap-1.5">`;
     m.midi_triggers.forEach(t => {
-      const type = t.type || 'control_change';
-      let label;
-      if (type === 'note_on')       label = `NOTE ON ${t.note ?? '?'} ch${t.channel}`;
-      else if (type === 'note_off') label = `NOTE OFF ${t.note ?? '?'} ch${t.channel}`;
-      else                          label = `CC${t.number ?? '?'} ch${t.channel}`;
-      html += `<span class="text-xs font-mono bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-700">${label}</span>`;
+      html += `<span class="text-xs font-mono bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-700">${_triggerLabel(t)}</span>`;
     });
     html += `</div></div>`;
   }
@@ -1497,9 +1483,9 @@ function _detailHTML(name, m) {
   const wsLabel  = m.workspace || '—';
   const ssLabel  = m.snapshot  || '—';
   html += `<div class="flex items-center gap-1.5 border-t border-zinc-800 pt-2 font-mono text-xs flex-wrap">
-    <span class="${wsColor}">${wsLabel}</span>
+    <span class="${wsColor}">${_esc(wsLabel)}</span>
     <span class="text-zinc-700">/</span>
-    <span class="${ssColor}">${ssLabel}</span>
+    <span class="${ssColor}">${_esc(ssLabel)}</span>
     ${!wsResolved || !ssResolved ? `<span class="text-red-500/60 text-[10px]">(not in snapshot map)</span>` : ''}
   </div>`;
 
@@ -1594,6 +1580,12 @@ const RUNTIME_FIELDS = ['name', 'value', 'progress', 'lfo_active',
 function _cleanMacro(m) {
   const c = JSON.parse(JSON.stringify(m));
   RUNTIME_FIELDS.forEach(f => delete c[f]);
+  // an editor round-trip with every pin left at "not pinned" leaves an empty
+  // companions map behind — drop it rather than persist noise
+  (c.steps || []).forEach(s => {
+    const op = s && s.operation;
+    if (op && op.companions && !Object.keys(op.companions).length) delete op.companions;
+  });
   return c;
 }
 
@@ -1620,6 +1612,10 @@ function _buildSubmixPickerOptions(selected) {
 window.updateSendPickerOptions = function (name, selectedChannel) {
   const sendSel = document.getElementById(`routing-send-${name}`);
   if (!sendSel) return;
+  // A rebuild with no explicit choice keeps the current one — the submix
+  // onchange callers pass nothing, and losing the selection re-targeted the
+  // macro to the first input in the list (a wrong fader on a live rig)
+  if (selectedChannel === undefined) selectedChannel = sendSel.value;
   const picker = window._picker || {};
   const inputs = picker.inputs || [];
   const outs   = picker.outputs || [];
@@ -2540,6 +2536,7 @@ window.learnTrigger = function (name, i) {
   if (btn) btn.textContent = 'waiting…';
   window._midiLearn = (captured) => {
     const m = _harvestEditor(name);
+    if (!m) return;   // editor closed while armed — nothing to fill
     const trig = (m.midi_triggers || [])[i];
     if (trig) {
       // #23: generic capture — CC/CC14/PC carry number, notes carry note,
@@ -2860,7 +2857,9 @@ function _editorFooter(name) {
 }
 
 function editDetail(name) {
-  if (window._drawerOpenFor !== name && macros[name]) _openDetailFor(name);   // #31: the editor lives in the drawer
+  // #31: the editor lives in the drawer. A refused switch (another macro's
+  // unsaved edits kept open) must abort, not render into the card's own node.
+  if (window._drawerOpenFor !== name && macros[name] && !_openDetailFor(name)) return;
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
   if (!panel || !macros[name]) return;
@@ -3223,8 +3222,11 @@ function _harvestEditor(name) {
       else obj[last] = parseFloat(pv.toFixed(4));
     } else if (el.type === 'number' || el.type === 'range' || el.dataset.numeric !== undefined) {
       // data-numeric: selects whose values are numbers (LFO rate) — harvesting
-      // them as strings would break strict-=== consumers and JSON hygiene
-      obj[last] = el.value === '' ? 0 : parseFloat(el.value);
+      // them as strings would break strict-=== consumers and JSON hygiene.
+      // A select's blank option means "no value" (the companion pin's
+      // "not pinned"): key absent, NOT 0 — 0 would pin Bell / 6 dB/oct.
+      if (el.tagName === 'SELECT' && el.value === '') delete obj[last];
+      else obj[last] = el.value === '' ? 0 : parseFloat(el.value);
     } else {
       obj[last] = el.value;
     }
@@ -3256,6 +3258,7 @@ async function saveInlineEdit(name) {
 function cancelInlineEdit(name) {
   delete window._editBuffers[name];
   delete window._descStale[name];   // stale hint is per-edit-session
+  _disarmMidiLearn();
   const panel = document.getElementById(`detail-${name}`);
   const arrow = document.getElementById(`detail-arrow-${name}`);
   if (!panel) return;
@@ -3478,7 +3481,8 @@ function uploadFile(input, type) {
   formData.append('file', file);
   API.upload(type, formData)
     .then(() => location.reload())
-    .catch(e => console.error('[UI] uploadFile error:', e));
+    .catch(e => alert(`Upload failed: ${e.message}`))   // 400 detail / 413 too large
+    .finally(() => { input.value = ''; });   // so re-picking the same file fires onchange
 }
 
 // ── Live Config Editor ────────────────────────────────────────────────────────
@@ -4052,6 +4056,14 @@ function toggleDetail(name) {
   else showDetail(name);
 }
 
+// An armed MIDI-learn must die with its editor: otherwise the next controller
+// message is swallowed (not fired) and the callback harvests a gone buffer.
+function _disarmMidiLearn() {
+  window._midiLearn = null;
+  clearTimeout(window._learnHoldTimer);
+  window._learnHold = null;
+}
+
 function closeDetailDrawer(force) {
   const name = window._drawerOpenFor;
   if (!name) return;
@@ -4060,6 +4072,7 @@ function closeDetailDrawer(force) {
     delete window._editBuffers[name];
     delete window._descStale[name];
   }
+  _disarmMidiLearn();
   const drawer = document.getElementById('detail-drawer');
   const panel = document.querySelector(`#drawer-body #${CSS.escape(`detail-${name}`)}`);
   window._drawerOpenFor = null;
