@@ -1197,14 +1197,12 @@ function createMacroCardHTML(name, m) {
       <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
     </div>
     <!-- Action buttons -->
+    <!-- (the grid wrapper stays: the skins style .grid-cols-3 > button as the
+         performance key; the old RAMP key did exactly what FIRE does, #42) -->
     <div class="grid grid-cols-3 gap-2">
-        <button onclick="fireMacro('${name}',1.0,false)"
-            class="fire-btn col-span-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 active:scale-95 active:bg-zinc-600 text-zinc-400 hover:text-white font-medium py-2.5 rounded-xl text-xs tracking-widest transition-all">
+        <button onclick="fireMacro('${name}')"
+            class="fire-btn col-span-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 active:scale-95 active:bg-zinc-600 text-zinc-400 hover:text-white font-medium py-2.5 rounded-xl text-xs tracking-widest transition-all">
             FIRE
-        </button>
-        <button onclick="fireMacro('${name}',1.0,true)"
-            class="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-500 hover:text-zinc-300 font-medium py-2.5 rounded-xl transition-all active:scale-95 text-xs tracking-widest">
-            RAMP
         </button>
     </div>
     <!-- Details toggle -->
@@ -1359,7 +1357,7 @@ function _modulWaveKeys(name) {
 }
 
 // ── Fire macro ────────────────────────────────────────────────────────────────
-async function fireMacro(name, value = 1.0, ramp = false) {
+async function fireMacro(name, value = 1.0) {
   if (!macros[name]) return;
   try {
     await API.trigger(name, value, window._detectedBPM || null);

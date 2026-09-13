@@ -107,8 +107,58 @@ begin
     if k = Key then
     begin
       Result := Trim(Copy(s, p + 1, Length(s)));
+      // a quoted value (the installer quotes MQTT_USER/MQTT_PASS so a '#'
+      // or a space survives the bridge's .env parser) reads back bare
+      if (Length(Result) >= 2) and (Result[1] = '"') and (Result[Length(Result)] = '"') then
+        Result := Copy(Result, 2, Length(Result) - 2);
       exit;
     end;
+  end;
+end;
+
+procedure AddLine(var Lines: TArrayOfString; const S: String);
+begin
+  SetArrayLength(Lines, GetArrayLength(Lines) + 1);
+  Lines[GetArrayLength(Lines) - 1] := S;
+end;
+
+function Quoted(const S: String): String;
+begin
+  Result := '"' + S + '"';
+end;
+
+// Keys the wizard owns; every other key in an existing config.env is carried
+// over on upgrade (API_TOKEN, LOG_LEVEL, ENABLE_OSC_MONITOR, ... are documented
+// as hand-edited in that file - rewriting it from the wizard alone dropped
+// them, and a dropped API_TOKEN silently turns the auth gate off).
+function IsManagedKey(const K: String): Boolean;
+begin
+  Result := (K = 'OSC_IP') or (K = 'OSC_PORT') or (K = 'OSC_LISTEN_PORT') or
+            (K = 'WEB_PORT') or (K = 'OSC_TRANSPORT') or (K = 'GLOBAL_OSC_IP') or
+            (K = 'GLOBAL_OSC_PORT') or (K = 'GLOBAL_OSC_LISTEN_PORT') or
+            (K = 'ENABLE_MQTT') or (K = 'MQTT_BROKER') or (K = 'MQTT_PORT') or
+            (K = 'MQTT_USER') or (K = 'MQTT_PASS');
+end;
+
+procedure AppendUnmanagedKeys(const FileName: String; var Lines: TArrayOfString);
+var
+  Old: TArrayOfString;
+  i, p, n: Integer;
+  s, k: String;
+begin
+  if not LoadStringsFromFile(FileName, Old) then exit;
+  n := 0;
+  for i := 0 to GetArrayLength(Old) - 1 do
+  begin
+    s := Trim(Old[i]);
+    if (s = '') or (s[1] = '#') then continue;
+    p := Pos('=', s);
+    if p = 0 then continue;
+    k := Trim(Copy(s, 1, p - 1));
+    if IsManagedKey(k) then continue;
+    if n = 0 then AddLine(Lines, '# kept from the previous install');
+    AddLine(Lines, s);
+    n := n + 1;
   end;
 end;
 
@@ -320,33 +370,42 @@ end;
 procedure WriteServerConfig;
 var
   Dir, Cfg, Ip: String;
+  Lines: TArrayOfString;
 begin
   Dir := ExpandConstant('{userappdata}\tmosc-bridge');
   ForceDirectories(Dir);
+  Cfg := Dir + '\config.env';
   Ip := Trim(EOscIp.Text);
-  Cfg := '# TotalMix OSC bridge - written by the installer (' + '{#AppVersion}' + '). Edit freely; restart the bridge to apply.' + #13#10 +
-         'OSC_IP=' + Ip + #13#10 +
-         'OSC_PORT=' + Trim(EOscPort.Text) + #13#10 +
-         'OSC_LISTEN_PORT=' + Trim(EListenPort.Text) + #13#10 +
-         'WEB_PORT=' + Trim(EWebPort.Text) + #13#10;
+  SetArrayLength(Lines, 0);
+  AddLine(Lines, '# TotalMix OSC bridge - written by the installer (' + '{#AppVersion}' + '). Edit freely; restart the bridge to apply.');
+  AddLine(Lines, 'OSC_IP=' + Ip);
+  AddLine(Lines, 'OSC_PORT=' + Trim(EOscPort.Text));
+  AddLine(Lines, 'OSC_LISTEN_PORT=' + Trim(EListenPort.Text));
+  AddLine(Lines, 'WEB_PORT=' + Trim(EWebPort.Text));
   if CTransport.ItemIndex = 1 then
-    Cfg := Cfg + 'OSC_TRANSPORT=global' + #13#10 +
-                 'GLOBAL_OSC_IP=' + Ip + #13#10 +
-                 'GLOBAL_OSC_PORT=' + ReadKey(Dir + '\config.env', 'GLOBAL_OSC_PORT', '7002') + #13#10 +
-                 'GLOBAL_OSC_LISTEN_PORT=' + ReadKey(Dir + '\config.env', 'GLOBAL_OSC_LISTEN_PORT', '9002') + #13#10
-  else
-    Cfg := Cfg + 'OSC_TRANSPORT=classic' + #13#10;
-  if Trim(EMqttHost.Text) <> '' then
   begin
-    Cfg := Cfg + 'ENABLE_MQTT=True' + #13#10 +
-                 'MQTT_BROKER=' + Trim(EMqttHost.Text) + #13#10 +
-                 'MQTT_PORT=' + Trim(EMqttPort.Text) + #13#10;
-    if Trim(EMqttUser.Text) <> '' then Cfg := Cfg + 'MQTT_USER=' + Trim(EMqttUser.Text) + #13#10;
-    if Trim(EMqttPass.Text) <> '' then Cfg := Cfg + 'MQTT_PASS=' + Trim(EMqttPass.Text) + #13#10;
+    AddLine(Lines, 'OSC_TRANSPORT=global');
+    AddLine(Lines, 'GLOBAL_OSC_IP=' + Ip);
+    AddLine(Lines, 'GLOBAL_OSC_PORT=' + ReadKey(Cfg, 'GLOBAL_OSC_PORT', '7002'));
+    AddLine(Lines, 'GLOBAL_OSC_LISTEN_PORT=' + ReadKey(Cfg, 'GLOBAL_OSC_LISTEN_PORT', '9002'));
   end
   else
-    Cfg := Cfg + 'ENABLE_MQTT=False' + #13#10;
-  SaveStringToFile(Dir + '\config.env', Cfg, False);
+    AddLine(Lines, 'OSC_TRANSPORT=classic');
+  if Trim(EMqttHost.Text) <> '' then
+  begin
+    AddLine(Lines, 'ENABLE_MQTT=True');
+    AddLine(Lines, 'MQTT_BROKER=' + Trim(EMqttHost.Text));
+    AddLine(Lines, 'MQTT_PORT=' + Trim(EMqttPort.Text));
+    if Trim(EMqttUser.Text) <> '' then AddLine(Lines, 'MQTT_USER=' + Quoted(Trim(EMqttUser.Text)));
+    if Trim(EMqttPass.Text) <> '' then AddLine(Lines, 'MQTT_PASS=' + Quoted(Trim(EMqttPass.Text)));
+  end
+  else
+    AddLine(Lines, 'ENABLE_MQTT=False');
+  AppendUnmanagedKeys(Cfg, Lines);
+  // UTF-8 (with BOM, which the bridge's utf-8-sig loader expects): the ANSI
+  // SaveStringToFile turned a non-ASCII password into bytes the loader
+  // could not decode
+  SaveStringsToUTF8File(Cfg, Lines, False);
 end;
 
 procedure WriteClientConfig;

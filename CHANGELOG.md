@@ -2,6 +2,20 @@
 
 ## Unreleased — 2026-09-09 · Repo restructure (#27)
 
+- **LICENSE**: MIT (#33).
+- **Installer keeps hand-edited config (#41)**: an upgrade rewrites
+  `config.env` from the wizard fields but now carries over every key it
+  does not manage (`API_TOKEN`, `LOG_LEVEL`, `ENABLE_OSC_MONITOR`, ...)
+  under a "kept from the previous install" comment - a dropped
+  `API_TOKEN` used to turn the auth gate off silently. The file is
+  written as UTF-8 and MQTT user/password are quoted, so a non-ASCII or
+  `#`-containing password round-trips.
+- Removed (#36, #42): the card's RAMP key (it did exactly what FIRE
+  does), `POST /api/config/macros/{name}/rename` (the UI renames via the
+  label; the key is stable), `GET /api/test`, `GET /api/debug/levels`,
+  and the `dev-mobile.html` harness. `/api/device/state` and
+  `init-from-example` stay; the sweep/probe WebSocket events stay because
+  each one also carries a full state refresh.
 - Fifth audit pass (frontend, macro/knob engine, packaging). Duck engine:
   a bridge-side knob move on a ducked send now seeds the new base (it
   used to release to the OLD level and revert the performer's move every

@@ -215,16 +215,6 @@ async def midi_activity(body: dict):
     return {"ok": True}
 
 
-@app.get("/api/test")
-async def test_api():
-    return {
-        "status": "ok",
-        "macros_count": len(bridge.mappings.get("macros", {})),
-        "static_dir": static_dir,
-        "web_port": WEB_PORT,
-    }
-
-
 @app.get("/api/status")
 async def get_status():
     """Return currently-loaded config summary for the gear menu."""
@@ -513,31 +503,11 @@ def get_midi_bindings():
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-@app.get("/api/debug/levels")
-def debug_levels():
-    """Live meter recon (#meters): the raw /level address shapes the Global
-    feed delivers plus a snapshot of current values. Read-only."""
-    lst = getattr(bridge, "global_listener", None)
-    st = getattr(lst, "state", None) if lst is not None else None
-    if st is None or not hasattr(st, "levels"):
-        return {"available": False}
-    with st._lock:
-        rows = {}
-        for (rk2, _hw), _v in st.levels.items():
-            rows[rk2] = rows.get(rk2, 0) + 1
-        return {"available": True,
-                "shapes": {k: list(v) for k, v in st.levels_raw.items()},
-                "rows": rows,
-                "count": len(st.levels),
-                "sample": {f"{k[0]}/{k[1]}": [v[0], v[1]] for k, v in list(st.levels.items())[:12]}}
-
-
 @app.post("/api/config/macros-order")
 async def reorder_macros(request: Request):
     """Persist a new macro ordering (drag-to-reorder in the rack UI).
     Body: {"order": [every macro name exactly once]}. Reorders the dict
-    IN PLACE (clear + reinsert) so held references stay valid - the same
-    discipline as rename."""
+    IN PLACE (clear + reinsert) so held references stay valid."""
     body = await request.json()
     order = body.get("order") or []
     macros = bridge.mappings.get("macros", {})
@@ -549,40 +519,6 @@ async def reorder_macros(request: Request):
     macros.update(snapshot)
     _persist_mappings()
     return {"ok": True, "order": list(macros)}
-
-
-@app.post("/api/config/macros/{macro_name}/rename")
-async def rename_macro(macro_name: str, body: dict):
-    """Rename a macro in place (the name is the mappings key). Keeps its
-    position in the dict, carries runtime state (health, knob value) over,
-    persists, and broadcasts deleted+created so every tab re-syncs."""
-    new_name = str(body.get("new_name", "")).strip()
-    macros = bridge.mappings.get("macros", {})
-    if macro_name not in macros:
-        raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
-    if not MACRO_NAME_RE.match(new_name):
-        raise HTTPException(status_code=400,
-                            detail="Name must be 1-64 chars: letters, digits, _ or -")
-    if new_name == macro_name:
-        return {"status": "unchanged", "macro": macro_name}
-    if new_name in macros:
-        raise HTTPException(status_code=409, detail=f"'{new_name}' already exists")
-    # reorder IN PLACE (same dict object): bridge.MAPPINGS and any held
-    # references keep working, and the macro keeps its position
-    items = list(macros.items())
-    macros.clear()
-    for k, v in items:
-        macros[new_name if k == macro_name else k] = v
-    for store in (bridge.macro_live_state, bridge.macro_health,
-                  bridge.knob_values, bridge._knob_last_status,
-                  bridge._knob_last_broadcast, bridge._knob_enable_sent):
-        if macro_name in store:
-            store[new_name] = store.pop(macro_name)
-    _persist_mappings()
-    logger.info(f"Macro '{macro_name}' renamed to '{new_name}'")
-    bridge.broadcast_state(macro_event={"type": "macro_deleted", "name": macro_name})
-    bridge.broadcast_state(macro_event={"type": "macro_created", "name": new_name})
-    return {"status": "success", "macro": new_name, "was": macro_name}
 
 
 @app.get("/api/config/mappings")
