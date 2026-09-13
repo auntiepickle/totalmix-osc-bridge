@@ -28,6 +28,9 @@
 
 #define ST_OK      0   /* MIDI open + running (indigo icon) */
 #define ST_NO_MIDI 1   /* cannot open the MIDI device — busy/held elsewhere (orange icon) */
+#define ST_YIELDED 2   /* gave up claiming it; the browser's Web MIDI has it (orange icon) */
+
+#define OPEN_CLAIM_TRIES 10   /* ~30s of announcing ownership before standing down */
 
 #define STARTUP_KEY  "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define STARTUP_NAME "TmoscAgent"
@@ -150,9 +153,11 @@ static void load_config(void)
 
 static int  win_read(void *ctx, tm_midi_msg *out, int max) { return tm_midi_win_read((tm_midi_win *)ctx, out, max); }
 static void win_wait(void *ctx, int ms) { tm_midi_win_wait((tm_midi_win *)ctx, ms); }
+static int  win_health(void *ctx) { return tm_midi_win_health((tm_midi_win *)ctx); }
 
 static DWORD WINAPI worker(LPVOID arg)
 {
+    int open_fails = 0;      /* consecutive failures to take the device */
     (void)arg;
     /* MIDI inputs are exclusive: another app (DAW, browser Web MIDI, RME
      * tools) can hold the device. Instead of giving up silently, retry every
@@ -179,18 +184,29 @@ static DWORD WINAPI worker(LPVOID arg)
 
         if (tm_midi_win_resolve(q, resolved, sizeof(resolved)) != 0
             || (m = tm_midi_win_open(resolved)) == NULL) {
-            PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);
+            open_fails++;
             /* Announce ownership even though we don't hold the device yet: the
              * bridge marks us present and a browser yields its Web MIDI (closing
-             * the port), so the next open can succeed. */
-            tm_runner_announce(g_host, g_port);
+             * the port), so the next open can succeed. A browser yields on the
+             * first announce, so stop after ~30s: past that the holder is some
+             * other app (a DAW, RME's own tools) and going on claiming a port we
+             * do not have would keep the browser yielded too — leaving nobody at
+             * all reading MIDI, which is worse than letting the browser have it. */
+            if (open_fails <= OPEN_CLAIM_TRIES) {
+                PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);
+                tm_runner_announce(g_host, g_port);
+            } else {
+                PostMessage(g_hwnd, WM_SETSTATUS, ST_YIELDED, 0);
+            }
             for (i = 0; i < 30 && !g_quit; i++) Sleep(100);  /* ~3s, wake fast on quit */
             continue;
         }
         if (g_quit) { tm_midi_win_close(m); break; }   /* Quit raced the open: do not start the runner */
+        open_fails = 0;
         PostMessage(g_hwnd, WM_SETSTATUS, ST_OK, 0);
         src.read = win_read;
         src.wait = win_wait;
+        src.health = win_health;   /* reopen when a suspend/replug kills the port */
         tm_runner(g_host, g_port, &src, m, 0);   /* blocks until Quit or device error */
         tm_midi_win_close(m);
         if (!g_quit) PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);  /* device dropped -> retry */
@@ -226,11 +242,13 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             else if (lp == WM_LBUTTONDBLCLK) ShellExecuteA(NULL, "open", g_url, NULL, NULL, SW_SHOWNORMAL);
             return 0;
         case WM_SETSTATUS: {
-            int busy = (wp == ST_NO_MIDI);
-            g_nid.hIcon = busy ? g_ico_err : g_ico_ok;
-            if (busy)
+            g_nid.hIcon = (wp == ST_OK) ? g_ico_ok : g_ico_err;
+            if (wp == ST_NO_MIDI)
                 snprintf(g_nid.szTip, sizeof(g_nid.szTip),
                          "TotalMix OSC Agent - MIDI device busy (held by another app), retrying");
+            else if (wp == ST_YIELDED)
+                snprintf(g_nid.szTip, sizeof(g_nid.szTip),
+                         "TotalMix OSC Agent - MIDI device held by another app; the browser tab has MIDI");
             else
                 snprintf(g_nid.szTip, sizeof(g_nid.szTip),
                          "TotalMix OSC Agent - running - %s", g_url);

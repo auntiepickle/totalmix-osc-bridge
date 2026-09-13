@@ -18,6 +18,13 @@ typedef struct {
     int (*read)(void *ctx, tm_midi_msg *out, int max);
     /* Block up to `ms` waiting for input (may return early). */
     void (*wait)(void *ctx, int ms);
+    /* Optional (set to NULL when the backend has no such failure mode).
+     * Polled every couple of seconds: return 0 while the port is live, -1
+     * once it has silently gone stale — the classic case is a handle that
+     * outlived a system suspend, which reports no error and delivers nothing
+     * ever again. The runner then exits with a device error so the caller
+     * closes the port and opens it afresh. */
+    int (*health)(void *ctx);
 } tm_midi_src;
 
 /* Run until stopped. host/port = bridge. verbose logs each dispatched action.

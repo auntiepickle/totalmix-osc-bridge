@@ -19,6 +19,7 @@
 #define REFRESH_MS    5000
 #define RECONNECT_MS  1000
 #define HEARTBEAT_MS  2000   /* announce MIDI ownership so browsers yield Web MIDI */
+#define HEALTH_MS     2000   /* poll the MIDI port for silent death (suspend/replug) */
 #define ACTIVITY_MIN_MS 40   /* max ~25/s relayed to the browser (learn + live monitor) */
 
 static volatile int g_stop = 0;
@@ -230,6 +231,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
     tm_net net; net.fd = -1;
     tm_clock clock;
     double last_flush = 0, last_refresh = 0, last_reconnect = 0, last_heartbeat = 0;
+    double last_health = 0;
     int connected = 0;
     int rc = 0;                                  /* 0 clean stop, 2 device error */
 
@@ -246,6 +248,20 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
         double t = now_ms();
         tm_midi_msg batch[256];
         int n, a, any_pending = 0, k, timeout;
+
+        /* Before anything else, and whether or not the bridge is reachable: a
+         * port that died with the machine asleep still reads as healthy and
+         * simply goes quiet, which is indistinguishable from nobody touching
+         * the controller. Only this probe tells the two apart. */
+        if (src->health && t - last_health >= HEALTH_MS) {
+            last_health = t;
+            if (src->health(ctx) != 0) {
+                fprintf(stderr, "[agent] MIDI port went stale (system resume or device "
+                                "re-enumeration) - reopening\n");
+                rc = 2;
+                break;
+            }
+        }
 
         if (!connected) {
             /* keep draining the device while offline: otherwise every queued

@@ -27,6 +27,7 @@ add_library(tmosc_core STATIC
   core/tmosc_clock.c
   core/tmosc_proto.c
   core/tmosc_bindings.c
+  core/tmosc_suspend.c
 )
 target_include_directories(tmosc_core PUBLIC core)
 if(MSVC)

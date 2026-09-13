@@ -1,5 +1,6 @@
 /* midi_win.c — see midi_win.h. Links against winmm. */
 #include "midi_win.h"
+#include "tmosc_suspend.h"
 #include <windows.h>
 #include <mmsystem.h>
 #include <stdlib.h>
@@ -7,6 +8,7 @@
 #include <ctype.h>
 
 #define RING 1024
+#define SUSPEND_MIN_MS 1000.0    /* shorter gaps are clock jitter, not a sleep */
 
 struct tm_midi_win {
     HMIDIIN h;
@@ -14,6 +16,9 @@ struct tm_midi_win {
     CRITICAL_SECTION lock;
     tm_midi_msg ring[RING];
     volatile int head, tail;     /* head=write, tail=read */
+    UINT dev;                    /* device index we opened */
+    char name[80];               /* its name then, to spot a re-enumeration */
+    tm_suspend susp;             /* resume detector (see tm_midi_win_health) */
 };
 
 int tm_midi_win_list(tm_midi_port *out, int max)
@@ -99,8 +104,56 @@ tm_midi_win *tm_midi_win_open(const char *index_str)
         free(m);
         return NULL;
     }
+    m->dev = dev;
+    {   /* remember which device this index was, for tm_midi_win_health */
+        MIDIINCAPSA caps;
+        if (midiInGetDevCapsA(dev, &caps, sizeof(caps)) == MMSYSERR_NOERROR)
+            snprintf(m->name, sizeof(m->name), "%s", caps.szPname);
+    }
+    tm_suspend_init(&m->susp);
     midiInStart(m->h);
     return m;
+}
+
+/* Milliseconds of interrupt time excluding any suspend, or -1 where the OS
+ * cannot tell us. Resolved at runtime: QueryUnbiasedInterruptTime needs
+ * _WIN32_WINNT >= 0x0601 to be declared, and looking it up keeps the build
+ * working across MinGW and MSVC whatever SDK version they target. */
+typedef BOOL (WINAPI *tm_unbiased_fn)(PULONGLONG);
+
+static double unbiased_ms(void)
+{
+    static tm_unbiased_fn fn = NULL;
+    static int looked_up = 0;
+    ULONGLONG t100ns;
+    if (!looked_up) {
+        HMODULE k = GetModuleHandleA("kernel32.dll");
+        if (k) fn = (tm_unbiased_fn)(void *)GetProcAddress(k, "QueryUnbiasedInterruptTime");
+        looked_up = 1;
+    }
+    if (!fn || !fn(&t100ns)) return -1.0;
+    return (double)(t100ns / 10000ULL);
+}
+
+int tm_midi_win_health(tm_midi_win *m)
+{
+    MIDIINCAPSA caps;
+    double ub;
+    if (!m) return -1;
+
+    /* 1. Resume. The handle stays valid-looking across a suspend but the
+     *    re-enumerated device never feeds it again, so always reopen. */
+    ub = unbiased_ms();
+    if (ub >= 0.0
+        && tm_suspend_check(&m->susp, (double)GetTickCount64(), ub, SUSPEND_MIN_MS) > 0.0)
+        return -1;
+
+    /* 2. Re-enumeration. Our index now names a different device, or none —
+     *    reopening re-resolves the configured name to wherever it landed. */
+    if (m->dev >= midiInGetNumDevs()) return -1;
+    if (midiInGetDevCapsA(m->dev, &caps, sizeof(caps)) != MMSYSERR_NOERROR) return -1;
+    if (m->name[0] && strcmp(caps.szPname, m->name) != 0) return -1;
+    return 0;
 }
 
 void tm_midi_win_close(tm_midi_win *m)

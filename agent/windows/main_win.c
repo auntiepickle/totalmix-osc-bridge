@@ -19,9 +19,14 @@
 #include <string.h>
 #include <windows.h>
 
+/* tm_runner clears its own stop flag on entry, so a Ctrl-C landing between two
+ * runs (while we reopen the port) needs its own latch to be seen. */
+static volatile int g_quitting = 0;
+
 static BOOL WINAPI ctrl_handler(DWORD type)
 {
     (void)type;
+    g_quitting = 1;
     tm_runner_stop();
     return TRUE;
 }
@@ -33,6 +38,10 @@ static int win_read(void *ctx, tm_midi_msg *out, int max)
 static void win_wait(void *ctx, int ms)
 {
     tm_midi_win_wait((tm_midi_win *)ctx, ms);
+}
+static int win_health(void *ctx)
+{
+    return tm_midi_win_health((tm_midi_win *)ctx);
 }
 
 int main(int argc, char **argv)
@@ -90,10 +99,22 @@ int main(int argc, char **argv)
     fprintf(stderr, "[agent] MIDI device %s (%s) open; bridge http://%s:%d\n",
             resolved, mididev ? mididev : "first input", host, port);
 
-    src.read = win_read;
-    src.wait = win_wait;
-    tm_runner(host, port, &src, m, verbose);
-
-    tm_midi_win_close(m);
+    for (;;) {
+        int rc;
+        src.read = win_read;
+        src.wait = win_wait;
+        src.health = win_health;     /* reopen when a suspend/replug kills the port */
+        rc = tm_runner(host, port, &src, m, verbose);
+        tm_midi_win_close(m);
+        m = NULL;
+        if (rc != 2 || g_quitting) break;
+        fprintf(stderr, "[agent] reopening MIDI device %s\n", resolved);
+        while (!g_quitting) {
+            if (tm_midi_win_resolve(mididev, resolved, sizeof(resolved)) == 0
+                && (m = tm_midi_win_open(resolved)) != NULL) break;
+            Sleep(3000);
+        }
+        if (!m) break;
+    }
     return 0;
 }

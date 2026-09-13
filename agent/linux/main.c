@@ -101,6 +101,7 @@ int main(int argc, char **argv)
 
     src.read = alsa_read;
     src.wait = alsa_wait;
+    src.health = NULL;   /* ALSA surfaces a dead port as a read error */
     tm_runner(host, port, &src, &ctx, verbose);
 
     tm_midi_alsa_close(ctx.m);

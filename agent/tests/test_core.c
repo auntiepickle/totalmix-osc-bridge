@@ -8,6 +8,7 @@
 #include "tmosc_clock.h"
 #include "tmosc_proto.h"
 #include "tmosc_bindings.h"
+#include "tmosc_suspend.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -194,9 +195,24 @@ static void test_bindings_parse(void)
     CHECK(n == 1 && a[0].kind == TM_ACTION_FIRE && a[0].macro_index == 3);
 }
 
+/* Suspend detector: a suspend-counting clock pulling ahead of a
+ * suspend-excluding one by more than the threshold is a sleep; ordinary
+ * jitter (either sign) and the priming call are not. */
+static void test_suspend_detect(void)
+{
+    tm_suspend s;
+    tm_suspend_init(&s);
+    CHECK(tm_suspend_check(&s, 1000.0, 1000.0, 1000.0) == 0.0);          /* primes only */
+    CHECK(tm_suspend_check(&s, 3000.0, 2999.0, 1000.0) == 0.0);          /* +1 ms jitter */
+    CHECK(tm_suspend_check(&s, 5000.0, 4999.5, 1000.0) == 0.0);          /* -0.5 ms jitter */
+    CHECK(fabs(tm_suspend_check(&s, 65000.0, 6999.5, 1000.0) - 58000.0) < 1e-6); /* 58 s asleep */
+    CHECK(tm_suspend_check(&s, 67000.0, 8999.5, 1000.0) == 0.0);         /* awake again */
+}
+
 int main(void)
 {
     test_cc_knob();
+    test_suspend_detect();
     test_pc_fire();
     test_cc14_pair_consumes();
     test_note_on_off();

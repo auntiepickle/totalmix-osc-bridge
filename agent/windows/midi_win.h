@@ -26,4 +26,11 @@ int tm_midi_win_read(tm_midi_win *m, tm_midi_msg *out, int max);
 /* Wait up to ms for input (returns early when a message arrives). */
 void tm_midi_win_wait(tm_midi_win *m, int ms);
 
+/* Is this port still live? Returns 0 when it is, -1 when it has gone stale
+ * and must be closed and reopened: the machine suspended since the last call
+ * (a WinMM handle does not survive that — see tmosc_suspend.h), or the device
+ * index we hold no longer names the device we opened (unplug / re-enumeration).
+ * WinMM reports neither through midiIn*, so the runner polls this instead. */
+int tm_midi_win_health(tm_midi_win *m);
+
 #endif /* TM_MIDI_WIN_H */
