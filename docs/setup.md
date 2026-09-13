@@ -8,7 +8,7 @@ Three ways to run the bridge: the Windows installer (no Python, no Docker), loca
 
 The signed `tmosc-setup-<version>.exe` from [Releases](https://github.com/auntiepickle/totalmix-osc-bridge/releases) installs the tray MIDI agent (**Client**), the bridge as a standalone exe (**Server**), or **Both**. Per-user by default (no admin needed).
 
-**Server wizard pages** - the answers become `%APPDATA%\tmosc-bridge\config.env` (plain `KEY=VALUE`; edit any time and restart the bridge to apply; an upgrade reads the values back into the wizard):
+**Server wizard pages** - the answers become `%APPDATA%\tmosc-bridge\config.env` (plain `KEY=VALUE`; edit any time and restart the bridge to apply). An upgrade reads these values back into the wizard and carries every other key you added by hand (`API_TOKEN`, `LOG_LEVEL`, ...) over unchanged:
 
 | Field | `config.env` key | Default |
 |---|---|---|
