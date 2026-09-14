@@ -12,6 +12,7 @@ three ways to install it.
 | [security.md](security.md) | The bridge is reachable by more than you: `API_TOKEN` |
 | [known-limitations.md](known-limitations.md) | Something looks wrong and you want to know if it is known |
 | [design-modul.md](design-modul.md) | You are touching the MODUL skin: the ten rules of that design |
+| [design-workspaces.md](design-workspaces.md) | DRAFT: how workspaces, snapshots and macros should bind (by name or by slot), the agent catalog feed, drift handling |
 | [../agent/README.md](../agent/README.md) | The tray agent (client) |
 | [../CHANGELOG.md](../CHANGELOG.md) | What changed and why, newest first |
 
