@@ -12,7 +12,6 @@ import logging
 
 from fastapi import HTTPException, UploadFile
 
-from tmosc.bridge import bridge
 import tmosc.app_paths as app_paths
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,7 @@ def _sanitize_mappings(data: dict) -> dict:
     return data
 
 
-def _persist_mappings():
+def _persist_mappings(bridge):
     """Write bridge.mappings to mappings.json (backup first).
 
     Sanitizes ALL macros, not just the one being saved — a dirty file loaded

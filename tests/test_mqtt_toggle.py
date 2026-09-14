@@ -1,7 +1,8 @@
 """ENABLE_MQTT=False must leave the bridge without a client (installer "MQTT off")."""
 import tmosc.bridge as bridge_module
+from tmosc.api.app import app
 def test_enable_mqtt_false_creates_no_client(monkeypatch):
-    b = bridge_module.bridge
+    b = app.state.bridge
     saved = b.mqtt_client
     monkeypatch.setattr(bridge_module, "ENABLE_MQTT", False)
     monkeypatch.setattr(bridge_module, "ENABLE_OSC_MONITOR", False)

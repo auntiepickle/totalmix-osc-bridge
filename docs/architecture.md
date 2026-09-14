@@ -2,9 +2,10 @@
 
 The bridge is one Python process: a FastAPI app on one asyncio loop, a handful
 of daemon threads (OSC feedback listeners, macro runs, the knob watcher, the
-duck supervisor, MQTT), and one shared singleton, `bridge` in
-`tmosc/bridge.py`. The browser UI and the native tray agent are clients of its
-REST + WebSocket API.
+duck supervisor, MQTT), and one `TotalMixOSCBridge` object per process,
+built by `tmosc.bridge.build_bridge()` and owned by the FastAPI app at
+`app.state.bridge`. The browser UI and the native tray agent are clients of
+its REST + WebSocket API.
 
 ---
 
@@ -41,17 +42,19 @@ still accurate for those remaining paths.
 
 | Module | Owns |
 |---|---|
-| `tmosc/bridge.py` | `TotalMixOSCBridge` facade: `__init__` (all instance state), process lifecycle (`start_*`/`stop_*`), the config-reading methods (`_global_active`, `start_mqtt`), the WebSocket client registry (`ws_attach` / per-client queues) and the import-time singletons. Composes the `tmosc/core/` mixins below; one object, one namespace |
+| `tmosc/bridge.py` | `TotalMixOSCBridge` facade: `__init__` (all instance state), process lifecycle (`start_*`/`stop_*`), the config-reading methods (`_global_active`, `start_mqtt`), the WebSocket client registry (`ws_attach` / per-client queues), the config loaders (`load_mappings`, `load_snapshot_map`, `make_osc_client`) and the `build_bridge()` factory. Importing it has no side effects. Composes the `tmosc/core/` mixins below; one object, one namespace |
 | `tmosc/core/macros.py` | `MacrosMixin`: `run_macro` (classic + Global steps, fire modes, cancel), health records, routing labels, durations |
 | `tmosc/core/knobs.py` | `KnobsMixin`: knob engine - device value, companions, auto-enable, pins, VCA groups, set/readback/trailing flush, device watcher, hold reapply, MQTT knob state |
 | `tmosc/core/switching.py` | `SwitchingMixin`: workspace/snapshot switching, `_wait_device` confirmation, device-side snapshot sync |
 | `tmosc/core/transport.py` | `ClassicTransportMixin`: classic aim-and-write - parameter tables, `_resolve_target`, page-2 reads, button state, liveness probe |
 | `tmosc/core/channel_map.py` | `ChannelMapMixin`: channel map load/migrate/persist and the sweep |
 | `tmosc/core/broadcast.py` | `BroadcastMixin`: thread-safe WebSocket broadcast and MIDI-owner presence |
-| `tmosc/api/app.py` | `create_app()` factory + lifespan (start MQTT, listeners, Global OSC, LAN discovery, set `main_loop`; stop Global OSC on shutdown), middleware, static mount, compatibility re-exports. `app = create_app()` at module level: run with `uvicorn tmosc.api.app:app`; `web/web_client.py` is a compatibility shim for older Docker images |
+| `tmosc/api/app.py` | `create_app(bridge=None)` factory (builds the bridge via `build_bridge()` unless given one, stores it at `app.state.bridge`, calls `configure_logging()`) + lifespan (start MQTT, listeners, Global OSC, LAN discovery, set `main_loop`; stop Global OSC on shutdown), middleware, static mount, compatibility re-exports. `app = create_app()` at module level: run with `uvicorn tmosc.api.app:app`; `web/web_client.py` is a compatibility shim for older Docker images |
 | `tmosc/api/routes/` | One `APIRouter` per area: `health` (`/`, `/api/health`, `/api/status`), `macros` (list, trigger, switch, editor CRUD, order), `midi` (owner heartbeat/release, activity relay, bindings TSV), `knobs` (meters, group capture, duck, set/enable/param), `device` (state, sweep, physical table, Global status, identify, probe, picker), `config` (mappings / channel map / snapshot map reads, saves, uploads, init-from-example, reload), `ws` (`/ws`) |
 | `tmosc/api/persistence.py` | Atomic JSON writes, auto-backup, `_persist_mappings` (sanitizes every macro), `RUNTIME_FIELDS` / `MACRO_NAME_RE`, upload reading with the 2 MB cap |
 | `tmosc/api/auth.py` | Opt-in `API_TOKEN` gate for state-changing requests and `/ws` |
+| `tmosc/api/deps.py` | `Bridge` dependency: handlers declare `bridge: Bridge` and get `request.app.state.bridge` |
+| `tmosc/logsetup.py` | `configure_logging()`: console + rotating `bridge.log`, idempotent, called by every entry point |
 | `tmosc/__main__.py` | `python -m tmosc` and the frozen exe entry: `app_paths.prepare()`, then in-process uvicorn |
 | `tmosc/global_transport.py` | Global OSC writers: name to address resolution through the physical table, unit transforms, heartbeat/liveness |
 | `tmosc/global_listener.py` | Global OSC feedback into `GlobalDeviceState` (params, names, mix sends, levels, snapshots, human-change log) |

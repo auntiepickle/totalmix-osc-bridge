@@ -2,7 +2,7 @@
 from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
-from tmosc.bridge import bridge
+from tmosc.api.deps import Bridge
 import tmosc.physical_table as pt
 
 router = APIRouter(tags=["health"])
@@ -19,7 +19,7 @@ async def index_fallback():
 
 
 @router.get("/api/health")
-async def get_health():
+async def get_health(bridge: Bridge):
     """Return connection health for MQTT and OSC, plus the current MIDI owner
     (an external tray/agent holding the port) so the browser can yield/reclaim
     Web MIDI. Polled by the header — keep it light."""
@@ -31,7 +31,7 @@ async def get_health():
 
 
 @router.get("/api/status")
-async def get_status():
+async def get_status(bridge: Bridge):
     """Return currently-loaded config summary for the gear menu."""
     channel_map = bridge.channel_map or {}
     snap_map = bridge.snapshot_map or {}

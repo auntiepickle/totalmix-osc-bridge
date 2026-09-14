@@ -73,7 +73,7 @@ def test_since_filter():
 
 @pytest.fixture
 def wired_listener():
-    b = bridge_module.bridge
+    b = app.state.bridge
     prev = b.global_listener
     b.global_listener = make_listener()
     yield b.global_listener
@@ -81,7 +81,7 @@ def wired_listener():
 
 
 def test_activity_endpoint_503_without_listener():
-    b = bridge_module.bridge
+    b = app.state.bridge
     prev = b.global_listener
     b.global_listener = None
     try:
@@ -126,7 +126,7 @@ class FakeGlobalClient:
 @pytest.fixture
 def global_bridge(monkeypatch):
     import tmosc.physical_table as pt
-    b = bridge_module.bridge
+    b = app.state.bridge
     table = pt.empty_table()
     pt.merge_observation(table, "inputs", 0, "Mic 1")
     pt.merge_observation(table, "outputs", 4, "Phones")

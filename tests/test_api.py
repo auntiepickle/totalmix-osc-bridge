@@ -10,7 +10,6 @@ import pytest
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
 from tmosc.api.app import app  # noqa: E402
-import tmosc.bridge as bridge_module  # noqa: E402
 
 client = fastapi_testclient.TestClient(app)
 
@@ -44,7 +43,7 @@ def test_trigger_unknown_macro_404():
 
 
 def test_trigger_known_macro_accepted():
-    macros = bridge_module.bridge.mappings.get("macros", {})
+    macros = app.state.bridge.mappings.get("macros", {})
     assert macros, "example mappings should provide at least one macro"
     name = next(iter(macros))
     r = client.post(f"/api/trigger/{name}", json={"param": 0.5})
@@ -75,7 +74,7 @@ def test_patch_unknown_macro_creates_it(macro_crud):
 
 
 def test_device_state_503_without_listener():
-    assert bridge_module.bridge.osc_listener is None  # startup never ran
+    assert app.state.bridge.osc_listener is None  # startup never ran
     r = client.get("/api/device/state")
     assert r.status_code == 503
 
@@ -85,10 +84,10 @@ def macro_crud(monkeypatch):
     """Isolate macro CRUD tests: no disk writes, mappings restored after."""
     import tmosc.api.persistence as wp   # patched where the routers look it up
     persisted = []
-    monkeypatch.setattr(wp, "_persist_mappings", lambda: persisted.append(True))
-    saved = {k: dict(v) for k, v in bridge_module.bridge.mappings.get("macros", {}).items()}
+    monkeypatch.setattr(wp, "_persist_mappings", lambda b: persisted.append(True))
+    saved = {k: dict(v) for k, v in app.state.bridge.mappings.get("macros", {}).items()}
     yield persisted
-    bridge_module.bridge.mappings["macros"] = saved
+    app.state.bridge.mappings["macros"] = saved
 
 
 def test_macro_create_update_delete_cycle(macro_crud):
@@ -96,17 +95,17 @@ def test_macro_create_update_delete_cycle(macro_crud):
 
     r = client.post("/api/config/macros/crud_test_macro", json=body)
     assert r.status_code == 200 and r.json()["created"] is True
-    assert "crud_test_macro" in bridge_module.bridge.mappings["macros"]
+    assert "crud_test_macro" in app.state.bridge.mappings["macros"]
     assert len(macro_crud) == 1  # persisted once
 
     r = client.post("/api/config/macros/crud_test_macro",
                     json={**body, "description": "changed"})
     assert r.status_code == 200 and r.json()["created"] is False
-    assert bridge_module.bridge.mappings["macros"]["crud_test_macro"]["description"] == "changed"
+    assert app.state.bridge.mappings["macros"]["crud_test_macro"]["description"] == "changed"
 
     r = client.delete("/api/config/macros/crud_test_macro")
     assert r.status_code == 200
-    assert "crud_test_macro" not in bridge_module.bridge.mappings["macros"]
+    assert "crud_test_macro" not in app.state.bridge.mappings["macros"]
 
     assert client.delete("/api/config/macros/crud_test_macro").status_code == 404
 
@@ -145,7 +144,7 @@ def test_upsert_strips_runtime_fields(macro_crud):
     }
     r = client.post("/api/config/macros/runtime_strip_macro", json=body)
     assert r.status_code == 200
-    stored = bridge_module.bridge.mappings["macros"]["runtime_strip_macro"]
+    stored = app.state.bridge.mappings["macros"]["runtime_strip_macro"]
     assert not any(f in stored for f in RUNTIME_FIELDS)
     assert stored["description"] == "keep me" and stored["steps"]
 
@@ -159,7 +158,7 @@ def test_get_macros_injects_derived_routing_label(macro_crud):
     assert r.status_code == 200
     served = client.get("/api/macros").json()["derived_label_macro"]
     assert served["routing_label"] == "AN 3 → Sub X"
-    assert "routing_label" not in bridge_module.bridge.mappings["macros"]["derived_label_macro"]
+    assert "routing_label" not in app.state.bridge.mappings["macros"]["derived_label_macro"]
 
 
 def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
@@ -173,23 +172,23 @@ def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
     out = tmp_path / "mappings.json"
     monkeypatch.setattr(wp, "_atomic_write_json",
                         lambda path, data: out.write_text(_json.dumps(data, indent=2)))
-    saved = bridge_module.bridge.mappings
+    saved = app.state.bridge.mappings
     try:
-        bridge_module.bridge.mappings = {"macros": {
+        app.state.bridge.mappings = {"macros": {
             "legacy_dirty": {"steps": [], "progress": 42, "value": 0.7,
                              "routing_label": "stale → label"},
             "clean_one": {"steps": []},
         }}
-        wp._persist_mappings()
+        wp._persist_mappings(app.state.bridge)
         # in-memory cleaned...
-        assert bridge_module.bridge.mappings["macros"]["legacy_dirty"] == {"steps": []}
+        assert app.state.bridge.mappings["macros"]["legacy_dirty"] == {"steps": []}
         # ...and the file on disk too
         on_disk = _json.loads(out.read_text())
         assert on_disk["macros"]["legacy_dirty"] == {"steps": []}
         assert on_disk["macros"]["clean_one"] == {"steps": []}
     finally:
-        bridge_module.bridge.mappings = saved
-        bridge_module.bridge.mappings_is_example = True
+        app.state.bridge.mappings = saved
+        app.state.bridge.mappings_is_example = True
 
 
 def test_sanitize_mappings_pure():
@@ -223,7 +222,7 @@ def test_status_reports_bank_width_fields():
 def test_map_strip_count_counts_input_row_only(monkeypatch):
     """Playback sends must not inflate the stale-map comparison — counting
     them masked a real stale map (17 live vs '39 total' stayed silent)."""
-    monkeypatch.setattr(bridge_module.bridge, "channel_map", {
+    monkeypatch.setattr(app.state.bridge, "channel_map", {
         "submixes": {"Main": {"index": 1, "name": "Main", "sends": {
             "AN 1": {"row": 1, "channel": 1, "osc_address": "/1/volume1"},
             "AN 2": {"row": 1, "channel": 2, "osc_address": "/1/volume2"},
@@ -241,8 +240,8 @@ def test_reorder_macros_in_place(monkeypatch):
     """Drag-to-reorder: new order persists, dict identity survives (held
     references stay valid), and a partial/wrong list is rejected."""
     import tmosc.api.persistence as wp
-    monkeypatch.setattr(wp, "_persist_mappings", lambda: None)
-    b = bridge_module.bridge
+    monkeypatch.setattr(wp, "_persist_mappings", lambda b: None)
+    b = app.state.bridge
     macros = b.mappings.setdefault("macros", {})
     saved = dict(macros)
     macros.clear()
@@ -288,10 +287,9 @@ def test_auth_blocks_unauthenticated_write_when_set(monkeypatch):
 
 def test_midi_bindings_tsv(monkeypatch):
     """/api/midi/bindings emits the agent's trigger table as TSV."""
-    import tmosc.bridge as bridge_module
-    saved = bridge_module.bridge.mappings
+    saved = app.state.bridge.mappings
     try:
-        bridge_module.bridge.mappings = {"macros": {
+        app.state.bridge.mappings = {"macros": {
             "fader": {"steps": [{"operation": {"type": "knob"},
                                  "target": {"channel": "Mic 1"}}],
                       "midi_triggers": [{"type": "control_change", "number": 82,
@@ -307,13 +305,13 @@ def test_midi_bindings_tsv(monkeypatch):
         assert "fader\t1\tcontrol_change\t82\t-1\t1\t1" in lines
         assert "scene\t0\tprogram_change\t5\t-1\t1\t0" in lines
     finally:
-        bridge_module.bridge.mappings = saved
+        app.state.bridge.mappings = saved
 
 
 # ── MIDI ownership (coexistence) ──────────────────────────────────────────────
 
 def test_midi_owner_claim_and_release():
-    b = bridge_module.bridge
+    b = app.state.bridge
     b._midi_owner = None
     assert client.get("/api/health").json()["midi_owner"] is None
     # an agent claims the port
@@ -332,7 +330,7 @@ def test_midi_owner_claim_and_release():
 
 
 def test_midi_owner_ttl_expiry(monkeypatch):
-    b = bridge_module.bridge
+    b = app.state.bridge
     b._midi_owner = None
     # a stale heartbeat (older than the TTL) reads as no owner — the browser
     # reclaims MIDI even if the agent crashed without releasing.

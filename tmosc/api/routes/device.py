@@ -5,7 +5,7 @@ import threading
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tmosc.bridge import bridge
+from tmosc.api.deps import Bridge
 import tmosc.physical_table as pt
 
 router = APIRouter(tags=["device"])
@@ -14,7 +14,7 @@ router = APIRouter(tags=["device"])
 # ── Device Capture + Discovery ───────────────────────────────────────────────
 
 @router.get("/api/device/state")
-async def get_device_state():
+async def get_device_state(bridge: Bridge):
     """Live TotalMix state captured from OSC feedback (submixes, channels,
     raw address dump). Requires the OSC listener and TotalMix's OSC
     'Port outgoing' pointed at this server."""
@@ -30,7 +30,7 @@ class SweepBody(BaseModel):
 
 
 @router.post("/api/device/sweep")
-async def start_sweep(body: SweepBody = SweepBody()):
+async def start_sweep(bridge: Bridge, body: SweepBody = SweepBody()):
     """Measure the physical hardware-channel table (#24): /setBankStart
     0..33 + row-mirror nudge + /2/trackname read per offset, both rows.
     Read-only w.r.t. mixer state; never sends /setSubmix. Replaces the
@@ -56,12 +56,12 @@ async def start_sweep(body: SweepBody = SweepBody()):
 
 
 @router.get("/api/device/sweep")
-async def get_sweep_status():
+async def get_sweep_status(bridge: Bridge):
     return bridge.sweep_state
 
 
 @router.get("/api/device/physical_table")
-async def get_physical_table():
+async def get_physical_table(bridge: Bridge):
     table = (bridge.channel_map or {}).get("physical_table")
     if not table:
         raise HTTPException(status_code=404,
@@ -70,7 +70,7 @@ async def get_physical_table():
 
 
 @router.get("/api/device/global")
-def get_global_osc_status(probe: bool = False):
+def get_global_osc_status(bridge: Bridge, probe: bool = False):
     # sync endpoint on purpose: alive() may block ~2s on a /sendstate
     # probe — FastAPI runs sync handlers in the threadpool.
     # #22: probe defaults OFF so the header can poll this cheaply — the
@@ -111,7 +111,7 @@ def get_global_osc_status(probe: bool = False):
 
 
 @router.get("/api/device/activity")
-def get_device_activity(since: float = 0.0):
+def get_device_activity(bridge: Bridge, since: float = 0.0):
     """Channel identify, world→screen half (#8): per-channel VALUE-CHANGE
     activity from Global OSC feedback since a timestamp. Own bridge writes
     never echo and dumps re-reporting unchanged values don't register, so
@@ -135,7 +135,7 @@ def get_device_activity(since: float = 0.0):
 
 
 @router.post("/api/device/pulse")
-def pulse_channel(body: dict):
+def pulse_channel(body: dict, bridge: Bridge):
     """Channel identify, screen→world half (#8): briefly blip the selected
     send so the user can hear/see which physical channel it is. Two short
     bumps (current+6 dB, floor -30 dB when the send is off), restored to
@@ -191,7 +191,7 @@ def pulse_channel(body: dict):
 
 
 @router.post("/api/device/probe")
-def probe_device():
+def probe_device(bridge: Bridge):
     """Liveness probe (kept through #24 — TASK 6 deviation fix): a state-
     changing row toggle that must produce a dump. The only sound aliveness
     check; silence from an idle mixer is not evidence."""
@@ -201,7 +201,7 @@ def probe_device():
 
 
 @router.get("/api/device/picker")
-def get_picker():
+def get_picker(bridge: Bridge):
     """Routing-picker inventory (#6/#24): LIVE names preferred — inputs
     from the listener's cached current bank (zero device traffic),
     outputs from a fresh row-3 enumeration (~0.2s, cached) — each mapped

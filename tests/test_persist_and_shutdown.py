@@ -4,12 +4,12 @@ import json
 import threading
 import time
 
-import tmosc.bridge as bridge_module
+from tmosc.api.app import app
 
 
 def test_channel_map_persist_is_safe_under_concurrency(monkeypatch, tmp_path):
     monkeypatch.setenv("TMOSC_DATA_DIR", str(tmp_path))
-    b = bridge_module.bridge
+    b = app.state.bridge
     cms = [{"physical_table": {"n": i, "pad": "x" * 4000}} for i in range(8)]
     threads = [threading.Thread(target=b._persist_channel_map_file, args=(cm,)) for cm in cms]
     for t in threads:

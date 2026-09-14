@@ -7,7 +7,7 @@ import shutil
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 
-from tmosc.bridge import bridge
+from tmosc.api.deps import Bridge
 import tmosc.app_paths as app_paths
 from tmosc.api import persistence
 logger = logging.getLogger(__name__)
@@ -16,19 +16,19 @@ router = APIRouter(tags=["config"])
 
 
 @router.get("/api/snapshot_map")
-async def get_snapshot_map():
+async def get_snapshot_map(bridge: Bridge):
     """Return the loaded snapshot map (for client-side WS/SS validation)."""
     return bridge.snapshot_map or {}
 
 
 @router.get("/api/config/mappings")
-async def get_config_mappings():
+async def get_config_mappings(bridge: Bridge):
     """Return full mappings.json content for the live editor."""
     return bridge.mappings
 
 
 @router.post("/api/config/mappings")
-async def save_config_mappings(request: Request):
+async def save_config_mappings(request: Request, bridge: Bridge):
     """Save JSON body directly to mappings.json and hot-reload into bridge."""
     try:
         data = await request.json()
@@ -51,13 +51,13 @@ async def save_config_mappings(request: Request):
 
 
 @router.get("/api/config/channel_map")
-async def get_config_channel_map():
+async def get_config_channel_map(bridge: Bridge):
     """Return full channel_map content for the live editor."""
     return bridge.channel_map or {}
 
 
 @router.post("/api/config/channel_map")
-async def save_config_channel_map(request: Request):
+async def save_config_channel_map(request: Request, bridge: Bridge):
     """Save JSON body directly to ufx2_channel_map.json and hot-reload into bridge."""
     try:
         data = await request.json()
@@ -78,13 +78,13 @@ async def save_config_channel_map(request: Request):
 
 
 @router.get("/api/config/snapshot_map")
-async def get_config_snapshot_map():
+async def get_config_snapshot_map(bridge: Bridge):
     """Return full snapshot_map content for the live editor."""
     return bridge.snapshot_map or {}
 
 
 @router.post("/api/config/snapshot_map")
-async def save_config_snapshot_map(request: Request):
+async def save_config_snapshot_map(request: Request, bridge: Bridge):
     """Save snapshot_map to both local file and /app/config (SMB mount if present).
     Updates bridge.snapshot_map immediately so run_macro resolves slots correctly."""
     try:
@@ -119,7 +119,7 @@ async def save_config_snapshot_map(request: Request):
 
 
 @router.post("/api/upload/mappings")
-async def upload_mappings(file: UploadFile = File(...)):
+async def upload_mappings(bridge: Bridge, file: UploadFile = File(...)):
     try:
         data = await persistence._read_json_upload(file)
         if "macros" not in data:
@@ -141,7 +141,7 @@ async def upload_mappings(file: UploadFile = File(...)):
 
 
 @router.post("/api/upload/channel_map")
-async def upload_channel_map(file: UploadFile = File(...)):
+async def upload_channel_map(bridge: Bridge, file: UploadFile = File(...)):
     try:
         data = await persistence._read_json_upload(file)
         if "submixes" not in data and "physical_table" not in data:
@@ -160,7 +160,7 @@ async def upload_channel_map(file: UploadFile = File(...)):
 
 
 @router.post("/api/config/channel_map/init-from-example")
-async def init_channel_map_from_example():
+async def init_channel_map_from_example(bridge: Bridge):
     """Copy ufx2_channel_map.example.json → ufx2_channel_map.json and reload."""
     example = app_paths.example_path("ufx2_channel_map.example.json")
     target  = app_paths.data_path("ufx2_channel_map.json")
@@ -181,7 +181,7 @@ async def init_channel_map_from_example():
 
 
 @router.post("/api/config/mappings/init-from-example")
-async def init_mappings_from_example():
+async def init_mappings_from_example(bridge: Bridge):
     """Copy mappings.example.json → mappings.json and reload into the bridge.
     Called from the UI when no mappings.json exists on the server."""
     example = app_paths.example_path("mappings.example.json")
@@ -205,7 +205,7 @@ async def init_mappings_from_example():
 
 
 @router.post("/api/reload")
-async def reload_bridge():
+async def reload_bridge(bridge: Bridge):
     """Reload mappings.json from disk into the running bridge."""
     try:
         target = app_paths.data_path("mappings.json")

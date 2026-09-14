@@ -142,18 +142,17 @@ def test_web_layer_persists_into_data_dir(monkeypatch, tmp_path):
     time - this is the redirect the frozen build relies on, proven from
     source via the TMOSC_DATA_DIR override."""
     import tmosc.api.app as wc
-    import tmosc.bridge as bridge_module
     monkeypatch.setenv("TMOSC_DATA_DIR", str(tmp_path))
-    b = bridge_module.bridge
+    b = wc.app.state.bridge
     saved = (b.mappings, b.mappings_is_example, b.mappings_source)
     try:
         b.mappings = {"macros": {"m1": {"steps": []}}}
-        wc._persist_mappings()
+        wc._persist_mappings(b)
         on_disk = json.loads((tmp_path / "mappings.json").read_text())
         assert on_disk["macros"] == {"m1": {"steps": []}}
         # a second save backs the first copy up into <data_dir>/backups
         b.mappings = {"macros": {"m1": {"steps": []}, "m2": {"steps": []}}}
-        wc._persist_mappings()
+        wc._persist_mappings(b)
         assert len(list((tmp_path / "backups").glob("mappings.json.*"))) == 1
         assert set(json.loads((tmp_path / "mappings.json").read_text())["macros"]) == {"m1", "m2"}
     finally:

@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from tmosc.bridge import bridge
+from tmosc.api.deps import Bridge
 
 router = APIRouter(tags=["midi"])
 
@@ -17,21 +17,21 @@ class MidiOwnerBody(BaseModel):
 
 
 @router.post("/api/midi/owner/heartbeat")
-async def midi_owner_heartbeat(body: MidiOwnerBody):
+async def midi_owner_heartbeat(body: MidiOwnerBody, bridge: Bridge):
     """A tray/agent announces (every couple seconds) that it is handling MIDI.
     Refreshes presence; browsers yield Web MIDI while an agent owns the port."""
     return {"owner": bridge.midi_owner_heartbeat(body.id, body.host)}
 
 
 @router.post("/api/midi/owner/release")
-async def midi_owner_release(body: MidiOwnerBody):
+async def midi_owner_release(body: MidiOwnerBody, bridge: Bridge):
     """A tray/agent cleanly releases the MIDI port (on shutdown) so browsers
     reclaim it immediately instead of waiting for the heartbeat to expire."""
     return {"released": bridge.midi_owner_release(body.id)}
 
 
 @router.post("/api/midi/activity")
-async def midi_activity(body: dict):
+async def midi_activity(body: dict, bridge: Bridge):
     """A tray/agent relays each raw MIDI message it reads (throttled) so a
     browser that has yielded the port can still run MIDI-learn and show live
     activity. Pure fan-out: broadcast to WS clients, store nothing. The browser
@@ -46,7 +46,7 @@ async def midi_activity(body: dict):
 
 
 @router.get("/api/midi/bindings", response_class=PlainTextResponse)
-def get_midi_bindings():
+def get_midi_bindings(bridge: Bridge):
     """MIDI trigger table as TSV, for the native background agent (and a
     future microcontroller) to read without a JSON parser. One line per
     trigger, tab-separated:

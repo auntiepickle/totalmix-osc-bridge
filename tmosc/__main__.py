@@ -46,6 +46,8 @@ def main(argv=None) -> int:
         print(data)
         return 0
 
+    from tmosc.logsetup import configure_logging
+    configure_logging()                 # before the app import builds the bridge
     import uvicorn
     from tmosc.api.app import app, WEB_PORT
     host = os.getenv("WEB_HOST", "0.0.0.0")

@@ -1,7 +1,6 @@
 import os
 import time
 import logging
-import logging.handlers
 import json
 import threading
 import paho.mqtt.client as mqtt
@@ -14,7 +13,6 @@ from tmosc.config import (
     ENABLE_OSC_MONITOR, ENABLE_OSC_LISTENER, OSC_LISTEN_PORT,
     OSC_TRANSPORT, GLOBAL_OSC_IP, GLOBAL_OSC_PORT, GLOBAL_OSC_LISTEN_PORT,
     ENABLE_GLOBAL_OSC_LISTENER, GLOBAL_HEARTBEAT_TIMEOUT_S,
-    BRIDGE_LOG_FILE, LOG_MAX_BYTES, LOG_BACKUP_COUNT,
 )
 import tmosc.app_paths as app_paths
 from tmosc.osc import get_client
@@ -28,79 +26,72 @@ from tmosc.core.knobs import KnobsMixin
 from tmosc.core.channel_map import ChannelMapMixin
 from tmosc.core.transport import ClassicTransportMixin
 
-# === CENTRAL LOGGING ===
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    datefmt='%H:%M:%S',
-    handlers=[
-        logging.StreamHandler(),
-        logging.handlers.RotatingFileHandler(
-            BRIDGE_LOG_FILE,
-            maxBytes=LOG_MAX_BYTES,
-            backupCount=LOG_BACKUP_COUNT,
-            encoding='utf-8'
-        )
-    ]
-)
 logger = logging.getLogger(__name__)
 
-# Load snapshot map — prefer the SMB-mounted path (same source as mqtt_handler.py),
-# fall back to local file for dev environments without the mount.
-_SNAPSHOT_MAP_PATHS = [
-    "/app/config/ufx2_snapshot_map.json",           # Docker: SMB mount (authoritative)
-    app_paths.data_path("ufx2_snapshot_map.json"),  # local copy (repo root; %APPDATA% when frozen)
-]
-SNAPSHOT_MAP = {}
-for _p in _SNAPSHOT_MAP_PATHS:
-    try:
-        with open(_p, "r", encoding="utf-8-sig") as f:
-            SNAPSHOT_MAP = json.load(f)
-        logger.info(f"Loaded snapshot map from {_p} — workspaces: {list(SNAPSHOT_MAP.keys())}")
-        break
-    except FileNotFoundError:
-        continue
-    except Exception as e:
-        logger.error(f"Failed to load snapshot map from {_p}: {e}")
-        break
-if not SNAPSHOT_MAP:
+# Config loaders. They used to run at import (module-level SNAPSHOT_MAP /
+# MAPPINGS / osc_client); build_bridge() calls them now (#27 phase 4b), so
+# importing this module has no side effects beyond defining names.
+
+
+def load_snapshot_map(paths=None):
+    """First readable snapshot map on the search path, {} when none. Prefers
+    the SMB-mounted path (same source as mqtt_handler.py), falls back to the
+    local file for dev environments without the mount."""
+    paths = paths or [
+        "/app/config/ufx2_snapshot_map.json",           # Docker: SMB mount (authoritative)
+        app_paths.data_path("ufx2_snapshot_map.json"),  # local copy (repo root; %APPDATA% when frozen)
+    ]
+    for _p in paths:
+        try:
+            with open(_p, "r", encoding="utf-8-sig") as f:
+                snapshot_map = json.load(f)
+            logger.info(f"Loaded snapshot map from {_p} — workspaces: {list(snapshot_map.keys())}")
+            return snapshot_map
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.error(f"Failed to load snapshot map from {_p}: {e}")
+            break
     logger.warning("No snapshot map loaded — WS/SS switching will be disabled until map is available")
+    return {}
 
-# Load mappings — prefer mappings.json (user config), fall back to example
-_MAPPINGS_PATHS = [app_paths.data_path("mappings.json"),
-                   app_paths.example_path("mappings.example.json")]
-MAPPINGS = {"macros": {}}
-MAPPINGS_SOURCE = None
-MAPPINGS_IS_EXAMPLE = False
 
-for _mp in _MAPPINGS_PATHS:
-    try:
-        with open(_mp, "r", encoding="utf-8") as f:
-            MAPPINGS = json.load(f)
-        MAPPINGS_SOURCE = os.path.basename(_mp)
-        MAPPINGS_IS_EXAMPLE = MAPPINGS_SOURCE != "mappings.json"
-        if MAPPINGS_IS_EXAMPLE:
+def load_mappings():
+    """mappings.json (user config) or the bundled example as a fallback.
+    Returns (mappings, source_basename, is_example)."""
+    paths = [app_paths.data_path("mappings.json"),
+             app_paths.example_path("mappings.example.json")]
+    for _mp in paths:
+        try:
+            with open(_mp, "r", encoding="utf-8") as f:
+                mappings = json.load(f)
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.error(f"Failed to load {_mp}: {e}")
+            break
+        source = os.path.basename(_mp)
+        is_example = source != "mappings.json"
+        if is_example:
             logger.warning(
                 f"mappings.json not found — loaded fallback {_mp}. "
                 "Create mappings.json to override."
             )
         else:
-            logger.info(f"Loaded mappings.json — {len(MAPPINGS.get('macros', {}))} macros")
-        break
-    except FileNotFoundError:
-        continue
-    except Exception as e:
-        logger.error(f"Failed to load {_mp}: {e}")
-        break
+            logger.info(f"Loaded mappings.json — {len(mappings.get('macros', {}))} macros")
+        return mappings, source, is_example
+    return {"macros": {}}, None, False
 
-# OSC client — shared per-(ip, port) socket cache in osc.py, same one
-# mqtt_handler's send_osc() uses.
-if OSC_IP and OSC_PORT:
-    osc_client = get_client(OSC_IP, OSC_PORT)
-    logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
-else:
-    osc_client = None
+
+def make_osc_client():
+    """Classic OSC client (shared per-(ip, port) socket cache in osc.py, the
+    same one mqtt_handler's send_osc() uses), or None when OSC_IP is unset."""
+    if OSC_IP and OSC_PORT:
+        client = get_client(OSC_IP, OSC_PORT)
+        logger.info(f"OSC Client ready → {OSC_IP}:{OSC_PORT}")
+        return client
     logger.warning("OSC_IP not set — OSC disabled, macros will be skipped")
+    return None
 
 
 # === WEBSOCKET CLIENTS (shared between bridge.py and tmosc/api/app.py) ===
@@ -164,7 +155,8 @@ class TotalMixOSCBridge(BroadcastMixin, SwitchingMixin, MacrosMixin, KnobsMixin,
     # in this module (it is shared with tmosc/api/app.py).
     _ws_enqueue_all = staticmethod(ws_enqueue_all)
 
-    def __init__(self, osc_client, mappings, snapshot_map):
+    def __init__(self, osc_client, mappings, snapshot_map,
+                 mappings_source=None, mappings_is_example=False):
         self._suppress_count = 0    # >0 while any macro runs (see property)
         self._last_macro_end_time = 0.0
         # Serializes every sender of device-global aim state (/setSubmix,
@@ -180,8 +172,8 @@ class TotalMixOSCBridge(BroadcastMixin, SwitchingMixin, MacrosMixin, KnobsMixin,
         self._layout_epoch = 0.0
         self.osc_client = osc_client
         self.mappings = mappings
-        self.mappings_is_example = MAPPINGS_IS_EXAMPLE
-        self.mappings_source = MAPPINGS_SOURCE
+        self.mappings_is_example = mappings_is_example  # bundled example, not the user's file
+        self.mappings_source = mappings_source          # basename of what was loaded
         self.snapshot_map = snapshot_map
         self.current_workspace = None
         self.current_snapshot = None
@@ -347,13 +339,26 @@ class TotalMixOSCBridge(BroadcastMixin, SwitchingMixin, MacrosMixin, KnobsMixin,
             logger.info("MQTT client loop started — macro subscriptions ACTIVE")
 
 
-bridge = TotalMixOSCBridge(osc_client, MAPPINGS, SNAPSHOT_MAP)
+def build_bridge():
+    """The bridge factory: load mappings, snapshot map and the classic OSC
+    client from the data dir / env and return a fresh, not-yet-started
+    TotalMixOSCBridge. create_app() calls this once per app (the object
+    lives at app.state.bridge); the headless mode below calls it directly.
+    Nothing starts here - start_mqtt/start_osc_listener/start_global_osc
+    are the lifespan's job."""
+    mappings, source, is_example = load_mappings()
+    b = TotalMixOSCBridge(make_osc_client(), mappings, load_snapshot_map(),
+                          mappings_source=source, mappings_is_example=is_example)
+    logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
+    logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegistry + WebSocket live updates for Web Client v1")
+    return b
 
-logger.info("=== TOTALMIX OSC BRIDGE LOADED ===")
-logger.info("State-aware workspace/snapshot switching (NO force) + OperationRegistry + WebSocket live updates for Web Client v1")
 
 # === BRIDGE STARTUP — HEADLESS MODE (python -m tmosc.bridge: MQTT/OSC only, no web UI) ===
 if __name__ == "__main__":
+    from tmosc.logsetup import configure_logging
+    configure_logging()
+    bridge = build_bridge()
     bridge.start_mqtt()   # re-uses the same function
     bridge.start_osc_listener()
     bridge.start_global_osc()   # #25: no-op unless enabled via env
@@ -363,8 +368,8 @@ if __name__ == "__main__":
             time.sleep(30)
     except KeyboardInterrupt:
         logger.info("\nShutting down bridge...")
+        bridge.stop_global_osc()
         if ENABLE_OSC_MONITOR:
             osc_monitor.stop()
         if bridge.mqtt_client:
             bridge.mqtt_client.loop_stop()
-        logger.info("Bridge stopped cleanly.")

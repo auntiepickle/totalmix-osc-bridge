@@ -12,10 +12,20 @@
   deprecated `on_event` handlers, so the suite runs warning-free.
   `uvicorn tmosc.api.app:app`, the `web.web_client` shim and
   `python -m tmosc` are unchanged; tests that patch persistence or the
-  token now patch the module that owns the name. Follow-up (4b):
-  `create_app(bridge=...)` + `request.app.state.bridge`, a bridge factory
-  instead of the import-time singleton, and logging setup out of
-  `tmosc/bridge.py`. The `ui.js` split is the frontend half.
+  token now patch the module that owns the name. The `ui.js` split is
+  the frontend half.
+- **Bridge factory, no import-time singleton (#27 phase 4b)**:
+  `tmosc.bridge.build_bridge()` loads mappings / snapshot map / the OSC
+  client and returns the `TotalMixOSCBridge`; `create_app(bridge=None)`
+  builds one (or takes the one it is given) and stores it at
+  `app.state.bridge`, which the routers receive as a `bridge: Bridge`
+  dependency (`tmosc/api/deps.py`). Importing `tmosc.bridge` no longer
+  reads config files, opens a socket or configures logging: that moved
+  to `tmosc/logsetup.py` (`configure_logging()`, idempotent, called by
+  `python -m tmosc`, `create_app()` and the headless `python -m
+  tmosc.bridge`). `_persist_mappings(bridge)` takes the bridge. No
+  route, path or behaviour change; tests reach the app's bridge through
+  `app.state.bridge` and can build an isolated app around a fake one.
 - **bridge.py split by responsibility (#27 phase 3)**: the 2,600-line
   `tmosc/bridge.py` is now a 370-line facade (`__init__`, lifecycle,
   config-reading methods, WebSocket registry, singletons) composed from

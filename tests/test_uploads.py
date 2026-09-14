@@ -5,7 +5,6 @@ import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
-import tmosc.bridge as bridge_module  # noqa: E402
 from tmosc.api.app import app, MAX_UPLOAD_BYTES  # noqa: E402
 
 client = fastapi_testclient.TestClient(app)
@@ -15,7 +14,7 @@ client = fastapi_testclient.TestClient(app)
 def isolated_state(monkeypatch, tmp_path):
     """Writes land in a scratch state dir; the singleton's mappings are restored."""
     monkeypatch.setenv("TMOSC_DATA_DIR", str(tmp_path))
-    b = bridge_module.bridge
+    b = app.state.bridge
     saved = (b.mappings, b.mappings_is_example, b.mappings_source)
     yield tmp_path
     b.mappings, b.mappings_is_example, b.mappings_source = saved
@@ -47,4 +46,4 @@ def test_valid_upload_round_trips_and_hot_reloads(isolated_state):
     assert r.status_code == 200
     on_disk = json.loads((isolated_state / "mappings.json").read_text())
     assert on_disk["macros"]["up_test"] == {"steps": []}    # runtime fields stripped
-    assert "up_test" in bridge_module.bridge.mappings["macros"]
+    assert "up_test" in app.state.bridge.mappings["macros"]

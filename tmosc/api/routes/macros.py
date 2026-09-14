@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from tmosc.bridge import bridge
+from tmosc.api.deps import Bridge
 from tmosc.api import persistence
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ router = APIRouter(tags=["macros"])
 # ── Macro Cards API ──────────────────────────────────────────────────────────
 
 @router.get("/api/macros")
-async def get_macros():
+async def get_macros(bridge: Bridge):
     """Return all macros from the live bridge mappings (updated by live editor + reload).
 
     routing_label is derived at read time — persisted copies rot when the device
@@ -48,7 +48,7 @@ class SwitchBody(BaseModel):
 
 
 @router.post("/api/trigger/{macro_name}")
-async def trigger_macro(macro_name: str, body: TriggerBody = TriggerBody()):
+async def trigger_macro(macro_name: str, bridge: Bridge, body: TriggerBody = TriggerBody()):
     """Fire a macro — runs in a background thread so the response returns immediately.
 
     Accepts a JSON body with ``param`` (0.0–1.0) and an optional ``clock_bpm``
@@ -73,7 +73,7 @@ async def trigger_macro(macro_name: str, body: TriggerBody = TriggerBody()):
 
 
 @router.post("/api/switch")
-async def switch_workspace(body: SwitchBody):
+async def switch_workspace(body: SwitchBody, bridge: Bridge):
     """Switch to a workspace and optionally a snapshot without firing a macro.
 
     Used by the click-to-switch buttons in the UI group headers. Runs in a
@@ -94,7 +94,7 @@ async def switch_workspace(body: SwitchBody):
 
 @router.post("/api/config/macros/{macro_name}")
 @router.patch("/api/config/macros/{macro_name}")
-async def upsert_macro(macro_name: str, request: Request):
+async def upsert_macro(macro_name: str, request: Request, bridge: Bridge):
     """Create or update a single macro — used by the card editor and the
     New Macro flow. POST and PATCH behave identically (upsert); api.js has
     always POSTed here, so update-only PATCH semantics would 405 the editor."""
@@ -109,7 +109,7 @@ async def upsert_macro(macro_name: str, request: Request):
             )
         created = macro_name not in bridge.mappings.setdefault("macros", {})
         bridge.mappings["macros"][macro_name] = persistence._strip_runtime(data)
-        persistence._persist_mappings()
+        persistence._persist_mappings(bridge)
         logger.info(f"✅ Macro '{macro_name}' {'created' if created else 'updated'} via editor")
         bridge.broadcast_state(macro_event={
             "type": "macro_created" if created else "macro_updated",
@@ -124,20 +124,20 @@ async def upsert_macro(macro_name: str, request: Request):
 
 
 @router.delete("/api/config/macros/{macro_name}")
-async def delete_macro(macro_name: str):
+async def delete_macro(macro_name: str, bridge: Bridge):
     """Delete a macro (auto-backup first, hot-reloads into the bridge)."""
     if macro_name not in bridge.mappings.get("macros", {}):
         raise HTTPException(status_code=404, detail=f"Macro '{macro_name}' not found")
     del bridge.mappings["macros"][macro_name]
     bridge.macro_live_state.pop(macro_name, None)
-    persistence._persist_mappings()
+    persistence._persist_mappings(bridge)
     logger.info(f"🗑 Macro '{macro_name}' deleted via editor")
     bridge.broadcast_state(macro_event={"type": "macro_deleted", "name": macro_name})
     return {"status": "success", "macro": macro_name}
 
 
 @router.post("/api/config/macros-order")
-async def reorder_macros(request: Request):
+async def reorder_macros(request: Request, bridge: Bridge):
     """Persist a new macro ordering (drag-to-reorder in the rack UI).
     Body: {"order": [every macro name exactly once]}. Reorders the dict
     IN PLACE (clear + reinsert) so held references stay valid."""
@@ -150,5 +150,5 @@ async def reorder_macros(request: Request):
     snapshot = {k: macros[k] for k in order}
     macros.clear()
     macros.update(snapshot)
-    persistence._persist_mappings()
+    persistence._persist_mappings(bridge)
     return {"ok": True, "order": list(macros)}

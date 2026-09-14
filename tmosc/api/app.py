@@ -3,10 +3,11 @@
 Routes live in tmosc/api/routes/ (one APIRouter per area), config persistence
 in tmosc/api/persistence.py, the shared-token gate in tmosc/api/auth.py.
 `app` (module level) is what `uvicorn tmosc.api.app:app`, `python -m tmosc`,
-web/web_client.py and the tests import. The names in __all__ beyond `app` are
-compatibility re-exports (tests import them from here; patch them on the
-module that owns them). A bridge factory + `request.app.state.bridge` is the
-phase-4b follow-up - routes still read the tmosc.bridge singleton.
+web/web_client.py and the tests import; it owns the bridge built by
+tmosc.bridge.build_bridge() at `app.state.bridge`. `create_app(bridge=...)`
+builds an app around any bridge (tests: an isolated one on a fake OSC
+client). The names in __all__ beyond `app` are compatibility re-exports
+(tests import them from here; patch them on the module that owns them).
 """
 import os
 from contextlib import asynccontextmanager
@@ -17,7 +18,8 @@ import threading
 import logging
 import asyncio
 
-from tmosc.bridge import bridge
+from tmosc.bridge import TotalMixOSCBridge, build_bridge
+from tmosc.logsetup import configure_logging
 import tmosc.app_paths as app_paths
 from tmosc.api.auth import API_TOKEN, _auth_gate
 from tmosc.api.persistence import (
@@ -48,6 +50,7 @@ async def lifespan(app: FastAPI):
     """Process lifecycle. uvicorn runs this around serving (docker CMD,
     `python -m tmosc`); a bare TestClient(app) never enters it, so the
     tests run without a broker, listeners or network."""
+    bridge: TotalMixOSCBridge = app.state.bridge
     threading.Thread(target=_keepalive, daemon=True).start()
     bridge.start_mqtt()
     bridge.start_osc_listener()
@@ -81,8 +84,15 @@ async def static_no_cache(request: Request, call_next):
     return response
 
 
-def create_app() -> FastAPI:
+def create_app(bridge: TotalMixOSCBridge | None = None) -> FastAPI:
+    """Build the app around `bridge` (default: build_bridge() from the data
+    dir + env). Logging is configured here so the first thing a process
+    logs - the loaders inside build_bridge() - already lands in bridge.log."""
+    configure_logging()
+    if bridge is None:
+        bridge = build_bridge()
     app = FastAPI(title="TotalMix OSC Bridge Web Client", lifespan=lifespan)
+    app.state.bridge = bridge     # routers reach it via tmosc.api.deps.Bridge
 
     static_dir = app_paths.static_dir()
     print(f"DEBUG: Mounting static files from: {static_dir}")

@@ -4,7 +4,7 @@ import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from tmosc.bridge import bridge, ws_attach, ws_detach
+from tmosc.bridge import ws_attach, ws_detach
 from tmosc.api.auth import ws_authorized
 
 router = APIRouter(tags=["ws"])
@@ -18,6 +18,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
     await websocket.accept()
+    bridge = websocket.app.state.bridge
     sender = ws_attach(websocket)    # per-client send queue + sender task (#32)
     try:
         while True:

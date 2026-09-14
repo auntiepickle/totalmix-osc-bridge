@@ -3,7 +3,6 @@ import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
-import tmosc.bridge as bridge_module  # noqa: E402
 from tmosc.api.app import app, _strip_runtime  # noqa: E402
 
 client = fastapi_testclient.TestClient(app)
@@ -54,7 +53,7 @@ def test_strip_runtime_drops_last_fire():
 
 
 def test_get_macros_merges_last_fire():
-    b = bridge_module.bridge
+    b = app.state.bridge
     macros = b.mappings.get("macros", {})
     name = next(iter(macros))
     b.macro_health[name] = {"status": "ok", "reason": None,
@@ -79,7 +78,7 @@ def test_global_endpoint_light_by_default():
         def send_message(self, a, v):
             self.sent.append((a, v))
 
-    b = bridge_module.bridge
+    b = app.state.bridge
     prev = (b.global_listener, b.global_transport)
     b.global_listener = GlobalOSCListener(0)
     fc = FakeClient()

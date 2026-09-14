@@ -216,7 +216,7 @@ def test_runtime_fields_stripped_and_merged():
 
 @pytest.fixture
 def module_knob(monkeypatch):
-    b = bridge_module.bridge
+    b = app.state.bridge
     prev = (b.global_listener, b.global_transport, b.channel_map,
             dict(b.mappings.get("macros", {})))
     b.channel_map = {"physical_table": _table()}

@@ -2,14 +2,14 @@
 set/enable/param fallbacks for the WebSocket knob stream."""
 from fastapi import APIRouter, HTTPException
 
-from tmosc.bridge import bridge
+from tmosc.api.deps import Bridge
 from tmosc.api import persistence
 
 router = APIRouter(tags=["knobs"])
 
 
 @router.get("/api/meters")
-def get_meters():
+def get_meters(bridge: Bridge):
     """Live peak levels (dB) for every knob macro's meter source (#meters):
     sends meter their SOURCE channel, row-3 knobs their output. Stereo
     pairs report the max of both members. Values fresher than 2s only."""
@@ -74,7 +74,7 @@ def get_meters():
 
 
 @router.post("/api/knobs/{name}/group_capture")
-async def knob_group_capture(name: str):
+async def knob_group_capture(name: str, bridge: Bridge):
     # async on purpose: this mutates bridge.mappings and persists it, which
     # every other writer does on the event-loop thread - a threadpool copy
     # raced persistence._persist_mappings' rebind (review finding). Nothing here blocks.
@@ -102,12 +102,12 @@ async def knob_group_capture(name: str):
         if cur is not None and cur > 0.0005:
             mem["offset_db"] = round(gu.fader_db(cur) - pdb, 1)
             captured += 1
-    persistence._persist_mappings()
+    persistence._persist_mappings(bridge)
     return {"status": "ok", "captured": captured, "group": grp}
 
 
 @router.get("/api/duck")
-def get_duck():
+def get_duck(bridge: Bridge):
     """Live sidechain state per duck-enabled knob: gain reduction (dB)
     and the key channel's level - painted onto the modules by the UI."""
     d = getattr(bridge, "duck", None)
@@ -116,7 +116,7 @@ def get_duck():
 
 
 @router.post("/api/knob/{name}")
-def set_knob(name: str, body: dict):
+def set_knob(name: str, body: dict, bridge: Bridge):
     """HTTP fallback for the WebSocket knob stream (and for scripts/HA):
     set a KNOB macro to a 0..1 value. Mapped through the knob's range."""
     r = bridge.knob_set(name, body.get("value", 0.0), source="api")
@@ -128,7 +128,7 @@ def set_knob(name: str, body: dict):
 
 
 @router.post("/api/knob/{name}/enable")
-def set_knob_enable(name: str, body: dict):
+def set_knob_enable(name: str, body: dict, bridge: Bridge):
     """Flip a KNOB macro's section switch (EQ / low cut / dynamics / FX)."""
     r = bridge.knob_enable(name, bool(body.get("on", True)), source="ui")
     if r["status"] == "not_a_knob":
@@ -139,7 +139,7 @@ def set_knob_enable(name: str, body: dict):
 
 
 @router.post("/api/knob/{name}/param")
-def set_knob_param(name: str, body: dict):
+def set_knob_param(name: str, body: dict, bridge: Bridge):
     """Write a companion param on a KNOB macro's routing (low-cut slope,
     EQ band type): {"param": "lowcut_grade", "value": 0..1}."""
     r = bridge.knob_param_set(name, str(body.get("param", "")),
