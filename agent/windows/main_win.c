@@ -12,6 +12,7 @@
 #include "tmosc_midi.h"
 #include "runner.h"
 #include "midi_win.h"
+#include "totalmix_win.h"
 #include "net.h"
 
 #include <stdio.h>
