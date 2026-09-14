@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Per-client WebSocket send queues (#32)**: a broadcast now only
+  enqueues a frame per connection; one sender task per client drains its
+  queue in order, and a client that has fallen 64 frames behind loses its
+  oldest frames rather than stalling the loop. Frames can no longer
+  arrive out of order, and one slow tab no longer throttles the others.
 - **Bridge concurrency follow-ups (#38)**: MQTT `totalmix/workspace` and
   `totalmix/snapshot` commands run on a worker thread under the device
   lock, so a command landing mid-ramp waits for the macro instead of

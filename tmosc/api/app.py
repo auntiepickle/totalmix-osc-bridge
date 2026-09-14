@@ -14,7 +14,7 @@ import threading
 import logging
 import asyncio
 
-from tmosc.bridge import bridge, ws_clients
+from tmosc.bridge import bridge, ws_attach, ws_detach
 import tmosc.physical_table as pt
 import tmosc.app_paths as app_paths
 logger = logging.getLogger(__name__)
@@ -900,7 +900,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
     await websocket.accept()
-    ws_clients.append(websocket)
+    sender = ws_attach(websocket)    # per-client send queue + sender task (#32)
     try:
         while True:
             raw = await websocket.receive_text()
@@ -917,8 +917,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     None, bridge.knob_set, str(msg.get("name", "")),
                     msg.get("value", 0.0), "midi")
     except WebSocketDisconnect:
-        if websocket in ws_clients:
-            ws_clients.remove(websocket)
+        pass
+    finally:
+        sender.cancel()
+        ws_detach(websocket)
 
 
 # ── File Upload + Auto-Backup ────────────────────────────────────────────────

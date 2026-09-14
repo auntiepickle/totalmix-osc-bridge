@@ -115,6 +115,54 @@ class _EdgeToggleClient:
 
 # === WEBSOCKET CLIENTS (shared between bridge.py and tmosc/api/app.py) ===
 ws_clients = []  # list of active FastAPI WebSocket connections
+# Per-client send queues (#32): a broadcast only ENQUEUES; one sender task
+# per connection drains its queue in order. A client whose transport is
+# paused (phone on flaky Wi-Fi) therefore stalls only itself, and every
+# client sees knob_update frames in the order they were produced - the old
+# one-task-per-broadcast fan-out could suspend on a slow client's drain()
+# while later broadcasts completed, reordering frames for everyone.
+_ws_queues = {}       # WebSocket -> asyncio.Queue
+WS_QUEUE_MAX = 64     # frames a stalled client may fall behind before it loses the oldest
+
+
+def ws_attach(websocket):
+    """Register a connection and start its sender task. Call on the event
+    loop (the /ws endpoint). Returns the task so the endpoint can cancel it."""
+    q = asyncio.Queue(maxsize=WS_QUEUE_MAX)
+    _ws_queues[websocket] = q
+    ws_clients.append(websocket)
+
+    async def _sender():
+        try:
+            while True:
+                await websocket.send_json(await q.get())
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            ws_detach(websocket)
+
+    return asyncio.get_running_loop().create_task(_sender())
+
+
+def ws_detach(websocket):
+    _ws_queues.pop(websocket, None)
+    if websocket in ws_clients:
+        ws_clients.remove(websocket)
+
+
+def _ws_enqueue(q, payload):
+    if q.full():
+        try:
+            q.get_nowait()          # drop the OLDEST frame, never block the loop
+        except asyncio.QueueEmpty:
+            pass
+    q.put_nowait(payload)
+
+
+def ws_enqueue_all(payload):
+    """Fan one payload out to every client queue (loop thread only)."""
+    for q in list(_ws_queues.values()):
+        _ws_enqueue(q, payload)
 
 class TotalMixOSCBridge:
     def __init__(self, osc_client, mappings, snapshot_map):
@@ -212,22 +260,17 @@ class TotalMixOSCBridge:
                 logger.debug(f"Broadcast failed safely: {e}")
 
     async def _do_broadcast(self, macro_update=None, macro_event=None):
-        """Actual broadcast logic (always runs inside asyncio)."""
-        for client in list(ws_clients):
-            try:
-                state = {
-                    "current_snapshot": getattr(self, "current_snapshot", "unknown"),
-                    "current_workspace": getattr(self, "current_workspace", "unknown"),
-                    "state_confirmed": getattr(self, "state_confirmed", None),
-                    "device_snapshot_slot": getattr(self, "device_snapshot_slot", None),
-                    "snapshot_modified": getattr(self, "snapshot_modified", None),
-                    "macro_update": macro_update,
-                    "macro_event": macro_event,
-                }
-                await client.send_json(state)
-            except Exception:
-                if client in ws_clients:
-                    ws_clients.remove(client)
+        """Actual broadcast logic (always runs inside asyncio): build the
+        state frame once and enqueue it per client (#32)."""
+        ws_enqueue_all({
+            "current_snapshot": getattr(self, "current_snapshot", "unknown"),
+            "current_workspace": getattr(self, "current_workspace", "unknown"),
+            "state_confirmed": getattr(self, "state_confirmed", None),
+            "device_snapshot_slot": getattr(self, "device_snapshot_slot", None),
+            "snapshot_modified": getattr(self, "snapshot_modified", None),
+            "macro_update": macro_update,
+            "macro_event": macro_event,
+        })
 
     # ─────────────────────────────────────────────────────────────
     # MIDI OWNERSHIP (coexistence): a tray/agent announces it holds the
@@ -288,12 +331,7 @@ class TotalMixOSCBridge:
 
     async def _do_broadcast_event(self, event):
         """Broadcast an arbitrary typed event dict (has a top-level 'type')."""
-        for client in list(ws_clients):
-            try:
-                await client.send_json(event)
-            except Exception:
-                if client in ws_clients:
-                    ws_clients.remove(client)
+        ws_enqueue_all(event)
 
    
     def _load_channel_map(self):
