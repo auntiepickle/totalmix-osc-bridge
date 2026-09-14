@@ -8,7 +8,17 @@ import threading
 import paho.mqtt.client as mqtt
 import re
 import asyncio
-from tmosc.config import *
+# Tests monkeypatch OSC_TRANSPORT / ENABLE_MQTT / ENABLE_OSC_MONITOR on THIS
+# module; the methods that read them (_global_active, start_*) must therefore
+# live here and read the module global at call time.
+from tmosc.config import (
+    OSC_IP, OSC_PORT, ENABLE_MQTT, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS,
+    ENABLE_OSC_MONITOR, ENABLE_OSC_LISTENER, OSC_LISTEN_PORT,
+    OSC_TRANSPORT, GLOBAL_OSC_IP, GLOBAL_OSC_PORT, GLOBAL_OSC_LISTEN_PORT,
+    ENABLE_GLOBAL_OSC_LISTENER, GLOBAL_HEARTBEAT_TIMEOUT_S,
+    BRIDGE_LOG_FILE, LOG_MAX_BYTES, LOG_BACKUP_COUNT,
+    snapshot_num_to_osc_index,
+)
 import tmosc.app_paths as app_paths
 from tmosc.osc import get_client
 from tmosc.mqtt_handler import setup_mqtt
