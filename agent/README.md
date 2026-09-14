@@ -113,8 +113,15 @@ Done. The exe is fully standalone (static CRT — no Visual C++ redistributable)
 
 Right-click the tray icon for **Open Web UI**, **Open Web UI - HTTPS**,
 **Start with Windows**, and **Quit**. The icon shows the state at a glance —
-indigo knob = running, orange = the MIDI device is held by another app (it
-retries and grabs it once free).
+indigo knob = running; orange = something is missing, and the tooltip says
+what: the MIDI device is held by another app (it retries and grabs it once
+free), the browser tab has MIDI (the tray stood down), or the bridge was not
+found / dropped (LAN discovery found nothing, or `host=` in `config.txt` is
+unreachable — it keeps retrying). The icon survives an Explorer restart.
+
+LAN discovery (`host=auto`) probes the limited broadcast **and** every
+network interface's own broadcast address, so a bridge on a second adapter
+or VLAN segment is found too.
 
 ## Status
 

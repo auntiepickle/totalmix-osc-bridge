@@ -41,6 +41,18 @@ static double g_st_last[2];             /* bend, aftertouch relay throttle */
 
 void tm_runner_stop(void) { g_stop = 1; }
 
+static void (*g_link_cb)(int) = NULL;
+static int g_link_reported = -1;        /* last state handed to the callback */
+
+void tm_runner_set_link_callback(void (*cb)(int connected)) { g_link_cb = cb; }
+
+static void report_link(int connected)
+{
+    if (!g_link_cb || connected == g_link_reported) return;
+    g_link_reported = connected;
+    g_link_cb(connected);
+}
+
 /* Monotonic-ish millisecond clock (portable). */
 #ifdef _WIN32
   #include <windows.h>
@@ -91,11 +103,25 @@ static void print_bindings(void)
 static int load_bindings(tm_net *net)
 {
     static char buf[65536];
-    int rlen = 0, status = 0;
+    static char old_names[TM_MAX_MACROS][TM_NAME_LEN];
+    int rlen = 0, status = 0, old_count, i;
     if (tm_net_request(net, "GET", "/api/midi/bindings", NULL,
                        buf, sizeof(buf), &rlen, &status) != 0) return -1;
     if (status != 200) return -1;
+    old_count = g_bind.mapping.macro_count;
+    memcpy(old_names, g_bind.names, sizeof(old_names));
     tm_bindings_parse(&g_bind, buf, rlen);
+    /* g_pending/g_dirty are indexed by macro POSITION. A rename or reorder
+     * on the bridge between two refreshes moves the indices, so a knob value
+     * still waiting to flush would be posted under another macro's name.
+     * Dropping (rather than flushing first) is the safe choice: the next
+     * controller tick re-sends the current value anyway. */
+    for (i = 0; i < TM_MAX_MACROS; i++) {
+        if (!g_dirty[i]) continue;
+        if (i >= old_count || i >= g_bind.mapping.macro_count
+            || strcmp(old_names[i], g_bind.names[i]) != 0)
+            g_dirty[i] = 0;
+    }
     fprintf(stderr, "[agent] loaded %d macro(s) from bindings\n", g_bind.mapping.macro_count);
     return 0;
 }
@@ -239,6 +265,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
 
     g_verbose = verbose;
     g_stop = 0;
+    g_link_reported = -1;
     init_agent_id();
     fprintf(stderr, "[agent] bridge http://%s:%d, API token: %s\n", host, port,
             tm_net_has_token() ? "set" : "unset");   /* never the value */
@@ -276,9 +303,11 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
             if (tm_net_connect(&net, host, port) == 0 && load_bindings(&net) == 0) {
                 connected = 1; last_refresh = t;
                 fprintf(stderr, "[agent] connected\n");
+                report_link(1);
             } else {
                 tm_net_close(&net);
                 fprintf(stderr, "[agent] connect failed, retrying\n");
+                report_link(0);
                 continue;
             }
         }
@@ -336,7 +365,7 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
             last_heartbeat = t;
             if (post_owner(&net, "/api/midi/owner/heartbeat") != 0) connected = 0;
         }
-        if (!connected) tm_net_close(&net);
+        if (!connected) { tm_net_close(&net); report_link(0); }
     }
 
     fprintf(stderr, "[agent] shutting down\n");

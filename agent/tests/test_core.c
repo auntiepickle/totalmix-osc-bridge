@@ -195,6 +195,43 @@ static void test_bindings_parse(void)
     CHECK(n == 1 && a[0].kind == TM_ACTION_FIRE && a[0].macro_index == 3);
 }
 
+/* The bridge allows 64-character macro names; the parser must keep all 64
+ * (TM_NAME_LEN gives headroom) so the POST path names the right macro. */
+static void test_bindings_long_name(void)
+{
+    static tm_bindings b;
+    char name[65], tsv[128];
+    int i, rc;
+    for (i = 0; i < 64; i++) name[i] = (char)('a' + (i % 26));
+    name[64] = '\0';
+    snprintf(tsv, sizeof(tsv), "%s\t1\tcontrol_change\t7\t-1\t1\t1\n", name);
+    rc = tm_bindings_parse(&b, tsv, (int)strlen(tsv));
+    CHECK(rc == 0);
+    CHECK(b.mapping.macro_count == 1);
+    CHECK(strlen(tm_bindings_name(&b, 0)) == 64);
+    CHECK(strcmp(tm_bindings_name(&b, 0), name) == 0);
+}
+
+/* Contiguity guard: a macro's triggers are one block. A line for an earlier
+ * macro turning up after another macro started cannot join its block, so it
+ * is rejected (parse reports -1) and the earlier macro keeps its one trigger
+ * rather than silently owning the wrong one. */
+static void test_bindings_interleaved_rejected(void)
+{
+    static tm_bindings b;
+    const char *tsv =
+        "a\t1\tcontrol_change\t1\t-1\t1\t1\n"
+        "b\t1\tcontrol_change\t2\t-1\t1\t1\n"
+        "a\t1\tcontrol_change\t3\t-1\t1\t1\n";
+    int rc = tm_bindings_parse(&b, tsv, (int)strlen(tsv));
+    CHECK(rc == -1);
+    CHECK(b.mapping.macro_count == 2);
+    CHECK(b.macros[0].trigger_count == 1);
+    CHECK(b.macros[1].trigger_count == 1);
+    CHECK(b.trig_used == 2);
+    CHECK(b.macros[1].triggers[0].number == 2);   /* b's block untouched */
+}
+
 /* Suspend detector: a suspend-counting clock pulling ahead of a
  * suspend-excluding one by more than the threshold is a sleep; ordinary
  * jitter (either sign) and the priming call are not. */
@@ -223,6 +260,8 @@ int main(void)
     test_clock_bpm();
     test_proto();
     test_bindings_parse();
+    test_bindings_long_name();
+    test_bindings_interleaved_rejected();
 
     if (g_fail) { printf("\n%d CHECK(s) FAILED\n", g_fail); return 1; }
     printf("all core tests passed\n");

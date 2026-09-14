@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Tray agent robustness (#37)**: the tray icon survives an Explorer
+  restart (hidden top-level window + `TaskbarCreated`); a bridge that
+  cannot be found or drops shows its own "bridge not found" state instead
+  of "MIDI device busy" (the runner reports link up/down to the tray);
+  LAN discovery also sends a directed broadcast on every up, non-loopback
+  interface (Windows `GetAdaptersAddresses`, Linux `getifaddrs`); a
+  bindings refresh that renames or reorders macros drops any knob value
+  pending under a moved index instead of posting it under another macro.
 - **Per-macro DOM ids can no longer collide (#43)**: the web UI now joins
   an element's prefix and the macro key with `:` (`card:locut`,
   `knob-en:locut`) instead of `-`. Keys may contain `-`, so a macro named

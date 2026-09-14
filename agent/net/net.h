@@ -32,9 +32,11 @@ int tm_net_request(tm_net *n, const char *method, const char *path,
                    const char *body, char *resp, int resp_cap,
                    int *resp_len, int *status);
 
-/* Auto-discover a bridge on the LAN: UDP-broadcast a ping to <port> and take
- * the first responder's IP into host_out. Returns 0 if a bridge was found,
- * -1 otherwise (caller falls back to a configured/entered host). */
+/* Auto-discover a bridge on the LAN: UDP-broadcast a ping to <port> (the
+ * limited broadcast plus every interface's directed broadcast, so a bridge on
+ * a second adapter/segment is reached too) and take the first responder's IP
+ * into host_out. Returns 0 if a bridge was found, -1 otherwise (caller falls
+ * back to a configured/entered host). */
 int tm_net_discover(int port, char *host_out, int host_cap);
 
 #endif /* TM_NET_H */

@@ -5,8 +5,15 @@
 #include <stdlib.h>
 
 #ifdef _WIN32
+  #ifndef _WIN32_WINNT
+    #define _WIN32_WINNT 0x0601   /* GetAdaptersAddresses + OnLinkPrefixLength (Vista+) */
+  #endif
   #include <winsock2.h>
   #include <ws2tcpip.h>
+  #include <iphlpapi.h>
+  #ifdef _MSC_VER
+    #pragma comment(lib, "iphlpapi.lib")
+  #endif
   typedef SOCKET sock_t;
   #define SOCK_BAD  INVALID_SOCKET
   #define sock_close closesocket
@@ -23,6 +30,8 @@
   #include <netinet/tcp.h>
   #include <arpa/inet.h>
   #include <netdb.h>
+  #include <ifaddrs.h>
+  #include <net/if.h>
   typedef int sock_t;
   #define SOCK_BAD  (-1)
   #define sock_close close
@@ -81,12 +90,81 @@ int tm_net_connect(tm_net *n, const char *host, int port)
     return 0;
 }
 
+/* --- discovery: where to send the probe ------------------------------------ */
+#define DISCOVER_MAX_DST 17   /* the limited broadcast + up to 16 interfaces */
+
+static void add_dst(struct sockaddr_in *dst, int *n, uint32_t s_addr_be, unsigned short port_be)
+{
+    int i;
+    if (*n >= DISCOVER_MAX_DST) return;
+    for (i = 0; i < *n; i++)
+        if ((uint32_t)dst[i].sin_addr.s_addr == s_addr_be) return;   /* dedupe */
+    memset(&dst[*n], 0, sizeof(dst[*n]));
+    dst[*n].sin_family = AF_INET;
+    dst[*n].sin_port = port_be;
+    dst[*n].sin_addr.s_addr = s_addr_be;
+    (*n)++;
+}
+
+/* The limited broadcast (255.255.255.255) leaves on ONE interface - Windows
+ * picks one, Linux the default route - so a bridge on a second adapter or
+ * LAN segment was never reached (#37). Add every up, non-loopback IPv4
+ * interface's DIRECTED broadcast (ip | ~mask); a failure on one interface
+ * just skips it. */
+static void add_interface_broadcasts(struct sockaddr_in *dst, int *n, unsigned short port_be)
+{
+#ifdef _WIN32
+    ULONG size = 16 * 1024;
+    ULONG rc = (ULONG)ERROR_BUFFER_OVERFLOW;
+    IP_ADAPTER_ADDRESSES *aa = NULL;
+    int tries;
+    for (tries = 0; tries < 3 && rc == (ULONG)ERROR_BUFFER_OVERFLOW; tries++) {
+        free(aa);
+        aa = (IP_ADAPTER_ADDRESSES *)malloc(size);
+        if (!aa) return;
+        rc = GetAdaptersAddresses(AF_INET,
+                                  GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+                                  NULL, aa, &size);
+    }
+    if (rc == (ULONG)NO_ERROR) {
+        IP_ADAPTER_ADDRESSES *a;
+        for (a = aa; a; a = a->Next) {
+            IP_ADAPTER_UNICAST_ADDRESS *u;
+            if (a->OperStatus != IfOperStatusUp) continue;
+            if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+            for (u = a->FirstUnicastAddress; u; u = u->Next) {
+                uint32_t ip, mask;
+                int prefix = (int)u->OnLinkPrefixLength;
+                if (!u->Address.lpSockaddr || u->Address.lpSockaddr->sa_family != AF_INET) continue;
+                if (prefix < 1 || prefix > 30) continue;          /* /31, /32: no broadcast */
+                ip = (uint32_t)((struct sockaddr_in *)u->Address.lpSockaddr)->sin_addr.s_addr;
+                mask = (uint32_t)htonl(0xFFFFFFFFu << (32 - prefix));
+                add_dst(dst, n, ip | ~mask, port_be);
+            }
+        }
+    }
+    free(aa);
+#else
+    struct ifaddrs *ifs = NULL, *ifa;
+    if (getifaddrs(&ifs) != 0) return;
+    for (ifa = ifs; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
+        if (!(ifa->ifa_flags & IFF_UP) || !(ifa->ifa_flags & IFF_BROADCAST)) continue;
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+        if (!ifa->ifa_broadaddr) continue;
+        add_dst(dst, n, (uint32_t)((struct sockaddr_in *)ifa->ifa_broadaddr)->sin_addr.s_addr, port_be);
+    }
+    freeifaddrs(ifs);
+#endif
+}
+
 int tm_net_discover(int port, char *host_out, int host_cap)
 {
     sock_t fd;
-    struct sockaddr_in dst;
+    struct sockaddr_in dst[DISCOVER_MAX_DST];
     const char *req = "TMOSC-DISCOVER?";
-    int one = 1, attempt, got = -1;
+    int one = 1, attempt, got = -1, ndst = 0, d;
+    unsigned short port_be = htons((unsigned short)port);
 #ifdef _WIN32
     DWORD tv = 800;   /* ms */
 #else
@@ -99,10 +177,8 @@ int tm_net_discover(int port, char *host_out, int host_cap)
     setsockopt(fd, SOL_SOCKET, SO_BROADCAST, SOCKOPT_CAST &one, sizeof(one));
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, SOCKOPT_CAST &tv, sizeof(tv));
 
-    memset(&dst, 0, sizeof(dst));
-    dst.sin_family = AF_INET;
-    dst.sin_port = htons((unsigned short)port);
-    dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);   /* 255.255.255.255 */
+    add_dst(dst, &ndst, (uint32_t)htonl(INADDR_BROADCAST), port_be);   /* 255.255.255.255 */
+    add_interface_broadcasts(dst, &ndst, port_be);
 
     for (attempt = 0; attempt < 3 && got != 0; attempt++) {
         char buf[64];
@@ -113,7 +189,8 @@ int tm_net_discover(int port, char *host_out, int host_cap)
 #else
         socklen_t slen = sizeof(src);
 #endif
-        sendto(fd, req, (int)strlen(req), 0, (struct sockaddr *)&dst, sizeof(dst));
+        for (d = 0; d < ndst; d++)   /* one interface failing must not stop the rest */
+            sendto(fd, req, (int)strlen(req), 0, (struct sockaddr *)&dst[d], sizeof(dst[d]));
         for (;;) {
             slen = sizeof(src);
             n = (int)recvfrom(fd, buf, sizeof(buf) - 1, 0, (struct sockaddr *)&src, &slen);

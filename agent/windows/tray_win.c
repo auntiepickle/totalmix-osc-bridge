@@ -26,9 +26,10 @@
 #define ID_QUIT    1002
 #define ID_STARTUP 1003
 
-#define ST_OK      0   /* MIDI open + running (indigo icon) */
-#define ST_NO_MIDI 1   /* cannot open the MIDI device — busy/held elsewhere (orange icon) */
-#define ST_YIELDED 2   /* gave up claiming it; the browser's Web MIDI has it (orange icon) */
+#define ST_OK        0   /* MIDI open + running (indigo icon) */
+#define ST_NO_MIDI   1   /* cannot open the MIDI device — busy/held elsewhere (orange icon) */
+#define ST_YIELDED   2   /* gave up claiming it; the browser's Web MIDI has it (orange icon) */
+#define ST_NO_BRIDGE 3   /* discovery found nothing / the bridge dropped (orange icon) */
 
 #define OPEN_CLAIM_TRIES 10   /* ~30s of announcing ownership before standing down */
 
@@ -73,6 +74,7 @@ static char   g_https_url[192];     /* secure client (Web MIDI): Caddy/nip.io or
 static char   g_token[TM_NET_TOKEN_MAX];   /* bridge API_TOKEN (config.txt token= / TMOSC_TOKEN); never logged */
 static volatile int g_quit = 0;     /* tray shutting down: stop the worker retry loop */
 static HICON  g_ico_ok, g_ico_err;  /* preloaded small icons for the two states */
+static UINT   g_taskbar_created;    /* Explorer's "I (re)started" broadcast: re-add the icon */
 
 static void set_str(char *dst, size_t cap, const char *src)
 {
@@ -160,6 +162,14 @@ static int  win_read(void *ctx, tm_midi_msg *out, int max) { return tm_midi_win_
 static void win_wait(void *ctx, int ms) { tm_midi_win_wait((tm_midi_win *)ctx, ms); }
 static int  win_health(void *ctx) { return tm_midi_win_health((tm_midi_win *)ctx); }
 
+/* Runner -> tray: the bridge link came up / went away (called from the
+ * worker thread on change only, so the icon shows a dropped bridge instead
+ * of a stale green). */
+static void on_link(int connected)
+{
+    PostMessage(g_hwnd, WM_SETSTATUS, connected ? ST_OK : ST_NO_BRIDGE, 0);
+}
+
 static DWORD WINAPI worker(LPVOID arg)
 {
     int open_fails = 0;      /* consecutive failures to take the device */
@@ -181,7 +191,7 @@ static DWORD WINAPI worker(LPVOID arg)
                 set_str(g_host, sizeof(g_host), found);
                 snprintf(g_url, sizeof(g_url), "http://%s:%d", g_host, g_port);
             } else {
-                PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_MIDI, 0);
+                PostMessage(g_hwnd, WM_SETSTATUS, ST_NO_BRIDGE, 0);
                 for (i = 0; i < 30 && !g_quit; i++) Sleep(100);   /* ~3s, then re-scan */
                 continue;
             }
@@ -254,6 +264,10 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             else if (wp == ST_YIELDED)
                 snprintf(g_nid.szTip, sizeof(g_nid.szTip),
                          "TotalMix OSC Agent - MIDI device held by another app; the browser tab has MIDI");
+            else if (wp == ST_NO_BRIDGE)
+                snprintf(g_nid.szTip, sizeof(g_nid.szTip),
+                         "TotalMix OSC Agent - bridge not found (%s) - check host= in config.txt; retrying",
+                         g_host[0] ? g_url : "LAN discovery");
             else
                 snprintf(g_nid.szTip, sizeof(g_nid.szTip),
                          "TotalMix OSC Agent - running - %s", g_url);
@@ -272,6 +286,17 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             Shell_NotifyIconA(NIM_DELETE, &g_nid);
             PostQuitMessage(0);
             return 0;
+        default:
+            /* Explorer crashed or restarted: every tray icon is gone. The
+             * shell broadcasts TaskbarCreated to top-level windows (never to
+             * message-only ones - the old HWND_MESSAGE window sat deaf, so the
+             * agent kept running with no icon and no Quit). Re-add with the
+             * current state's icon and tip. */
+            if (g_taskbar_created && msg == g_taskbar_created) {
+                Shell_NotifyIconA(NIM_ADD, &g_nid);
+                return 0;
+            }
+            break;
     }
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
@@ -294,8 +319,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdline, int show)
     wc.lpszClassName = "TmoscAgentTray";
     wc.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_TRAY));
     RegisterClassA(&wc);
-    g_hwnd = CreateWindowA("TmoscAgentTray", "TotalMix OSC Agent", 0,
-                           0, 0, 0, 0, HWND_MESSAGE, NULL, hInst, NULL);
+    g_taskbar_created = RegisterWindowMessageA("TaskbarCreated");
+    /* a hidden TOP-LEVEL window (never shown): it receives the shell's
+     * TaskbarCreated broadcast, which a message-only window does not */
+    g_hwnd = CreateWindowA("TmoscAgentTray", "TotalMix OSC Agent", WS_OVERLAPPED,
+                           0, 0, 0, 0, NULL, NULL, hInst, NULL);
 
     memset(&g_nid, 0, sizeof(g_nid));
     g_nid.cbSize = sizeof(g_nid);
@@ -314,6 +342,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdline, int show)
     snprintf(g_nid.szTip, sizeof(g_nid.szTip), "TotalMix OSC Agent - %s", g_url);
     Shell_NotifyIconA(NIM_ADD, &g_nid);
 
+    tm_runner_set_link_callback(on_link);
     g_thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
 
     while (GetMessage(&msg, NULL, 0, 0) > 0) {

@@ -70,12 +70,12 @@ if(WIN32)
 
   add_executable(tmosc-agent windows/main_win.c windows/midi_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
   target_include_directories(tmosc-agent PRIVATE ${TMOSC_SHARED_INC} windows)
-  target_link_libraries(tmosc-agent PRIVATE tmosc_core winmm ws2_32)
+  target_link_libraries(tmosc-agent PRIVATE tmosc_core winmm ws2_32 iphlpapi)   # iphlpapi: per-interface discovery
   install(TARGETS tmosc-agent RUNTIME DESTINATION bin)
 
   # WIN32 = GUI subsystem (WinMain, no console window)
   add_executable(tmosc-agent-tray WIN32 windows/tray_win.c windows/midi_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
   target_include_directories(tmosc-agent-tray PRIVATE ${TMOSC_SHARED_INC} windows)
-  target_link_libraries(tmosc-agent-tray PRIVATE tmosc_core winmm ws2_32 shell32 user32 advapi32)
+  target_link_libraries(tmosc-agent-tray PRIVATE tmosc_core winmm ws2_32 iphlpapi shell32 user32 advapi32)
   install(TARGETS tmosc-agent-tray RUNTIME DESTINATION bin)
 endif()

@@ -37,6 +37,12 @@ int tm_runner_dryrun(const char *host, int port);
 /* Ask the runner loop to stop (signal handler / tray Quit). */
 void tm_runner_stop(void);
 
+/* Optional: called from the runner's thread whenever the bridge link changes
+ * (1 = connected + bindings loaded, 0 = connect failed / dropped). Fires on
+ * change only. NULL (default) = no callback. A tray uses it to show a
+ * "bridge not found" state instead of a stale green icon. */
+void tm_runner_set_link_callback(void (*cb)(int connected));
+
 /* One-shot: connect and POST a single MIDI-ownership heartbeat, then close.
  * Used while the MIDI device is busy/unavailable so the bridge still sees the
  * agent present and a browser yields Web MIDI (closing the port), letting the
