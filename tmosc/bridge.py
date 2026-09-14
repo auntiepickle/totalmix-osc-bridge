@@ -3,10 +3,8 @@ import time
 import logging
 import logging.handlers
 import json
-import tempfile
 import threading
 import paho.mqtt.client as mqtt
-import re
 import asyncio
 # Tests monkeypatch OSC_TRANSPORT / ENABLE_MQTT / ENABLE_OSC_MONITOR on THIS
 # module; the methods that read them (_global_active, start_*) must therefore
@@ -17,15 +15,12 @@ from tmosc.config import (
     OSC_TRANSPORT, GLOBAL_OSC_IP, GLOBAL_OSC_PORT, GLOBAL_OSC_LISTEN_PORT,
     ENABLE_GLOBAL_OSC_LISTENER, GLOBAL_HEARTBEAT_TIMEOUT_S,
     BRIDGE_LOG_FILE, LOG_MAX_BYTES, LOG_BACKUP_COUNT,
-    snapshot_num_to_osc_index,
 )
 import tmosc.app_paths as app_paths
 from tmosc.osc import get_client
 from tmosc.mqtt_handler import setup_mqtt
 from tmosc.osc_monitor import osc_monitor
-from tmosc.operations import OperationRegistry, shape_value, unshape_value
 import tmosc.physical_table as pt
-import tmosc.global_units as gu
 from tmosc.core.broadcast import BroadcastMixin
 from tmosc.core.switching import SwitchingMixin
 from tmosc.core.macros import MacrosMixin
