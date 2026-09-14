@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 — 2026-09-14 · Server package split (#27 phases 3-5), tray robustness, WS send queues
 
 - **api/app.py split into routers + app factory (#27 phase 4, server half)**:
   the 1,100-line `tmosc/api/app.py` is now a 100-line `create_app()` +
