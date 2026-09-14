@@ -5,18 +5,18 @@ import shutil
 import datetime
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 import json
 import threading
 import logging
 import asyncio
 
-from tmosc.bridge import bridge, ws_attach, ws_detach
-import tmosc.physical_table as pt
+from tmosc.bridge import bridge
 import tmosc.app_paths as app_paths
+from tmosc.api.auth import API_TOKEN, _auth_gate   # noqa: F401 - API_TOKEN re-exported: tests read it here
+from tmosc.api.routes import health, midi, device, ws
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TotalMix OSC Bridge Web Client")
@@ -51,23 +51,9 @@ def _atomic_write_json(target, data):
         raise
 
 
-# Opt-in shared-token auth (critical-review S2). OFF by default: when the
-# API_TOKEN env var is unset, this is a pure pass-through and nothing changes.
-# When set, every state-changing request (POST/PUT/PATCH/DELETE) and the /ws
-# socket must carry it (X-Api-Token header or ?token=). GETs - the UI and
-# reads - stay open; the ear-safety risk is the writes. See docs/security.md.
-API_TOKEN = os.environ.get("API_TOKEN", "").strip()
-_AUTH_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-
-
-@app.middleware("http")
-async def _auth_gate(request: Request, call_next):
-    if API_TOKEN and request.method in _AUTH_METHODS:
-        supplied = (request.headers.get("x-api-token")
-                    or request.query_params.get("token"))
-        if supplied != API_TOKEN:
-            return JSONResponse({"detail": "unauthorized"}, status_code=401)
-    return await call_next(request)
+# Register the opt-in token gate FIRST, the no-cache header second: Starlette
+# wraps middleware in reverse order of registration (last added = outermost).
+app.middleware("http")(_auth_gate)
 
 
 @app.middleware("http")
@@ -81,15 +67,8 @@ async def static_no_cache(request: Request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
-
-@app.get("/")
-async def root():
-    return RedirectResponse(url="/static/index.html")
-
-
-@app.get("/index.html")
-async def index_fallback():
-    return RedirectResponse(url="/static/index.html")
+for _r in (health.router, midi.router, device.router, ws.router):
+    app.include_router(_r)
 
 
 # ── Macro Cards API ──────────────────────────────────────────────────────────
@@ -167,120 +146,6 @@ async def switch_workspace(body: SwitchBody):
         daemon=True,
     ).start()
     return {"status": "accepted", "workspace": body.workspace, "snapshot": body.snapshot}
-
-
-@app.get("/api/health")
-async def get_health():
-    """Return connection health for MQTT and OSC, plus the current MIDI owner
-    (an external tray/agent holding the port) so the browser can yield/reclaim
-    Web MIDI. Polled by the header — keep it light."""
-    return {
-        "mqtt_connected": getattr(bridge, "mqtt_connected", False),
-        "osc_configured": bridge.osc_client is not None,
-        "midi_owner": bridge.midi_owner_state(),
-    }
-
-
-class MidiOwnerBody(BaseModel):
-    id: str
-    host: Optional[str] = None
-
-
-@app.post("/api/midi/owner/heartbeat")
-async def midi_owner_heartbeat(body: MidiOwnerBody):
-    """A tray/agent announces (every couple seconds) that it is handling MIDI.
-    Refreshes presence; browsers yield Web MIDI while an agent owns the port."""
-    return {"owner": bridge.midi_owner_heartbeat(body.id, body.host)}
-
-
-@app.post("/api/midi/owner/release")
-async def midi_owner_release(body: MidiOwnerBody):
-    """A tray/agent cleanly releases the MIDI port (on shutdown) so browsers
-    reclaim it immediately instead of waiting for the heartbeat to expire."""
-    return {"released": bridge.midi_owner_release(body.id)}
-
-
-@app.post("/api/midi/activity")
-async def midi_activity(body: dict):
-    """A tray/agent relays each raw MIDI message it reads (throttled) so a
-    browser that has yielded the port can still run MIDI-learn and show live
-    activity. Pure fan-out: broadcast to WS clients, store nothing. The browser
-    uses this for monitor + learn ONLY — it never fires macros from it (the
-    agent already did), so there's no double-trigger."""
-    m = body.get("m")
-    if (isinstance(m, (list, tuple)) and 1 <= len(m) <= 3
-            and all(isinstance(x, int) for x in m)):
-        await bridge._do_broadcast_event(
-            {"type": "midi_activity", "m": list(m), "src": "agent"})
-    return {"ok": True}
-
-
-@app.get("/api/status")
-async def get_status():
-    """Return currently-loaded config summary for the gear menu."""
-    channel_map = bridge.channel_map or {}
-    snap_map = bridge.snapshot_map or {}
-    listener = bridge.osc_listener
-    listening = listener is not None and listener.running
-    bank_width = listener.state.bank_width if listening else None
-    live_strips = listener.state.real_strip_count if listening else None
-    # Highest channel the map expects — if the live bank is narrower, part
-    # of the rig is invisible to routing (per-workspace TotalMix setting)
-    map_max_channel = max(
-        (s.get("channel", 0)
-         for sub in channel_map.get("submixes", {}).values()
-         for s in sub.get("sends", {}).values()),
-        default=0,
-    )
-    # How many INPUT-row channels the map knows per submix — compared against
-    # live_strip_count, which only ever reflects the currently selected row
-    # (input in practice). Counting playback sends here masked a real stale
-    # map once: 17 live vs '39 total' stayed silent while 16 mapped input
-    # channels didn't exist on the device.
-    map_strip_count = max(
-        (sum(1 for s in sub.get("sends", {}).values() if s.get("row", 1) == 1)
-         for sub in channel_map.get("submixes", {}).values()),
-        default=0,
-    )
-    # NOTE (2026-08-20 architecture review): input strip counts change with
-    # EVERY snapshot (pairing is per-snapshot) — that is normal operation,
-    # not drift. An earlier version auto-walked here and made snapshot
-    # switches trigger 90s walks in a loop. Strip counts are reported for
-    # telemetry only; nothing acts on them.
-    return {
-        "osc_bank_width": bank_width,
-        "live_strip_count": live_strips,
-        "channel_map_max_channel": map_max_channel,
-        "channel_map_strip_count": map_strip_count,
-        # workspace/snapshot below are the bridge's commanded belief;
-        # state_confirmed says whether the device confirmed the last switch
-        "state_confirmed": getattr(bridge, "state_confirmed", None),
-        # #30: what the device reports about snapshots (Global feed); the
-        # workspace is never reported, so it stays belief
-        "device_snapshot_slot": getattr(bridge, "device_snapshot_slot", None),
-        "snapshot_modified": getattr(bridge, "snapshot_modified", None),
-        # Live-vs-map drift (output side): False drives the UI banner
-        # #24: no drift concept — per-write confirmations carry correctness.
-        # The physical table summary + sweep status are the honest surface.
-        "physical_table": pt.summarize(
-            (bridge.channel_map or {}).get("physical_table") or {}),
-        "sweep_status": bridge.sweep_state.get("status"),
-        "device_probe": getattr(bridge, "last_probe", None),
-        "macros": len(bridge.mappings.get("macros", {})),
-        "channel_map_submixes": len(channel_map.get("submixes", {})),
-        "snapshot_map_workspaces": len(snap_map),
-        "workspace": bridge.current_workspace,
-        "snapshot": bridge.current_snapshot,
-        "mappings_is_example": bridge.mappings_is_example,
-        "mappings_source": bridge.mappings_source,
-        "channel_map_is_example": getattr(bridge, "channel_map_is_example", False),
-    }
-
-
-@app.get("/api/snapshot_map")
-async def get_snapshot_map():
-    """Return the loaded snapshot map (for client-side WS/SS validation)."""
-    return bridge.snapshot_map or {}
 
 
 # ── Live Config Editor ────────────────────────────────────────────────────────
@@ -476,33 +341,6 @@ def get_duck():
             "duck": {k: dict(v) for k, v in dict(d.status if d else {}).items()}}
 
 
-@app.get("/api/midi/bindings", response_class=PlainTextResponse)
-def get_midi_bindings():
-    """MIDI trigger table as TSV, for the native background agent (and a
-    future microcontroller) to read without a JSON parser. One line per
-    trigger, tab-separated:
-
-        name  is_knob  type  number  note  channel  use_value_as_param
-
-    number/note are -1 when not applicable. Read-only; the agent matches
-    incoming MIDI against this and drives /ws (knob) or /api/trigger (fire),
-    exactly as the browser does."""
-    lines = []
-    for name, m in list(bridge.mappings.get("macros", {}).items()):   # snapshot: other threads resize it
-        is_knob = 1 if bridge._knob_step(m) else 0
-        for t in (m.get("midi_triggers") or []):
-            typ = str(t.get("type", "control_change"))
-            number = t.get("number", -1)
-            note = t.get("note", -1)
-            channel = t.get("channel", 1)
-            uvap = 1 if t.get("use_value_as_param") else 0
-            number = -1 if number is None else number
-            note = -1 if note is None else note
-            # name is MACRO_NAME_RE-constrained ([A-Za-z0-9_-]) so no tabs/newlines
-            lines.append(f"{name}\t{is_knob}\t{typ}\t{number}\t{note}\t{channel}\t{uvap}")
-    return "\n".join(lines) + ("\n" if lines else "")
-
-
 @app.post("/api/config/macros-order")
 async def reorder_macros(request: Request):
     """Persist a new macro ordering (drag-to-reorder in the rack UI).
@@ -618,106 +456,6 @@ async def save_config_snapshot_map(request: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ── Device Capture + Discovery ───────────────────────────────────────────────
-
-@app.get("/api/device/state")
-async def get_device_state():
-    """Live TotalMix state captured from OSC feedback (submixes, channels,
-    raw address dump). Requires the OSC listener and TotalMix's OSC
-    'Port outgoing' pointed at this server."""
-    if bridge.osc_listener is None or not bridge.osc_listener.running:
-        raise HTTPException(status_code=503, detail="OSC listener not running")
-    return bridge.osc_listener.state.to_dict()
-
-
-
-class SweepBody(BaseModel):
-    rows: list = ["inputs", "outputs"]
-    settle_s: float = 0.3
-    reset: bool = False
-
-
-@app.post("/api/device/sweep")
-async def start_sweep(body: SweepBody = SweepBody()):
-    """Measure the physical hardware-channel table (#24): /setBankStart
-    0..33 + row-mirror nudge + /2/trackname read per offset, both rows.
-    Read-only w.r.t. mixer state; never sends /setSubmix. Replaces the
-    discovery walk as the learning mechanism."""
-    if bridge.osc_client is None:
-        raise HTTPException(status_code=503, detail="OSC client not configured")
-    if bridge.osc_listener is None or not bridge.osc_listener.running:
-        raise HTTPException(status_code=503, detail="OSC listener not running")
-    if bridge.sweep_state.get("status") == "running":
-        raise HTTPException(status_code=409, detail="Sweep already running")
-    # Claim the state HERE (event-loop thread), not in the worker: two quick
-    # POSTs both passed the check above and started two sweeps (review finding).
-    bridge.sweep_state = {"status": "running", "progress": 0, "total": 0,
-                          "rows": list(body.rows)}
-    threading.Thread(
-        target=bridge.run_sweep,
-        kwargs={"rows": tuple(body.rows), "settle_s": body.settle_s,
-                "reset": body.reset},
-        daemon=True,
-    ).start()
-    return {"status": "started", "rows": body.rows,
-            "estimated_s": round(len(body.rows) * 34 * (body.settle_s + 0.2), 1)}
-
-
-@app.get("/api/device/sweep")
-async def get_sweep_status():
-    return bridge.sweep_state
-
-
-@app.get("/api/device/physical_table")
-async def get_physical_table():
-    table = (bridge.channel_map or {}).get("physical_table")
-    if not table:
-        raise HTTPException(status_code=404,
-                            detail="No physical table — run POST /api/device/sweep")
-    return table
-
-
-@app.get("/api/device/global")
-def get_global_osc_status(probe: bool = False):
-    # sync endpoint on purpose: alive() may block ~2s on a /sendstate
-    # probe — FastAPI runs sync handlers in the threadpool.
-    # #22: probe defaults OFF so the header can poll this cheaply — the
-    # light path reports heartbeat age only; pass ?probe=true for the
-    # active /sendstate check (what the deploy verifications used).
-    """Global OSC (#25) transport/listener status: which transport writes,
-    heartbeat liveness, and what the Global listener has learned."""
-    import tmosc.config as cfg
-    out = {
-        "transport": cfg.OSC_TRANSPORT,
-        "listener_enabled": cfg.ENABLE_GLOBAL_OSC_LISTENER,
-        "running": bridge.global_listener is not None,
-    }
-    if bridge.global_listener:
-        st = bridge.global_listener.state
-        out.update({
-            "listen_port": bridge.global_listener.port,
-            "heartbeat_age_s": st.heartbeat_age(),
-            "status": dict(st.status),
-            "message_count": st.message_count,
-            "names": {row: st.channel_names(row)
-                      for row in ("inputs", "playbacks", "outputs")},
-            "snapshots": {str(k): v for k, v in dict(st.snapshots).items()},
-        })
-    if bridge.global_transport:
-        if probe:
-            out["alive"] = bridge.global_transport.alive()
-        else:
-            age = bridge.global_listener.state.heartbeat_age() \
-                if bridge.global_listener else None
-            out["alive"] = {
-                "alive": age is not None
-                    and age < bridge.global_transport.heartbeat_timeout_s,
-                "method": "heartbeat_age",
-                "age_s": round(age, 3) if age is not None else None,
-            }
-    return out
-
-
 @app.post("/api/knob/{name}")
 def set_knob(name: str, body: dict):
     """HTTP fallback for the WebSocket knob stream (and for scripts/HA):
@@ -752,175 +490,6 @@ def set_knob_param(name: str, body: dict):
     if r["status"] != "resolved":
         raise HTTPException(status_code=409, detail=r["status"])
     return r
-
-
-@app.get("/api/device/activity")
-def get_device_activity(since: float = 0.0):
-    """Channel identify, world→screen half (#8): per-channel VALUE-CHANGE
-    activity from Global OSC feedback since a timestamp. Own bridge writes
-    never echo and dumps re-reporting unchanged values don't register, so
-    entries are (almost always) a human touching the device — the UI's
-    wiggle-to-learn polls this while armed."""
-    if bridge.global_listener is None:
-        raise HTTPException(status_code=503,
-                            detail="Global OSC listener not running")
-    st = bridge.global_listener.state
-    channels = st.recent_changes(since)
-    for e in channels:
-        names = st.channel_names(e["row_key"])
-        name = names.get(e["hw"])
-        if name is None and st.stereo.get(e["row_key"], {}).get(e["hw"] - 1):
-            # right member of a linked pair — the name lives at the left
-            name = names.get(e["hw"] - 1)
-        e["name"] = name
-    import time as _time
-    return {"now": _time.time(), "channels": channels,
-            "name_ver": getattr(st, "name_change_count", 0)}
-
-
-@app.post("/api/device/pulse")
-def pulse_channel(body: dict):
-    """Channel identify, screen→world half (#8): briefly blip the selected
-    send so the user can hear/see which physical channel it is. Two short
-    bumps (current+6 dB, floor -30 dB when the send is off), restored to
-    the exact prior level. Global transport only."""
-    import time as _time
-    import tmosc.global_units as gu
-    if not bridge._global_active():
-        raise HTTPException(status_code=409,
-                            detail="pulse needs the Global OSC transport")
-    target = {"channel": body.get("channel", ""),
-              "submix": body.get("submix", ""),
-              "row": body.get("row", 1),
-              "param": "volume"}
-    writer, label, status = bridge.global_transport.resolve_step(target)
-    if status != "resolved":
-        raise HTTPException(status_code=422, detail=f"{label}: {status}")
-    # Current level in dB from live state; if unknown, provoke a targeted
-    # re-dump and wait. NEVER guess: restoring a guessed level could mute a
-    # live output — refuse instead.
-    st = bridge.global_listener.state
-    tx = bridge.global_transport._client
-
-    def _read_cur():
-        if writer.address.startswith("/mix/"):
-            _, _, src, in_hw, out_hw, _ = writer.address.split("/")
-            e = st.get_mix(src, int(in_hw), int(out_hw), "fader")
-        else:  # /output/{n}/faderlin — row-3 output fader
-            n = writer.address.split("/")[2]
-            e = st.get_param("outputs", int(n), "fader")
-        return e[0] if e else None
-
-    cur_db = _read_cur()
-    if cur_db is None:
-        if writer.address.startswith("/mix/"):
-            tx.send_message("/sendmix", 1.0)
-        else:
-            tx.send_message(f"/sendchan/output/{writer.address.split('/')[2]}", 1.0)
-        bridge.global_listener.wait_for(lambda s: _read_cur() is not None, 8.0)
-        cur_db = _read_cur()
-    if cur_db is None:
-        raise HTTPException(status_code=422,
-                            detail="current level unknown even after a "
-                                   "re-dump — refusing to pulse blind")
-    cur_lin = gu.fader_lin(cur_db)
-    pulse_lin = gu.fader_lin(max(cur_db + 6.0, -30.0))
-    for lin, hold in ((pulse_lin, 0.18), (cur_lin, 0.12),
-                      (pulse_lin, 0.18), (cur_lin, 0.0)):
-        writer.send_message("pulse", lin)
-        if hold:
-            _time.sleep(hold)
-    return {"pulsed": getattr(writer, "address", label),
-            "restored_db": round(cur_db, 2)}
-
-
-@app.post("/api/device/probe")
-def probe_device():
-    """Liveness probe (kept through #24 — TASK 6 deviation fix): a state-
-    changing row toggle that must produce a dump. The only sound aliveness
-    check; silence from an idle mixer is not evidence."""
-    result = bridge.probe_device()
-    bridge.last_probe = result
-    return result
-
-
-@app.get("/api/device/picker")
-def get_picker():
-    """Routing-picker inventory (#6/#24): LIVE names preferred — inputs
-    from the listener's cached current bank (zero device traffic),
-    outputs from a fresh row-3 enumeration (~0.2s, cached) — each mapped
-    to its hw start via the physical table. Falls back to the table's
-    alias lists when the listener is blind (source: 'table')."""
-    table = (bridge.channel_map or {}).get("physical_table") or {}
-    listener = bridge.osc_listener
-    result = {"inputs": [], "outputs": [], "source": {}}
-
-    live_outs = None
-    if bridge.osc_client is not None and listener is not None and listener.running:
-        live_outs = bridge._live_output_names()
-    if live_outs:
-        def _okey(n):
-            hw = pt.resolve_start(table, "outputs", n)
-            return (hw if hw is not None else 999, n)
-        result["outputs"] = [
-            {"hw": pt.resolve_start(table, "outputs", n), "name": n}
-            for n in sorted(live_outs, key=_okey)]
-        result["source"]["outputs"] = "live"
-    else:
-        result["outputs"] = [{"hw": e["hw"], "name": e["name"]}
-                             for e in pt.display_names(table, "outputs")]
-        result["source"]["outputs"] = "table"
-
-    # TASK-8 finding: the listener's cached bank can be the OUTGOING
-    # snapshot's input row right after a switch — serving it as 'live'
-    # made the picker lie. Provoke a fresh, settled dump instead (~0.4s,
-    # 2s-cached), exactly like resolution does.
-    live_ins = None
-    if bridge.osc_client is not None and listener is not None and listener.running:
-        live_ins = bridge._live_input_names()
-    if live_ins:
-        result["inputs"] = [
-            {"hw": pt.resolve_start(table, "inputs", n), "name": n}
-            for n in live_ins]
-        result["source"]["inputs"] = "live"
-    else:
-        result["inputs"] = [{"hw": e["hw"], "name": e["name"]}
-                            for e in pt.display_names(table, "inputs")]
-        result["source"]["inputs"] = "table"
-    return result
-
-
-
-
-# ── WebSocket ────────────────────────────────────────────────────────────────
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    if API_TOKEN and websocket.query_params.get("token") != API_TOKEN:
-        await websocket.close(code=1008)
-        return
-    await websocket.accept()
-    sender = ws_attach(websocket)    # per-client send queue + sender task (#32)
-    try:
-        while True:
-            raw = await websocket.receive_text()
-            # KNOB stream (continuous MIDI control): {"type":"knob","name","value"}
-            # rides the existing socket - no HTTP round-trip per tick. Off the
-            # event loop: knob_set does a UDP write + a feedback read.
-            try:
-                msg = json.loads(raw)
-            except (ValueError, TypeError):
-                continue
-            if isinstance(msg, dict) and msg.get("type") == "knob":
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(
-                    None, bridge.knob_set, str(msg.get("name", "")),
-                    msg.get("value", 0.0), "midi")
-    except WebSocketDisconnect:
-        pass
-    finally:
-        sender.cancel()
-        ws_detach(websocket)
 
 
 # ── File Upload + Auto-Backup ────────────────────────────────────────────────

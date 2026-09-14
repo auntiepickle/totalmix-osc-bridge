@@ -271,8 +271,8 @@ def test_auth_off_by_default_allows_writes():
 
 
 def test_auth_blocks_unauthenticated_write_when_set(monkeypatch):
-    import tmosc.api.app as wc
-    monkeypatch.setattr(wc, "API_TOKEN", "s3cret")
+    import tmosc.api.auth as auth        # patched where the gate looks it up
+    monkeypatch.setattr(auth, "API_TOKEN", "s3cret")
     # a mutating request WITHOUT the token is refused before the handler
     r = client.post("/api/trigger/whatever")
     assert r.status_code == 401
