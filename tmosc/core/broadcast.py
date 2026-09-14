@@ -36,6 +36,7 @@ class BroadcastMixin:
             "state_confirmed": getattr(self, "state_confirmed", None),
             "device_snapshot_slot": getattr(self, "device_snapshot_slot", None),
             "snapshot_modified": getattr(self, "snapshot_modified", None),
+            "workspace_report": self.workspace_report_state(),
             "macro_update": macro_update,
             "macro_event": macro_event,
         })
@@ -59,10 +60,12 @@ class BroadcastMixin:
                 return None
             return {"id": o["id"], "host": o.get("host"), "age_s": round(age, 2)}
 
-    def midi_owner_heartbeat(self, owner_id, host=None):
+    def midi_owner_heartbeat(self, owner_id, host=None, title=None):
         """An agent announces it is handling MIDI. Refreshes presence; on a
         NEW claim (none/expired -> owned, or a different owner) broadcasts a
-        midi_owner event so browsers yield promptly."""
+        midi_owner event so browsers yield promptly. `title` (#30) is the
+        TotalMix main-window title as the agent sees it on that machine ("" =
+        no TotalMix window there); None = an agent that does not report it."""
         now = time.time()
         with self._midi_owner_lock:
             prev = self._midi_owner
@@ -71,6 +74,8 @@ class BroadcastMixin:
             self._midi_owner = {"id": owner_id, "host": host, "last_seen": now}
         if new_claim:
             self.broadcast_midi_owner(self.midi_owner_state())
+        if title is not None:
+            self.report_workspace(title, source=host or owner_id)
         return self.midi_owner_state()
 
     def midi_owner_release(self, owner_id):

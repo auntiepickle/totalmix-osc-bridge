@@ -213,6 +213,7 @@ class TotalMixOSCBridge(BroadcastMixin, SwitchingMixin, MacrosMixin, KnobsMixin,
         # a reason to skip a commanded switch (the workspace is unobservable).
         self.device_snapshot_slot = None
         self.snapshot_modified = None
+        self.workspace_report = None        # #30: workspace from the TotalMix title, via the agent heartbeat
         self.last_probe = None              # result of the last device liveness probe
         self._midi_owner = None             # {"id","host","last_seen"} — external agent (tray) holding the MIDI port
         self._midi_owner_lock = threading.Lock()  # coexistence: browser yields Web MIDI while an agent owns it

@@ -74,6 +74,9 @@ async def get_status(bridge: Bridge):
         # workspace is never reported, so it stays belief
         "device_snapshot_slot": getattr(bridge, "device_snapshot_slot", None),
         "snapshot_modified": getattr(bridge, "snapshot_modified", None),
+        # #30: the workspace as TotalMix shows it, reported by the agent on
+        # that machine (None without such an agent)
+        "workspace_report": bridge.workspace_report_state(),
         # Live-vs-map drift (output side): False drives the UI banner
         # #24: no drift concept — per-write confirmations carry correctness.
         # The physical table summary + sweep status are the honest surface.

@@ -30,6 +30,14 @@ int tm_proto_trigger_path(char *buf, int buflen, const char *name);
 /* {"param":<v>} or {"param":<v>,"clock_bpm":<bpm>} (bpm included only if >0). */
 int tm_proto_trigger_body(char *buf, int buflen, float param, int clock_bpm);
 
+/* --- MIDI-owner heartbeat (POST /api/midi/owner/heartbeat) --- */
+/* {"id":"<id>","host":"<host>"} plus ,"title":"<title>" when title is not
+ * NULL - the TotalMix main-window title on this machine, which the bridge
+ * parses for the loaded workspace (#30). "" means no TotalMix window here;
+ * NULL means this build does not report titles. Escaped like the others. */
+int tm_proto_owner_body(char *buf, int buflen, const char *id, const char *host,
+                        const char *title);
+
 #ifdef __cplusplus
 }
 #endif

@@ -8,11 +8,18 @@ page replaces are archived in
 
 ## TotalMix OSC protocol
 
-- **The active workspace is not reported over OSC.** The bridge only knows
-  the workspace it last switched to itself (or absorbed from a retained MQTT
-  message). A workspace changed inside TotalMix stays invisible until the
-  next bridge-side switch. The header renders an unconfirmed workspace dashed
-  and dimmed; picking one there switches TotalMix and re-syncs. (#30)
+- **The active workspace is not reported over OSC.** Nothing on disk
+  tracks it live either (`LastPresetSel` in TotalMix's preferences is written
+  on save only). The one live source is TotalMix's own window title, which
+  names the Quick Select workspace (or shows the `.tmws` path of a file
+  workspace), so the tray agent on the TotalMix machine sends that title with
+  its heartbeat and the bridge adopts the workspace from it. Without such an
+  agent the bridge only knows the workspace it last switched to itself (or
+  absorbed from a retained MQTT message), and the header renders that belief
+  dashed and dimmed; picking one there switches TotalMix and re-syncs. A
+  reported workspace the snapshot map does not know (a slot renamed since
+  the map was scraped, or a file workspace) is shown by name with snapshot
+  names unavailable. (#30)
 - **Snapshot feedback is a slot number, not a name.** The Global feed reports
   which Quick Select slot is active and whether it was edited since; the name
   comes from `ufx2_snapshot_map.json` for the believed workspace. A stale map

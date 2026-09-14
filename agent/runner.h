@@ -43,6 +43,14 @@ void tm_runner_stop(void);
  * "bridge not found" state instead of a stale green icon. */
 void tm_runner_set_link_callback(void (*cb)(int connected));
 
+/* Optional: provider of the TotalMix main-window title on this machine
+ * (the Windows console + tray set it; a daemon on a box without TotalMix
+ * leaves it NULL). Called before every heartbeat: write the UTF-8 title into
+ * buf (cap bytes, NUL-terminated) and return its length, 0 when no TotalMix
+ * window exists. The heartbeat then carries "title" and the bridge adopts
+ * the workspace TotalMix shows (#30). NULL (default) = field not sent. */
+void tm_runner_set_title_provider(int (*cb)(char *buf, int cap));
+
 /* One-shot: connect and POST a single MIDI-ownership heartbeat, then close.
  * Used while the MIDI device is busy/unavailable so the bridge still sees the
  * agent present and a browser yields Web MIDI (closing the port), letting the

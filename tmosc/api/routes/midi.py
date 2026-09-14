@@ -14,13 +14,16 @@ router = APIRouter(tags=["midi"])
 class MidiOwnerBody(BaseModel):
     id: str
     host: Optional[str] = None
+    title: Optional[str] = None   # #30: TotalMix main-window title on the agent's machine ("" = none)
 
 
 @router.post("/api/midi/owner/heartbeat")
 async def midi_owner_heartbeat(body: MidiOwnerBody, bridge: Bridge):
     """A tray/agent announces (every couple seconds) that it is handling MIDI.
-    Refreshes presence; browsers yield Web MIDI while an agent owns the port."""
-    return {"owner": bridge.midi_owner_heartbeat(body.id, body.host)}
+    Refreshes presence; browsers yield Web MIDI while an agent owns the port.
+    With `title` the bridge also adopts the workspace TotalMix shows (#30)."""
+    return {"owner": bridge.midi_owner_heartbeat(body.id, body.host, title=body.title),
+            "workspace_report": bridge.workspace_report_state()}
 
 
 @router.post("/api/midi/owner/release")

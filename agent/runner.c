@@ -207,11 +207,24 @@ static void init_agent_id(void)
     snprintf(g_agent_id, sizeof(g_agent_id), "%s-tmosc-agent", host);
 }
 
+static int (*g_title_cb)(char *buf, int cap) = NULL;
+
+void tm_runner_set_title_provider(int (*cb)(char *buf, int cap))
+{
+    g_title_cb = cb;
+}
+
 static int post_owner(tm_net *net, const char *path)
 {
-    char body[192], resp[256];
+    char body[1024], resp[256], title[512];
+    const char *t = NULL;
     int rlen, status = 0, rc;
-    snprintf(body, sizeof(body), "{\"id\":\"%s\",\"host\":\"%s\"}", g_agent_id, g_agent_host);
+    if (g_title_cb) {                       /* "" = TotalMix not running here (#30) */
+        if (g_title_cb(title, (int)sizeof(title)) <= 0) title[0] = '\0';
+        t = title;
+    }
+    if (tm_proto_owner_body(body, (int)sizeof(body), g_agent_id, g_agent_host, t) < 0)
+        tm_proto_owner_body(body, (int)sizeof(body), g_agent_id, g_agent_host, NULL);
     rc = tm_net_request(net, "POST", path, body, resp, sizeof(resp), &rlen, &status);
     if (rc == 0) note_status(path, status);
     if (g_verbose && rc == 0 && status != 200)

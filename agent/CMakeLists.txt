@@ -68,13 +68,13 @@ endif()
 if(WIN32)
   enable_language(RC)   # compile windows/tray.rc -> embeds tray.ico as the app/tray icon
 
-  add_executable(tmosc-agent windows/main_win.c windows/midi_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
+  add_executable(tmosc-agent windows/main_win.c windows/midi_win.c windows/totalmix_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
   target_include_directories(tmosc-agent PRIVATE ${TMOSC_SHARED_INC} windows)
-  target_link_libraries(tmosc-agent PRIVATE tmosc_core winmm ws2_32 iphlpapi)   # iphlpapi: per-interface discovery
+  target_link_libraries(tmosc-agent PRIVATE tmosc_core winmm ws2_32 iphlpapi user32)   # iphlpapi: per-interface discovery; user32: TotalMix title
   install(TARGETS tmosc-agent RUNTIME DESTINATION bin)
 
   # WIN32 = GUI subsystem (WinMain, no console window)
-  add_executable(tmosc-agent-tray WIN32 windows/tray_win.c windows/midi_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
+  add_executable(tmosc-agent-tray WIN32 windows/tray_win.c windows/midi_win.c windows/totalmix_win.c windows/tray.rc ${TMOSC_SHARED_SRC})
   target_include_directories(tmosc-agent-tray PRIVATE ${TMOSC_SHARED_INC} windows)
   target_link_libraries(tmosc-agent-tray PRIVATE tmosc_core winmm ws2_32 iphlpapi shell32 user32 advapi32)
   install(TARGETS tmosc-agent-tray RUNTIME DESTINATION bin)

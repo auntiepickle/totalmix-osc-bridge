@@ -137,6 +137,26 @@ int tm_proto_trigger_path(char *buf, int buflen, const char *name)
     return n;
 }
 
+int tm_proto_owner_body(char *buf, int buflen, const char *id, const char *host,
+                        const char *title)
+{
+    int n = 0;
+    if (!buf || buflen <= 0 || !id) return -1;
+    if (!put_str(buf, buflen, &n, "{\"id\":\"")) return -1;
+    if (!put_json_escaped(buf, buflen, &n, id)) return -1;
+    if (!put_str(buf, buflen, &n, "\",\"host\":\"")) return -1;
+    if (!put_json_escaped(buf, buflen, &n, host ? host : "")) return -1;
+    if (!put(buf, buflen, &n, '"')) return -1;
+    if (title) {
+        if (!put_str(buf, buflen, &n, ",\"title\":\"")) return -1;
+        if (!put_json_escaped(buf, buflen, &n, title)) return -1;
+        if (!put(buf, buflen, &n, '"')) return -1;
+    }
+    if (!put(buf, buflen, &n, '}')) return -1;
+    buf[n] = '\0';
+    return n;
+}
+
 int tm_proto_trigger_body(char *buf, int buflen, float param, int clock_bpm)
 {
     int n = 0;

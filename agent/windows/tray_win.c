@@ -16,6 +16,7 @@
 
 #include "runner.h"
 #include "midi_win.h"
+#include "totalmix_win.h"
 #include "net.h"
 #include "resource.h"
 
@@ -343,6 +344,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdline, int show)
     Shell_NotifyIconA(NIM_ADD, &g_nid);
 
     tm_runner_set_link_callback(on_link);
+    tm_runner_set_title_provider(tm_totalmix_title);   /* #30: workspace via the TotalMix title */
     g_thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
 
     while (GetMessage(&msg, NULL, 0, 0) > 0) {

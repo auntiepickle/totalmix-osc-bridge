@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The header follows workspace switches made in TotalMix (#30, second
+  half)**: TotalMix never reports the workspace over OSC and nothing on disk
+  tracks it live, but its window title names the loaded workspace (a Quick
+  Select name, or the `.tmws` path of a file workspace) and follows a switch
+  within a second (verified on the live rig). The Windows agent (console and
+  tray) now sends that title with its MIDI-owner heartbeat (`"title"`,
+  `tm_proto_owner_body`), and the bridge parses it
+  (`SwitchingMixin.parse_workspace_title` / `report_workspace`): the
+  workspace becomes confirmed, the current snapshot is re-named through the
+  right map, the retained MQTT workspace slot is republished, and
+  `/api/status` + the WebSocket frame carry `workspace_report` (name, kind,
+  in_map, source, live). A reported workspace the snapshot map does not know
+  is listed by name with snapshot names unavailable. Reports are ignored
+  while a bridge-side switch holds the device lock. Needs the new agent
+  build; an older agent changes nothing.
 - **ui.js split by panel (#27 phase 4, frontend half)**: the 4,100-line
   `web/static/ui.js` is now nine files under `web/static/ui/` (cards,
   modul, rack, editor, editor-controls, editor-render, settings,

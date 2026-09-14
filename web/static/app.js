@@ -27,6 +27,7 @@ let currentSnapshot = '—';
 // workspace over OSC, so it stays 'last known' until a bridge-side switch is
 // confirmed; the snapshot becomes real once the Global feed reports a slot.
 let stateConfirmed = null;
+let workspaceReport = null;   // #30: {name, kind, in_map, source, live} from the agent's TotalMix title report
 let deviceSnapshotSlot = null;
 let snapshotModified = null;
 let midiConnectedDevice = '';
@@ -98,8 +99,10 @@ function _onWSMessage(event) {
   const flagsChanged =
     ('state_confirmed' in data && data.state_confirmed !== stateConfirmed) ||
     ('snapshot_modified' in data && data.snapshot_modified !== snapshotModified) ||
-    ('device_snapshot_slot' in data && data.device_snapshot_slot !== deviceSnapshotSlot);
+    ('device_snapshot_slot' in data && data.device_snapshot_slot !== deviceSnapshotSlot) ||
+    ('workspace_report' in data && JSON.stringify(data.workspace_report) !== JSON.stringify(workspaceReport));
   if ('state_confirmed' in data) stateConfirmed = data.state_confirmed;
+  if ('workspace_report' in data) workspaceReport = data.workspace_report;
   if ('snapshot_modified' in data) snapshotModified = data.snapshot_modified;
   if ('device_snapshot_slot' in data) deviceSnapshotSlot = data.device_snapshot_slot;
   if (layoutChanged || flagsChanged) _updateNavDropdowns();
@@ -396,6 +399,12 @@ function _updateNavDropdowns() {
 
   const snapMap    = window._snapshotMap || {};
   const workspaces = Object.keys(snapMap);
+  // #30: a workspace TotalMix reports that the snapshot map does not know
+  // (renamed slot, file workspace) is still listed, so the header shows it
+  const rep = workspaceReport;
+  if (rep && !rep.in_map && rep.name && rep.name === currentWorkspace && !workspaces.includes(rep.name)) {
+    workspaces.push(rep.name);
+  }
   const wsKnown    = workspaces.includes(currentWorkspace);
 
   // Workspace dropdown — placeholder selected when state not yet confirmed
@@ -423,9 +432,16 @@ function _updateNavDropdowns() {
   // purpose: a pull-and-restart deploy does not rebuild the Tailwind CSS.
   const wsUnconfirmed = stateConfirmed !== true;
   const ssUnconfirmed = wsUnconfirmed && deviceSnapshotSlot == null;
+  const repLive = !!(rep && rep.live !== false && rep.name === currentWorkspace);
+  const wsHintOff = repLive
+    ? `Workspace as TotalMix shows it (title bar on ${rep.source || 'the agent machine'})`
+      + (rep.kind === 'file' ? ', loaded from a workspace file' : '')
+      + (rep.in_map ? '' : ' — not in the snapshot map, so snapshot names are unavailable')
+      + ' — pick another to switch'
+    : 'The mixer\'s current workspace — pick another to switch TotalMix to it';
   _markUnconfirmed(wsSel, wsUnconfirmed,
-    'Last known workspace — TotalMix does not report it over OSC. Pick one to switch and re-sync.',
-    'The mixer\'s current workspace — pick another to switch TotalMix to it');
+    'Last known workspace — TotalMix does not report it over OSC and no agent on the TotalMix machine is reporting its title. Pick one to switch and re-sync.',
+    wsHintOff);
   _markUnconfirmed(ssSel, ssUnconfirmed,
     'Last known snapshot — not yet confirmed by the device. Pick one to recall and re-sync.',
     deviceSnapshotSlot != null
@@ -886,6 +902,7 @@ async function prefillBridgeState() {
     if (s.workspace) currentWorkspace = s.workspace;
     if (s.snapshot)  currentSnapshot  = s.snapshot;
     stateConfirmed     = s.state_confirmed ?? null;
+    workspaceReport    = s.workspace_report ?? null;
     snapshotModified   = s.snapshot_modified ?? null;
     deviceSnapshotSlot = s.device_snapshot_slot ?? null;
     _updateNavDropdowns();

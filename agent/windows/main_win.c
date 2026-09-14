@@ -87,6 +87,7 @@ int main(int argc, char **argv)
     port = atoi(ports);
 
     SetConsoleCtrlHandler(ctrl_handler, TRUE);
+    tm_runner_set_title_provider(tm_totalmix_title);   /* #30: workspace via the TotalMix title */
 
     if (tm_midi_win_resolve(mididev, resolved, sizeof(resolved)) != 0) {
         tm_midi_port pl[64];

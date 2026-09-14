@@ -165,6 +165,18 @@ static void test_proto(void)
     CHECK(strcmp(buf, "{\"param\":1,\"clock_bpm\":128}") == 0);
     n = tm_proto_trigger_body(buf, sizeof(buf), 0.25f, 0);
     CHECK(strcmp(buf, "{\"param\":0.25}") == 0);
+
+    /* heartbeat body (#30): title optional, backslashes + quotes escaped */
+    n = tm_proto_owner_body(buf, sizeof(buf), "BONE-tmosc-agent", "BONE", NULL);
+    CHECK(n > 0 && strcmp(buf, "{\"id\":\"BONE-tmosc-agent\",\"host\":\"BONE\"}") == 0);
+    n = tm_proto_owner_body(buf, sizeof(buf), "a", "h", "");
+    CHECK(strcmp(buf, "{\"id\":\"a\",\"host\":\"h\",\"title\":\"\"}") == 0);
+    n = tm_proto_owner_body(buf, sizeof(buf), "a", "h",
+                            "RME TotalMix FX: UFX II (1) - 48.0k - Z:\\ws\\my \"live\".tmws");
+    CHECK(strcmp(buf, "{\"id\":\"a\",\"host\":\"h\",\"title\":"
+                      "\"RME TotalMix FX: UFX II (1) - 48.0k - Z:\\\\ws\\\\my \\\"live\\\".tmws\"}") == 0);
+    n = tm_proto_owner_body(buf, 16, "a", "h", "a title that cannot fit");
+    CHECK(n == -1);
     (void)n;
 }
 

@@ -45,8 +45,11 @@ The agent drives the same macros the browser does, over plain HTTP on the LAN:
 | fire trigger       | `POST /api/trigger/<name>`  `{"param":..[,"clock_bpm":..]}`   |
 
 Plus, for coexistence with an open browser: a presence heartbeat
-(`POST /api/midi/owner/heartbeat`) so the browser yields Web MIDI to the tray,
-and a throttled raw-MIDI relay (`POST /api/midi/activity`) so browser MIDI-learn
+(`POST /api/midi/owner/heartbeat`) so the browser yields Web MIDI to the tray.
+On Windows that heartbeat also carries the TotalMix FX main-window title
+(`"title"`), the one live place TotalMix shows the loaded workspace; the
+bridge parses the workspace out of it, so the header follows workspace
+switches made in TotalMix itself (#30). And a throttled raw-MIDI relay (`POST /api/midi/activity`) so browser MIDI-learn
 and the live activity view keep working while the agent owns the port. The one
 read-only feed the bridge adds is `GET /api/midi/bindings` (the trigger table).
 
