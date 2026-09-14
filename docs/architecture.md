@@ -41,7 +41,13 @@ still accurate for those remaining paths.
 
 | Module | Owns |
 |---|---|
-| `tmosc/bridge.py` | `TotalMixOSCBridge`: macro runner, knob engine (device sync, hold, VCA groups, MQTT knob state), workspace/snapshot switching, MIDI-owner state, WebSocket broadcast plumbing, classic aiming, sweep and probe |
+| `tmosc/bridge.py` | `TotalMixOSCBridge` facade: `__init__` (all instance state), process lifecycle (`start_*`/`stop_*`), the config-reading methods (`_global_active`, `start_mqtt`), the WebSocket client registry (`ws_attach` / per-client queues) and the import-time singletons. Composes the `tmosc/core/` mixins below; one object, one namespace |
+| `tmosc/core/macros.py` | `MacrosMixin`: `run_macro` (classic + Global steps, fire modes, cancel), health records, routing labels, durations |
+| `tmosc/core/knobs.py` | `KnobsMixin`: knob engine - device value, companions, auto-enable, pins, VCA groups, set/readback/trailing flush, device watcher, hold reapply, MQTT knob state |
+| `tmosc/core/switching.py` | `SwitchingMixin`: workspace/snapshot switching, `_wait_device` confirmation, device-side snapshot sync |
+| `tmosc/core/transport.py` | `ClassicTransportMixin`: classic aim-and-write - parameter tables, `_resolve_target`, page-2 reads, button state, liveness probe |
+| `tmosc/core/channel_map.py` | `ChannelMapMixin`: channel map load/migrate/persist and the sweep |
+| `tmosc/core/broadcast.py` | `BroadcastMixin`: thread-safe WebSocket broadcast and MIDI-owner presence |
 | `tmosc/api/app.py` | FastAPI app: every REST endpoint, `/ws`, config persistence (atomic writes + auto-backup), uploads, startup wiring. Run with `uvicorn tmosc.api.app:app`; `web/web_client.py` is a compatibility shim for older Docker images |
 | `tmosc/__main__.py` | `python -m tmosc` and the frozen exe entry: `app_paths.prepare()`, then in-process uvicorn |
 | `tmosc/global_transport.py` | Global OSC writers: name to address resolution through the physical table, unit transforms, heartbeat/liveness |

@@ -114,8 +114,9 @@ keeps them in `%APPDATA%\tmosc-bridge`. Schemas: [docs/config.md](docs/config.md
 ## Repository layout
 
 ```
-tmosc/            the server package (python -m tmosc): bridge.py engine, api/ (FastAPI),
-                  OSC transports + listeners, MQTT, discovery, duck engine, app_paths
+tmosc/            the server package (python -m tmosc): bridge.py facade + core/ mixins
+                  (macros, knobs, switching, transport, channel map, broadcast), api/
+                  (FastAPI), OSC transports + listeners, MQTT, discovery, duck engine, app_paths
 web/              browser UI (web/static) + the web.web_client compatibility shim
 agent/            native C MIDI client: portable core, Linux daemon, Windows tray
 installer/        Inno Setup unified installer (Client / Server / Both)

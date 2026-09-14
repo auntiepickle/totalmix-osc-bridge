@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **bridge.py split by responsibility (#27 phase 3)**: the 2,600-line
+  `tmosc/bridge.py` is now a 370-line facade (`__init__`, lifecycle,
+  config-reading methods, WebSocket registry, singletons) composed from
+  six mixins in `tmosc/core/` - `macros`, `knobs`, `switching`,
+  `transport` (classic aim-and-write), `channel_map` (map + sweep) and
+  `broadcast` (WS dispatch + MIDI owner). Same `TotalMixOSCBridge`
+  object and attribute set, no API change, no test touched; the
+  `from tmosc.config import *` star import is gone. App factory /
+  lifespan deferred to phase 4 (router split).
 - **Client-only installer retired (#27 phase 5)**: `agent/windows/installer.iss`
   and the `agent-v*` release workflow are gone; `tmosc-setup-<version>.exe`
   (Client / Server / Both) is the one installer. CI is three workflows with
