@@ -48,7 +48,10 @@ still accurate for those remaining paths.
 | `tmosc/core/transport.py` | `ClassicTransportMixin`: classic aim-and-write - parameter tables, `_resolve_target`, page-2 reads, button state, liveness probe |
 | `tmosc/core/channel_map.py` | `ChannelMapMixin`: channel map load/migrate/persist and the sweep |
 | `tmosc/core/broadcast.py` | `BroadcastMixin`: thread-safe WebSocket broadcast and MIDI-owner presence |
-| `tmosc/api/app.py` | FastAPI app: every REST endpoint, `/ws`, config persistence (atomic writes + auto-backup), uploads, startup wiring. Run with `uvicorn tmosc.api.app:app`; `web/web_client.py` is a compatibility shim for older Docker images |
+| `tmosc/api/app.py` | `create_app()` factory + lifespan (start MQTT, listeners, Global OSC, LAN discovery, set `main_loop`; stop Global OSC on shutdown), middleware, static mount, compatibility re-exports. `app = create_app()` at module level: run with `uvicorn tmosc.api.app:app`; `web/web_client.py` is a compatibility shim for older Docker images |
+| `tmosc/api/routes/` | One `APIRouter` per area: `health` (`/`, `/api/health`, `/api/status`), `macros` (list, trigger, switch, editor CRUD, order), `midi` (owner heartbeat/release, activity relay, bindings TSV), `knobs` (meters, group capture, duck, set/enable/param), `device` (state, sweep, physical table, Global status, identify, probe, picker), `config` (mappings / channel map / snapshot map reads, saves, uploads, init-from-example, reload), `ws` (`/ws`) |
+| `tmosc/api/persistence.py` | Atomic JSON writes, auto-backup, `_persist_mappings` (sanitizes every macro), `RUNTIME_FIELDS` / `MACRO_NAME_RE`, upload reading with the 2 MB cap |
+| `tmosc/api/auth.py` | Opt-in `API_TOKEN` gate for state-changing requests and `/ws` |
 | `tmosc/__main__.py` | `python -m tmosc` and the frozen exe entry: `app_paths.prepare()`, then in-process uvicorn |
 | `tmosc/global_transport.py` | Global OSC writers: name to address resolution through the physical table, unit transforms, heartbeat/liveness |
 | `tmosc/global_listener.py` | Global OSC feedback into `GlobalDeviceState` (params, names, mix sends, levels, snapshots, human-change log) |
@@ -74,7 +77,7 @@ Load order: vendored uPlot, `modul/knob.js`, `modul/graph.js` (in `<head>`), the
 | `midi.js` | Web MIDI, learn, BPM clock, emulator, tray coexistence (yield and relay) |
 
 Server/client mirrors that must change together: `RUNTIME_FIELDS` and
-`MACRO_NAME_RE` (`tmosc/api/app.py` and `ui.js`), the fader law
+`MACRO_NAME_RE` (`tmosc/api/persistence.py` and `ui.js`), the fader law
 (`global_units.py` and `ui.js`), and the trigger matcher in the native agent
 (a port of `midi.js`).
 
@@ -92,7 +95,7 @@ Server/client mirrors that must change together: `RUNTIME_FIELDS` and
 | `mappings_is_example` | `bool` | True when running from `mappings.example.json` |
 | `channel_map_is_example` | `bool` | True when running from `ufx2_channel_map.example.json` |
 | `mqtt_connected` | `bool` | True when MQTT broker connection is active. False if no broker is configured. |
-| `main_loop` | event loop | Set by `startup_event()` in `tmosc/api/app.py`. Required for thread-safe broadcast. |
+| `main_loop` | event loop | Set by the app lifespan in `tmosc/api/app.py`. Required for thread-safe broadcast. |
 | `_suppress_handler` | `bool` | Blocks MQTT feedback during macro execution |
 | `_running_macros` | `set[str]` | Names of currently executing macros |
 | `_cancel_events` | `dict` | One `threading.Event` per running macro, set to cancel on `restart` |
@@ -140,7 +143,7 @@ This issue only exists when MQTT is configured. Without a broker there is no fee
 
 FastAPI runs in asyncio. MQTT callbacks and macro threads are OS threads. `bridge.broadcast_state()` must work from both.
 
-`startup_event()` in `tmosc/api/app.py` stores the running asyncio loop as `bridge.main_loop`. Sync threads call `asyncio.run_coroutine_threadsafe(self._do_broadcast(...), self.main_loop)`. Asyncio context creates a task directly. Broadcasts before FastAPI startup are silently dropped.
+The app lifespan in `tmosc/api/app.py` stores the running asyncio loop as `bridge.main_loop`. Sync threads call `asyncio.run_coroutine_threadsafe(self._do_broadcast(...), self.main_loop)`. Asyncio context creates a task directly. Broadcasts before FastAPI startup are silently dropped.
 
 ---
 

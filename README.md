@@ -116,7 +116,8 @@ keeps them in `%APPDATA%\tmosc-bridge`. Schemas: [docs/config.md](docs/config.md
 ```
 tmosc/            the server package (python -m tmosc): bridge.py facade + core/ mixins
                   (macros, knobs, switching, transport, channel map, broadcast), api/
-                  (FastAPI), OSC transports + listeners, MQTT, discovery, duck engine, app_paths
+                  (FastAPI: app factory + lifespan, routes/ per area, persistence, auth),
+                  OSC transports + listeners, MQTT, discovery, duck engine, app_paths
 web/              browser UI (web/static) + the web.web_client compatibility shim
 agent/            native C MIDI client: portable core, Linux daemon, Windows tray
 installer/        Inno Setup unified installer (Client / Server / Both)
@@ -134,7 +135,7 @@ tmosc-bridge.spec PyInstaller spec for the frozen Windows server
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                                   # 270+ tests, ~30 s, no hardware
+pytest                                   # 300+ tests, ~30 s, no hardware
 docker build -t tmosc .                  # what CI builds
 pip install -r requirements-frozen.txt && pyinstaller --noconfirm tmosc-bridge.spec
 pwsh tools/smoke_frozen.ps1              # boots dist/tmosc-bridge/tmosc-bridge.exe and checks it

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **api/app.py split into routers + app factory (#27 phase 4, server half)**:
+  the 1,100-line `tmosc/api/app.py` is now a 100-line `create_app()` +
+  lifespan (middleware, static mount, compatibility re-exports) composed
+  from `tmosc/api/routes/` (health, macros, midi, knobs, device, config,
+  ws - one `APIRouter` each, paths unchanged), `tmosc/api/persistence.py`
+  (atomic writes, backups, `_persist_mappings`, upload reading) and
+  `tmosc/api/auth.py` (the `API_TOKEN` gate). The lifespan replaces the
+  deprecated `on_event` handlers, so the suite runs warning-free.
+  `uvicorn tmosc.api.app:app`, the `web.web_client` shim and
+  `python -m tmosc` are unchanged; tests that patch persistence or the
+  token now patch the module that owns the name. Follow-up (4b):
+  `create_app(bridge=...)` + `request.app.state.bridge`, a bridge factory
+  instead of the import-time singleton, and logging setup out of
+  `tmosc/bridge.py`. The `ui.js` split is the frontend half.
 - **bridge.py split by responsibility (#27 phase 3)**: the 2,600-line
   `tmosc/bridge.py` is now a 370-line facade (`__init__`, lifecycle,
   config-reading methods, WebSocket registry, singletons) composed from

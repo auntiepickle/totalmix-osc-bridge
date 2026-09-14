@@ -4,7 +4,8 @@
     python -m tmosc.bridge          headless bridge without the web UI (MQTT/OSC only)
 
 Layout: bridge.py (the TotalMixOSCBridge facade: state, lifecycle, config) composed from
-core/ (macros, knobs, switching, transport, channel_map, broadcast mixins), api/ (FastAPI app: REST + WebSocket),
+core/ (macros, knobs, switching, transport, channel_map, broadcast mixins), api/ (FastAPI:
+app.py factory + lifespan, routes/ per area, persistence, auth),
 osc*.py / global_*.py (classic and Global OSC transports and feedback listeners),
 mqtt_handler.py, discovery.py (LAN auto-discovery), duck_engine.py, operations.py,
 physical_table.py, global_units.py, config.py (env), app_paths.py (where state lives).
