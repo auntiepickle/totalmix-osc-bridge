@@ -72,6 +72,30 @@ def test_sweep_builds_table_and_restores(sweep_bridge, monkeypatch):
     assert persisted
 
 
+def test_sweep_merges_into_the_map_current_at_the_end(sweep_bridge, monkeypatch):
+    """A channel-map save from the editor mid-sweep replaces bridge.channel_map
+    with a NEW dict; the observations must land (and persist) in that one,
+    not in the object captured before the 35 s device section (#38)."""
+    b, fake_osc = sweep_bridge
+    persisted = []
+    monkeypatch.setattr(b, "_persist_channel_map_file",
+                        lambda cm: persisted.append(cm))
+    fresh = {"physical_table": {"channels_per_row": 30, "rows": {}}}
+    real_send = b.osc_client.send_message
+
+    def send_and_swap(address, value):
+        real_send(address, value)
+        if address == "/setBankStart" and value == 3.0:
+            b.channel_map = fresh          # the editor saved a new map
+    b.osc_client.send_message = send_and_swap
+    state = b.run_sweep(settle_s=0)
+    assert state["status"] == "done"
+    assert b.channel_map is fresh
+    assert fresh["physical_table"]["rows"]["inputs"]["2"] == ["RE-101"]
+    assert fresh["physical_table"]["rows"]["outputs"]["0"] == ["Main"]
+    assert persisted and persisted[-1] is fresh
+
+
 def test_sweep_aborts_on_new_name_past_hardware_end(sweep_bridge, monkeypatch):
     """A NEW name at offset 30 means channels_per_row is wrong for this
     device — abort without persisting anything."""

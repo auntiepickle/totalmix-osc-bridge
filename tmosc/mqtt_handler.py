@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import json
 import time
@@ -135,6 +136,74 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
         publish_snapshot_map(client)
         publish_dynamic_workspaces(client)
 
+    def _run_switch(name, fn):
+        """Workspace/snapshot commands re-aim the device, so they run like
+        every other device-moving path: off paho's network thread (the
+        feedback wait is up to 2 s) and under bridge._device_lock, so a
+        command landing mid-macro waits for the ramp instead of switching
+        the layout underneath its remaining writes (#38)."""
+        def _body():
+            lock = getattr(bridge, "_device_lock", None) or contextlib.nullcontext()
+            try:
+                with lock:
+                    fn()
+            except Exception as e:
+                logger.error(f"{name} failed: {e}", exc_info=True)
+        threading.Thread(target=_body, name=name, daemon=True).start()
+
+    def _switch_workspace(ws_slot, ws_name, payload):
+        t0 = time.time()
+        send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
+        # Confirm via feedback like macro switches do — otherwise bridge
+        # state (and /api/status) is a commanded belief the device may not
+        # have followed (observed live)
+        bridge.state_confirmed = bridge._wait_device(
+            lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
+            timeout=2.0, fallback_sleep=0,
+            what=f"MQTT workspace slot {ws_slot} switch")
+        if bridge.state_confirmed:
+            bridge._layout_epoch = time.time()  # TASK-6 race hardening
+        bridge.update_workspace(name=ws_name or f"slot_{ws_slot}")
+        getattr(bridge, "reapply_held_knobs", lambda: 0)()  # snapshot-agnostic knobs
+        if bridge.state_confirmed:
+            # Refresh the retained belief — MQTT-driven switches left the
+            # topic at the last MACRO switch, so every restart restored a
+            # belief that old (server finding)
+            _mark_own_republish(bridge, "totalmix/workspace", payload)
+            client.publish("totalmix/workspace", payload, retain=True)
+            logger.info(f"Retained totalmix/workspace refreshed = "
+                        f"{payload} (confirmed MQTT switch)")
+
+    def _recall_snapshot(snap_num, payload):
+        # recall stays classic under every transport (#25 TASK 11: Global
+        # snapshot feedback unreliable; classic button-echo confirm is
+        # 0.02-0.08s solid)
+        osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
+        t0 = time.time()
+        send_osc(osc_addr, 1.0, osc_ip, osc_port)
+        bridge.state_confirmed = bridge._wait_device(
+            lambda st, addr=osc_addr: (
+                st.raw.get(addr, {}).get("args") == [1.0]
+                and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
+            timeout=1.0, fallback_sleep=0,
+            what=f"MQTT snapshot #{snap_num} recall")
+        if bridge.state_confirmed:
+            bridge._layout_epoch = time.time()  # TASK-6 race hardening
+        logger.info(f"Snapshot #{snap_num} recalled ({osc_addr})")
+        client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
+
+        ws = getattr(bridge, "current_workspace", None)
+        snap_name = None
+        if ws and ws in SNAPSHOT_MAP:
+            snap_name = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(snap_num))
+        bridge.update_snapshot(name=snap_name or f"snap_{snap_num}")
+        getattr(bridge, "reapply_held_knobs", lambda: 0)()  # snapshot-agnostic knobs
+        if bridge.state_confirmed:
+            _mark_own_republish(bridge, "totalmix/snapshot", payload)
+            client.publish("totalmix/snapshot", payload, retain=True)
+            logger.info(f"Retained totalmix/snapshot refreshed = "
+                        f"{payload} (confirmed MQTT switch)")
+
     def on_message(client, userdata, msg):
         global SNAPSHOT_MAP
         payload = msg.payload.decode().strip()
@@ -255,76 +324,33 @@ def setup_mqtt(client, mqtt_broker, mqtt_port, mqtt_user, mqtt_pass, osc_ip, osc
             if msg.topic == "totalmix/workspace":
                 try:
                     ws_slot = int(payload)
-                    ws_name = next(
-                        (name for name, data in SNAPSHOT_MAP.items()
-                         if isinstance(data, dict) and data.get("slot") == ws_slot),
-                        None,
-                    )
-                    if (ws_name and ws_name == getattr(bridge, "current_workspace", None)
-                            and getattr(bridge, "state_confirmed", None)):
-                        # skip only from a device-confirmed belief — an absorbed
-                        # retained belief can be stale (device moved while down)
-                        logger.debug(f"Workspace slot {ws_slot} already active — skipping OSC")
-                        bridge.update_workspace(name=ws_name)
-                        return
-                    t0 = time.time()
-                    send_osc("/loadQuickWorkspace", ws_slot, osc_ip, osc_port)
-                    # Confirm via feedback like macro switches do — otherwise
-                    # bridge state (and /api/status) is a commanded belief the
-                    # device may not have followed (observed live)
-                    bridge.state_confirmed = bridge._wait_device(
-                        lambda st: st.raw.get("/1/labelSubmix", {}).get("last_seen", 0) >= t0,
-                        timeout=2.0, fallback_sleep=0,
-                        what=f"MQTT workspace slot {ws_slot} switch")
-                    if bridge.state_confirmed:
-                        bridge._layout_epoch = time.time()  # TASK-6 race hardening
-                    bridge.update_workspace(name=ws_name or f"slot_{ws_slot}")
-                    getattr(bridge, "reapply_held_knobs", lambda: 0)()  # snapshot-agnostic knobs
-                    if bridge.state_confirmed:
-                        # Refresh the retained belief — MQTT-driven switches
-                        # left the topic at the last MACRO switch, so every
-                        # restart restored a belief that old (server finding)
-                        _mark_own_republish(bridge, "totalmix/workspace", payload)
-                        client.publish("totalmix/workspace", payload, retain=True)
-                        logger.info(f"Retained totalmix/workspace refreshed = "
-                                    f"{payload} (confirmed MQTT switch)")
                 except ValueError:
                     logger.warning(f"Non-integer workspace payload ignored: {payload!r}")
+                    return
+                ws_name = next(
+                    (name for name, data in SNAPSHOT_MAP.items()
+                     if isinstance(data, dict) and data.get("slot") == ws_slot),
+                    None,
+                )
+                if (ws_name and ws_name == getattr(bridge, "current_workspace", None)
+                        and getattr(bridge, "state_confirmed", None)):
+                    # skip only from a device-confirmed belief — an absorbed
+                    # retained belief can be stale (device moved while down)
+                    logger.debug(f"Workspace slot {ws_slot} already active — skipping OSC")
+                    bridge.update_workspace(name=ws_name)
+                    return
+                _run_switch(f"mqtt-switch-ws-{ws_slot}",
+                            lambda: _switch_workspace(ws_slot, ws_name, payload))
 
             elif msg.topic == "totalmix/snapshot":
                 try:
                     snap_num = int(payload)
-                    if 1 <= snap_num <= 8:
-                        # recall stays classic under every transport (#25
-                        # TASK 11: Global snapshot feedback unreliable;
-                        # classic button-echo confirm is 0.02-0.08s solid)
-                        osc_addr = f"/3/snapshots/{snapshot_num_to_osc_index(snap_num)}/1"
-                        t0 = time.time()
-                        send_osc(osc_addr, 1.0, osc_ip, osc_port)
-                        bridge.state_confirmed = bridge._wait_device(
-                            lambda st, addr=osc_addr: (
-                                st.raw.get(addr, {}).get("args") == [1.0]
-                                and st.raw.get(addr, {}).get("last_seen", 0) >= t0),
-                            timeout=1.0, fallback_sleep=0,
-                            what=f"MQTT snapshot #{snap_num} recall")
-                        if bridge.state_confirmed:
-                            bridge._layout_epoch = time.time()  # TASK-6 race hardening
-                        logger.info(f"Snapshot #{snap_num} recalled ({osc_addr})")
-                        client.publish("totalmix/snapshot/status", f"loaded_{snap_num}", retain=True)
-
-                        ws = getattr(bridge, "current_workspace", None)
-                        snap_name = None
-                        if ws and ws in SNAPSHOT_MAP:
-                            snap_name = SNAPSHOT_MAP[ws].get("snapshots", {}).get(str(snap_num))
-                        bridge.update_snapshot(name=snap_name or f"snap_{snap_num}")
-                        getattr(bridge, "reapply_held_knobs", lambda: 0)()  # snapshot-agnostic knobs
-                        if bridge.state_confirmed:
-                            _mark_own_republish(bridge, "totalmix/snapshot", payload)
-                            client.publish("totalmix/snapshot", payload, retain=True)
-                            logger.info(f"Retained totalmix/snapshot refreshed = "
-                                        f"{payload} (confirmed MQTT switch)")
                 except ValueError:
                     logger.warning(f"Non-integer snapshot payload ignored: {payload!r}")
+                    return
+                if 1 <= snap_num <= 8:
+                    _run_switch(f"mqtt-switch-snap-{snap_num}",
+                                lambda: _recall_snapshot(snap_num, payload))
 
             elif msg.topic == "totalmix/config/snapshot_map":
                 SNAPSHOT_MAP = json.loads(payload)

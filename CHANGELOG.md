@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Bridge concurrency follow-ups (#38)**: MQTT `totalmix/workspace` and
+  `totalmix/snapshot` commands run on a worker thread under the device
+  lock, so a command landing mid-ramp waits for the macro instead of
+  switching the layout underneath its remaining writes (and paho's
+  network thread no longer blocks on the feedback wait). A sweep merges
+  its observations into whatever `channel_map` is current when the
+  device section ends - a channel-map save from the editor during the
+  35 s sweep used to make the persist write the new map without them.
 - **Agent sends the bridge's API token (#35)**: `token=` in the tray's
   `config.txt` (or `TMOSC_TOKEN` in the environment for the tray, console
   and Linux daemon) puts `X-Api-Token` on every request, so an

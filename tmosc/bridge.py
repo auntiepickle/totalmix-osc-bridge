@@ -1700,6 +1700,16 @@ class TotalMixOSCBridge:
                 finally:
                     self.osc_client.send_message("/setBankStart", 0.0)
                     self.osc_client.send_message("/1/busInput", 1.0)
+            # The device section takes ~35 s and a channel-map save from the
+            # web editor meanwhile REPLACES self.channel_map with a new dict;
+            # merging into the table captured above would persist the new
+            # map without a single observation (#38). Re-resolve now.
+            cm = self.channel_map if isinstance(self.channel_map, dict) else {}
+            self.channel_map = cm
+            table = cm.get("physical_table")
+            if not isinstance(table, dict):
+                table = pt.empty_table()
+                cm["physical_table"] = table
             row_map = {"inputs": "inputs", "outputs": "outputs"}
             for row, observed in observed_all.items():
                 key = row_map[row]

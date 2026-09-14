@@ -33,6 +33,7 @@ class FakeMQTTClient:
 
 class FakeBridge:
     def __init__(self):
+        self._device_lock = threading.RLock()
         self.mappings = {"macros": {"known_macro": {"steps": []}}}
         self.snapshot_map = {}
         self.current_workspace = None
@@ -87,11 +88,15 @@ def handler(monkeypatch):
     return client, fake_bridge, sent_osc
 
 
-def _join_macro_threads():
-    """MQTT macro triggers run off paho's thread now; wait for them."""
+def _join_mqtt_threads():
+    """MQTT macro triggers AND workspace/snapshot switches run off paho's
+    thread (the switches under the device lock, #38); wait for them."""
     for t in threading.enumerate():
-        if t.name.startswith("mqtt-macro-"):
+        if t.name.startswith("mqtt-"):
             t.join(timeout=2)
+
+
+_join_macro_threads = _join_mqtt_threads
 
 
 def test_macro_topic_triggers_run_macro(handler):
@@ -129,6 +134,7 @@ def test_invalid_macro_param_ignored(handler):
 def test_workspace_message_sends_osc_and_updates(handler):
     client, bridge, sent_osc = handler
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     assert ("/loadQuickWorkspace", 2) in sent_osc
     assert bridge.workspace_updates == ["Pill_setup"]
     # MQTT-commanded switches confirm via feedback like macro switches
@@ -139,6 +145,7 @@ def test_workspace_message_sends_osc_and_updates(handler):
 def test_snapshot_message_confirms_via_feedback(handler):
     client, bridge, _ = handler
     client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    _join_mqtt_threads()
     assert any("snapshot" in w for w in bridge.wait_device_calls)
     assert bridge.state_confirmed is True
 
@@ -147,6 +154,7 @@ def test_workspace_suppressed_during_macro(handler):
     client, bridge, sent_osc = handler
     bridge._suppress_handler = True
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     assert sent_osc == []
     assert bridge.workspace_updates == []
 
@@ -155,12 +163,14 @@ def test_workspace_suppressed_in_cooldown_window(handler):
     client, bridge, sent_osc = handler
     bridge._last_macro_end_time = time.time()
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     assert sent_osc == []
 
 
 def test_snapshot_message_uses_inverted_index(handler):
     client, bridge, sent_osc = handler
     client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    _join_mqtt_threads()
     # slot 3 → OSC button index 6
     assert ("/3/snapshots/6/1", 1.0) in sent_osc
     assert ("totalmix/snapshot/status", "loaded_3") in client.published
@@ -169,13 +179,16 @@ def test_snapshot_message_uses_inverted_index(handler):
 def test_snapshot_out_of_range_ignored(handler):
     client, bridge, sent_osc = handler
     client.on_message(client, None, msg("totalmix/snapshot", "9"))
+    _join_mqtt_threads()
     assert sent_osc == []
 
 
 def test_non_integer_payloads_ignored(handler):
     client, bridge, sent_osc = handler
     client.on_message(client, None, msg("totalmix/workspace", "garbage"))
+    _join_mqtt_threads()
     client.on_message(client, None, msg("totalmix/snapshot", "garbage"))
+    _join_mqtt_threads()
     assert sent_osc == []
 
 
@@ -212,6 +225,7 @@ def test_confirmed_mqtt_workspace_switch_republishes_retained(handler):
     2026-08-20). A CONFIRMED switch now refreshes the retained value."""
     client, bridge, _ = handler
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     assert bridge.state_confirmed is True
     assert ("totalmix/workspace", "2") in client.published
 
@@ -219,6 +233,7 @@ def test_confirmed_mqtt_workspace_switch_republishes_retained(handler):
 def test_confirmed_mqtt_snapshot_switch_republishes_retained(handler):
     client, bridge, _ = handler
     client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    _join_mqtt_threads()
     assert bridge.state_confirmed is True
     assert ("totalmix/snapshot", "3") in client.published
 
@@ -231,7 +246,9 @@ def test_unconfirmed_switch_does_not_republish(handler, monkeypatch):
         bridge, "_wait_device",
         lambda predicate, timeout, fallback_sleep, what="": False)
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    _join_mqtt_threads()
     assert sent_osc  # switches were still commanded
     assert ("totalmix/workspace", "2") not in client.published
     assert ("totalmix/snapshot", "3") not in client.published
@@ -243,14 +260,17 @@ def test_own_republish_echo_suppressed_exactly_once(handler):
     genuine command afterwards processes normally."""
     client, bridge, sent_osc = handler
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     osc_after_first = list(sent_osc)
     # the echo of our own republish arrives (live delivery, same payload)
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     assert sent_osc == osc_after_first           # echo drove nothing
     # a genuine identical command later is NOT swallowed (marker consumed);
     # it takes the already-on-target skip path, which updates state again
     updates_before = len(bridge.workspace_updates)
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     assert len(bridge.workspace_updates) > updates_before
 
 
@@ -258,11 +278,15 @@ def test_ws_and_snap_echo_markers_are_independent(handler):
     """A snapshot republish must not unmask a pending workspace echo."""
     client, bridge, sent_osc = handler
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    _join_mqtt_threads()
     osc_after_commands = list(sent_osc)
     # echoes arrive late, after both commands — both must be dropped
     client.on_message(client, None, msg("totalmix/workspace", "2"))
+    _join_mqtt_threads()
     client.on_message(client, None, msg("totalmix/snapshot", "3"))
+    _join_mqtt_threads()
     assert sent_osc == osc_after_commands
 
 
@@ -308,3 +332,21 @@ def test_knob_topic_bad_payload_ignored(handler):
     bridge.knob_set = lambda *a, **k: calls.append(a) or {"status": "resolved"}
     client.on_message(client, None, msg("totalmix/knob/vol", "loud please"))
     assert calls == []
+
+
+def test_switch_waits_for_the_device_lock(handler):
+    """A workspace command arriving while another device-moving path holds
+    bridge._device_lock (a ramp, a sweep) must not re-aim the device
+    underneath it: the OSC goes out only once the lock is free (#38)."""
+    client, bridge, sent_osc = handler
+    bridge._device_lock.acquire()
+    try:
+        client.on_message(client, None, msg("totalmix/workspace", "2"))
+        time.sleep(0.2)
+        assert sent_osc == []                      # blocked behind the lock
+        assert bridge.workspace_updates == []
+    finally:
+        bridge._device_lock.release()
+    _join_mqtt_threads()
+    assert ("/loadQuickWorkspace", 2) in sent_osc
+    assert bridge.workspace_updates == ["Pill_setup"]
