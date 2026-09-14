@@ -563,7 +563,7 @@ window.knobFromMidi = function (name, value) {
   if (window.ModulKnob && document.documentElement.getAttribute('data-skin') === 'modul') {
     ModulKnob.set(name, v);
   }
-  const slider = document.getElementById(`knob-${name}`);
+  const slider = document.getElementById(`knob:${name}`);
   if (slider) slider.value = v;
   knobInput(name, v);   // model + graph + label, then sendKnob(device)
 };
@@ -574,7 +574,7 @@ window.knobInput = function (name, value) {
   const step = m ? _knobStepOf(m) : null;
   if (m) m.knob_value = parseFloat(value);
   if (typeof refreshKnobGraph === 'function') refreshKnobGraph(name);
-  const lbl = document.getElementById(`knob-val-${name}`);
+  const lbl = document.getElementById(`knob-val:${name}`);
   if (lbl && step && window._valEdit !== name) {
     const param = (step.target && step.target.param) || 'volume';
     lbl.textContent = fmtParamValue(param, _shapeKnob(parseFloat(value), step.operation));
@@ -589,9 +589,9 @@ function updateKnobCard(name, moveSlider = true) {
   const step = m ? _knobStepOf(m) : null;
   if (!step) return;
   const param = (step.target && step.target.param) || 'volume';
-  const slider = document.getElementById(`knob-${name}`);
-  const lbl = document.getElementById(`knob-val-${name}`);
-  const dev = document.getElementById(`knob-dev-${name}`);
+  const slider = document.getElementById(`knob:${name}`);
+  const lbl = document.getElementById(`knob-val:${name}`);
+  const dev = document.getElementById(`knob-dev:${name}`);
   const v = Number.isFinite(parseFloat(m.knob_value)) ? parseFloat(m.knob_value) : null;
   if (slider && v != null && window._knobDrag !== name) slider.value = v;
   if (lbl && v != null && window._valEdit !== name) lbl.textContent = fmtParamValue(param, _shapeKnob(v, step.operation));
@@ -605,22 +605,22 @@ function updateKnobCard(name, moveSlider = true) {
   } else if (typeof _syncKnobGraph === 'function') {
     _syncKnobGraph(name);   // graphs-in-every-theme: strip curve follows
   }
-  const chip = document.getElementById(`knob-en-${name}`);
+  const chip = document.getElementById(`knob-en:${name}`);
   if (chip && !chip.classList.contains('mpower')) chip.outerHTML = _enableChipHTML(name, m, step);
   (COMPANION_FOR[param] || []).forEach(cp => {
-    const sl = document.getElementById(`knob-cps-${name}-${cp}`);
+    const sl = document.getElementById(`knob-cps:${name}-${cp}`);
     const cv = parseFloat((m.companions || {})[cp]);
     if (sl && Number.isFinite(cv) && window._knobDrag !== `${name}:${cp}`) {
       sl.value = cv;
-      const lbl = document.getElementById(`knob-cpv-${name}-${cp}`);
+      const lbl = document.getElementById(`knob-cpv:${name}-${cp}`);
       const def = PARAM_DEFS[cp] || {};
       if (lbl && window._valEdit !== `${name}:${cp}`) lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
     }
-    const el = document.getElementById(`knob-cp-${name}-${cp}`);
+    const el = document.getElementById(`knob-cp:${name}-${cp}`);
     if (el && !el.classList.contains('mplate') && document.activeElement !== el) {
       const tmp = document.createElement('div');
       tmp.innerHTML = _companionChipsHTML(name, m, step);
-      const fresh = tmp.querySelector(`#knob-cp-${name}-${cp}`);
+      const fresh = tmp.querySelector(`#${CSS.escape(`knob-cp:${name}-${cp}`)}`);
       if (fresh) el.outerHTML = fresh.outerHTML;
     }
   });
@@ -664,7 +664,7 @@ window.companionInput = function (name, param, value) {
   window._cpEcho = window._cpEcho || {};
   window._cpEcho[name + '|' + param] = v;
   if (typeof refreshKnobGraph === 'function') refreshKnobGraph(name);
-  const lbl = document.getElementById(`knob-cpv-${name}-${param}`);
+  const lbl = document.getElementById(`knob-cpv:${name}-${param}`);
   if (lbl && window._valEdit !== `${name}:${param}`) lbl.textContent = def.fmt ? def.fmt(v) : Math.round(v * 100) + '%';
   window._cpPending[`${name}\u0000${param}`] = v;
   if (_cpFlushTimer) return;
@@ -692,7 +692,7 @@ function updateMacroCard(name) {
   const m = macros[name];
   if (!m) return;
 
-  const routingEl = document.querySelector(`#card-${name} .routing-label`);
+  const routingEl = document.querySelector(`#${CSS.escape(`card:${name}`)} .routing-label`);
   if (routingEl && m.routing_label) routingEl.textContent = m.routing_label;
 
   updateHealthLine(name);   // #22: last-fire outcome rides macro_update
@@ -702,7 +702,7 @@ function updateMacroCard(name) {
 // Surgical refresh of the card's persistent health line (#22) — never a
 // full card re-render, so open editors and animations are untouched
 function updateHealthLine(name) {
-  const slot = document.querySelector(`#card-${name} .health-line-slot`);
+  const slot = document.querySelector(`#${CSS.escape(`card:${name}`)} .health-line-slot`);
   const m = macros[name];
   if (slot && m && typeof _healthLineHTML === 'function') {
     slot.innerHTML = _healthLineHTML(m.last_fire);
@@ -734,7 +734,7 @@ function _ledSet(dot, color, shadow, durationMs) {
 
 // White flash — MIDI signal received (very brief, before macro fires)
 function pulseLED(name, triggerTimestamp) {
-  const dot = document.getElementById(`led-dot-${name}`);
+  const dot = document.getElementById(`led-dot:${name}`);
   _ledSet(dot, 'bg-white', 'shadow-[0_0_8px_#fff]', 150);
 
   const m = macros[name];
@@ -748,7 +748,7 @@ function pulseLED(name, triggerTimestamp) {
 // paint the reason on the card's routing label for a few seconds
 function showSkipReason(name, reason) {
   const cards = document.querySelectorAll('.routing-label');
-  const card = document.getElementById(`led-dot-${name}`)?.closest('[class*=card],div');
+  const card = document.getElementById(`led-dot:${name}`)?.closest('[class*=card],div');
   const label = card ? card.querySelector('.routing-label') : null;
   if (!label) return;
   if (label.dataset.orig === undefined) label.dataset.orig = label.textContent;
@@ -792,13 +792,13 @@ function setLEDRunning(name) {
   if (_lastFiredName && _lastFiredName !== name) {
     _clearLastFired(_lastFiredName);
   }
-  const dot = document.getElementById(`led-dot-${name}`);
+  const dot = document.getElementById(`led-dot:${name}`);
   _ledSet(dot, 'bg-amber-400', 'shadow-[0_0_8px_#fbbf24]', 0);
 }
 
 function _clearLastFired(name) {
-  const dot  = document.getElementById(`led-dot-${name}`);
-  const card = document.getElementById(`card-${name}`);
+  const dot  = document.getElementById(`led-dot:${name}`);
+  const card = document.getElementById(`card:${name}`);
   if (dot)  { dot.classList.remove(..._LED_ALL); dot.classList.add('bg-zinc-700'); }
   if (card) card.classList.remove('!border-cyan-500', 'shadow-[0_0_14px_rgba(34,211,238,0.15)]');
 }
@@ -808,8 +808,8 @@ function _clearLastFired(name) {
 // "currently running" and "last fired", readable at a glance across the room.
 function flashLEDComplete(name) {
   _lastFiredName = name;
-  const dot  = document.getElementById(`led-dot-${name}`);
-  const card = document.getElementById(`card-${name}`);
+  const dot  = document.getElementById(`led-dot:${name}`);
+  const card = document.getElementById(`card:${name}`);
   if (!dot) return;
   dot.classList.remove(..._LED_ALL);
   dot.classList.add('bg-green-400', 'shadow-[0_0_10px_#4ade80]');
@@ -823,7 +823,7 @@ function flashLEDComplete(name) {
 
 // Red flash — macro was skipped/dropped
 function flashLEDSkipped(name) {
-  const dot = document.getElementById(`led-dot-${name}`);
+  const dot = document.getElementById(`led-dot:${name}`);
   _ledSet(dot, 'bg-red-500', 'shadow-[0_0_8px_#ef4444]', 800);
 }
 
@@ -906,7 +906,7 @@ setInterval(async () => {
     const d = await r.json();
     if (!d.available) return;
     document.querySelectorAll('[data-kind="level"], [data-kind="pan"]').forEach(card => {
-      const name = card.id.replace('card-', '');
+      const name = card.id.replace('card:', '');
       const db = d.meters[name];
       // a metered channel at silence shows a presence tick at the floor -
       // an empty lane must mean NO METER, not no signal (#user report)
@@ -915,10 +915,10 @@ setInterval(async () => {
       if (window.ModulGraph) ModulGraph.meterUpdate(`f:${name}`, pos);
     });
     // sidechain duck: live gain reduction onto the modules (#duck)
-    if (document.querySelector('[id^="duck-gr-"]')) {
+    if (document.querySelector('[id^="duck-gr:"]')) {
       const dk = await fetch('/api/duck').then(r => r.json()).catch(() => null);
       if (dk && dk.available) {
-        document.querySelectorAll('[id^="duck-gr-"]').forEach(el => {
+        document.querySelectorAll('[id^="duck-gr:"]').forEach(el => {
           const name = el.id.slice(8);
           const st = dk.duck[name];
           const gr = st && st.gr;

@@ -177,7 +177,7 @@ function _warnIconHTML(issues) {
 // only the per-card warn slots update; open editors and animations survive.
 window.refreshValidity = function () {
   Object.keys(macros).forEach(name => {
-    const slot = document.querySelector(`#card-${name} .warn-slot`);
+    const slot = document.querySelector(`#${CSS.escape(`card:${name}`)} .warn-slot`);
     if (slot) slot.innerHTML = _warnIconHTML(macroTargetIssues(macros[name]));
   });
 };
@@ -243,12 +243,12 @@ function _companionSlidersHTML(name, m, step) {
     const short = (def.label || cp).replace(/^EQ Band \d /, '').replace(/^Low Cut /, '');
     return `<div class="flex gap-2 items-center">
       <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${_esc(short)}</span>
-      <input id="knob-cps-${name}-${cp}" type="range" min="0" max="1" step="0.002" value="${val ?? 0.5}"
+      <input id="knob-cps:${name}-${cp}" type="range" min="0" max="1" step="0.002" value="${val ?? 0.5}"
           class="flex-1 min-w-0 accent-zinc-400" title="${_esc(def.label || cp)} on the device — live"
           oninput="companionInput('${name}','${cp}',this.value)" ondblclick="resetCompToDefault('${name}','${cp}')"
           onpointerdown="window._knobDrag='${name}:${cp}'" onpointerup="window._knobDrag=null"
           onpointercancel="window._knobDrag=null" onlostpointercapture="window._knobDrag=null">
-      <span id="knob-cpv-${name}-${cp}" onclick="startCompValEdit('${name}','${cp}')" title="tap to type a value" class="text-[10px] text-zinc-400 font-mono w-12 text-center shrink-0 cursor-text">${val == null ? '?' : (def.fmt ? def.fmt(val) : Math.round(val * 100) + '%')}</span>
+      <span id="knob-cpv:${name}-${cp}" onclick="startCompValEdit('${name}','${cp}')" title="tap to type a value" class="text-[10px] text-zinc-400 font-mono w-12 text-center shrink-0 cursor-text">${val == null ? '?' : (def.fmt ? def.fmt(val) : Math.round(val * 100) + '%')}</span>
     </div>`;
   }).join('');
 }
@@ -260,7 +260,7 @@ function _companionChipsHTML(name, m, step) {
     const pinned = (((step.operation || {}).companions) || {})[cp] != null;
     const v = (m.companions || {})[cp];
     const idx = Number.isFinite(parseFloat(v)) ? Math.round(parseFloat(v) * (labels.length - 1)) : null;
-    return `<select id="knob-cp-${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
+    return `<select id="knob-cp:${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
         title="${_esc(cp.replace(/_/g, ' '))} on the device${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}"${pinned ? ' style="border-color:rgba(251,146,60,0.5)"' : ''}
         class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border cursor-pointer transition-all ${idx == null ? 'bg-zinc-900 border-zinc-800 text-zinc-600' : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white'}">
         <option value="" disabled${idx == null ? ' selected' : ''}>${_esc(cp.replace(/_/g, ' '))} ?</option>
@@ -279,7 +279,7 @@ function _enableChipHTML(name, m, step) {
             : st === false ? 'bg-zinc-800 border-zinc-700 text-zinc-500'
             :                'bg-zinc-900 border-zinc-800 text-zinc-600';
   const word = st === true ? 'ON' : st === false ? 'OFF' : '?';
-  return `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')"
+  return `<button id="knob-en:${name}" onclick="toggleKnobEnable('${name}')"
       title="${_esc(label)} section switch on the device — click to toggle"
       class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-md border transition-all ${cls}">${_esc(label)} ${word}</button>`;
 }
@@ -292,7 +292,7 @@ function _knobStripHTML(name, m, step) {
   const v = _knobNormOf(m, step.operation);
   const dev = Number.isFinite(parseFloat(m.device_value)) ? parseFloat(m.device_value) : null;
   return `
-<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-4 rounded-2xl transition-colors duration-200">
+<div id="card:${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-4 rounded-2xl transition-colors duration-200">
     <div class="flex items-center gap-2 mb-1">
         ${_nameHTML(name)}
         <span class="warn-slot shrink-0">${_warnIconHTML(issues)}</span>
@@ -305,22 +305,22 @@ function _knobStripHTML(name, m, step) {
         ${_enableChipHTML(name, m, step)}
         ${_companionChipsHTML(name, m, step)}
     </div>
-    ${_graphsEnabled() && _graphKindOf(param) ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : ''}
+    ${_graphsEnabled() && _graphKindOf(param) ? `<div id="mgraph:${name}" class="mg-wrap"></div>` : ''}
     <div class="flex gap-2 items-center mb-1 min-w-0">
-        <input id="knob-${name}" type="range" min="0" max="1" step="0.002" value="${v}"
+        <input id="knob:${name}" type="range" min="0" max="1" step="0.002" value="${v}"
             class="flex-1 min-w-0 accent-orange-500" title="Drag to set — MIDI moves it too · double-click resets to default"
             oninput="knobInput('${name}', this.value)" ondblclick="resetKnobToDefault('${name}')"
             onpointerdown="window._knobDrag='${name}'" onpointerup="window._knobDrag=null"
             onpointercancel="window._knobDrag=null" onlostpointercapture="window._knobDrag=null">
-        <span id="knob-val-${name}" onclick="startKnobValEdit('${name}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0 cursor-text">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+        <span id="knob-val:${name}" onclick="startKnobValEdit('${name}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-12 text-center shrink-0 cursor-text">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
     </div>
-    <div id="knob-dev-${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>
-    <div id="knob-band-${name}" class="space-y-1 mb-2">${_companionSlidersHTML(name, m, step)}</div>
+    <div id="knob-dev:${name}" class="text-[10px] text-zinc-600 font-mono mb-2">${dev != null ? 'device ' + fmtParamValue(param, dev) : ''}</div>
+    <div id="knob-band:${name}" class="space-y-1 mb-2">${_companionSlidersHTML(name, m, step)}</div>
     <button onclick="toggleDetail('${name}')"
         class="w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
-        DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
+        DETAILS <i id="detail-arrow:${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
-    <div id="detail-${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+    <div id="detail:${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
 </div>`;
 }
 
@@ -476,7 +476,7 @@ function _knobModuleHTML(name, m, step) {
     const cv = parseFloat((m.companions || {})[cp]);
     const idx = Number.isFinite(cv) ? Math.round(cv * (labels.length - 1)) : null;
     const pinned = (((step.operation || {}).companions) || {})[cp] != null;
-    return `<select id="knob-cp-${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
+    return `<select id="knob-cp:${name}-${cp}" onchange="setKnobParam('${name}','${cp}',this.selectedIndex - 1,${labels.length})"
         class="mplate${pinned ? ' pinned' : ''}" title="${_esc(cp.replace(/_/g, ' '))}${pinned ? ' (pinned: the knob re-asserts this choice)' : ''}">
         <option value="" disabled${idx == null ? ' selected' : ''}>\u2014</option>
         ${labels.map((l, i) => `<option value="${i}"${i === idx ? ' selected' : ''}>${_enumGlyph(cp, l)}${_esc(l)}</option>`).join('')}
@@ -489,7 +489,7 @@ function _knobModuleHTML(name, m, step) {
     return `<div class="mmini" title="${_esc(def.label || cp)} on the device \u2014 live">
       ${ModulKnob.html(name, { size: 'mini', suffix: cp, label: def.label || cp })}
       <span class="mmini-lbl">${_esc(short)}</span>
-      <span id="knob-cpv-${name}-${cp}" class="mmini-val" onclick="startCompValEdit('${name}','${cp}')" title="tap to type a value">${Number.isFinite(cv) ? (def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%') : '\u2014'}</span>
+      <span id="knob-cpv:${name}-${cp}" class="mmini-val" onclick="startCompValEdit('${name}','${cp}')" title="tap to type a value">${Number.isFinite(cv) ? (def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%') : '\u2014'}</span>
     </div>`;
   }).join('');
   const hasEnable = !!ENABLE_FOR[param];
@@ -497,7 +497,7 @@ function _knobModuleHTML(name, m, step) {
   const gkind = _graphKindOf(param) || 'plain';
   const showGraph = hasGraph && size > 2;   // 2HP: one knob, one value
   return `
-<div id="card-${name}" class="card mmodule" data-size="${size}" data-kind="${gkind}">
+<div id="card:${name}" class="card mmodule" data-size="${size}" data-kind="${gkind}">
   <div class="mrk-head">
     <div class="mhead"><span class="mgrip" draggable="true" title="drag to reorder">\u28ff</span>${_nameHTML(name)}<span class="warn-slot">${_warnIconHTML(issues)}</span></div>
     <select class="msize" onchange="setUnitSize('${name}', this.value)" title="unit width - Eurorack HP sizes (or drag the module's right edge)">
@@ -505,25 +505,25 @@ function _knobModuleHTML(name, m, step) {
     </select>
     <div class="msub"><span class="routing-label">${_esc(m.routing_label || '\u2014')}</span></div>
     ${enumChips ? `<div class="mrk-plates">${enumChips}</div>` : ''}
-    ${hasEnable ? `<button id="knob-en-${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
+    ${hasEnable ? `<button id="knob-en:${name}" onclick="toggleKnobEnable('${name}')" class="mpower ${en === true ? 'on' : en === false ? 'off' : 'unk'}"
         title="section power"><span class="mled"></span><span class="mpower-txt">${en === true ? 'ON' : en === false ? 'OFF' : '\u2014'}</span></button>` : ''}
   </div>
-  ${showGraph ? `<div id="mgraph-${name}" class="mg-wrap"></div>` : `<div class="mrk-nograph"></div>`}
+  ${showGraph ? `<div id="mgraph:${name}" class="mg-wrap"></div>` : `<div class="mrk-nograph"></div>`}
   <div class="mrk-ctrl">
     <div class="mrk-knob">${ModulKnob.html(name, { label: shown })}</div>
-    <span id="knob-val-${name}" class="mval" onclick="startKnobValEdit('${name}')" title="tap to type a value">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
+    <span id="knob-val:${name}" class="mval" onclick="startKnobValEdit('${name}')" title="tap to type a value">${fmtParamValue(param, _shapeKnob(v, step.operation))}</span>
     ${rangeTxt ? `<span class="mrk-range">RANGE ${rangeTxt}</span>` : ''}
-    <span id="knob-dev-${name}" class="mdev">${Number.isFinite(parseFloat(m.device_value)) ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : ''}</span>
+    <span id="knob-dev:${name}" class="mdev">${Number.isFinite(parseFloat(m.device_value)) ? 'device ' + fmtParamValue(param, parseFloat(m.device_value)) : ''}</span>
     ${midiLabel ? `<span class="mbadge">${midiLabel}</span>` : ''}
     <div class="mminis">${minis}</div>
     <button onclick="toggleDetail('${name}')" class="mdetails">
-      DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
+      DETAILS <i id="detail-arrow:${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
   </div>
   ${_dgBarHTML(name, m, step)}
   <div class="mrk-below">
     <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
-    <div id="detail-${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+    <div id="detail:${name}" class="hidden mt-2 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
   </div>
   <div class="mresize" title="drag to resize"></div>
 </div>`;
@@ -561,7 +561,7 @@ function _duckHTML(name, m, step) {
   if (param !== 'volume') return '';           // duck rides the fader law
   const duck = _duckCfg(m);
   const on = duck && duck.enabled;
-  const chip = `<button id="duck-chip-${name}" onclick="toggleDuck('${name}')"
+  const chip = `<button id="duck-chip:${name}" onclick="toggleDuck('${name}')"
       class="mduck-chip${on ? ' on' : duck ? ' cfg' : ''}"
       title="sidechain duck - a key channel's level pulls this send down (goblin mode)">DUCK</button>`;
   if (!duck) return `<span class="mdg-sec">${chip}</span>`;
@@ -582,7 +582,7 @@ function _duckHTML(name, m, step) {
       <span class="mduck-lbl">${lbl}</span>
       <input type="range" min="0" max="1" step="any" value="${toNorm(real)}"
           oninput="_duckSlide('${name}','${f}',this.value)">
-      <span id="duck-v-${name}-${f}" class="mduck-val">${fmt(real)}</span>
+      <span id="duck-v:${name}-${f}" class="mduck-val">${fmt(real)}</span>
     </label>`;
   }).join('');
   return `<span class="mdg-sec on">
@@ -590,7 +590,7 @@ function _duckHTML(name, m, step) {
     <span class="mduck-lbl">KEY</span>
     <select class="mduck-key" onchange="_duckKey('${name}', this.value)" title="the channel whose level does the ducking">${keyOpts}</select>
     ${sliders}
-    <span id="duck-gr-${name}" class="mduck-gr" title="live gain reduction"></span>
+    <span id="duck-gr:${name}" class="mduck-gr" title="live gain reduction"></span>
   </span>`;
 }
 
@@ -636,8 +636,8 @@ function _groupHTML(name, m, step) {
   return `<span class="mdg-sec on mgrp">
     ${chip}
     ${members}
-    <select id="grp-ch-${name}" class="mduck-key" title="member channel">${chOpts}</select>
-    <select id="grp-sub-${name}" class="mduck-key" title="member submix (for input/playback sends)">${subOpts}</select>
+    <select id="grp-ch:${name}" class="mduck-key" title="member channel">${chOpts}</select>
+    <select id="grp-sub:${name}" class="mduck-key" title="member submix (for input/playback sends)">${subOpts}</select>
     <button class="mgrp-act" onclick="groupAdd('${name}')" title="add this send to the group">+ ADD</button>
     <button class="mgrp-act" onclick="groupCapture('${name}')"
         title="capture the balance: each member's offset becomes its CURRENT level relative to this knob">CAPTURE</button>
@@ -663,8 +663,8 @@ window.toggleSendGroup = function (name) {
 
 window.groupAdd = function (name) {
   const grp = _groupOf(macros[name]);
-  const chSel = document.getElementById(`grp-ch-${name}`);
-  const subSel = document.getElementById(`grp-sub-${name}`);
+  const chSel = document.getElementById(`grp-ch:${name}`);
+  const subSel = document.getElementById(`grp-sub:${name}`);
   if (!grp || !chSel || !chSel.value) return;
   const bar = chSel.value.indexOf('|');
   const row = parseInt(chSel.value.slice(0, bar), 10) || 1;
@@ -754,7 +754,7 @@ window._duckSlide = function (name, field, v01) {
   if (!duck || !def) return;
   const real = def[2](parseFloat(v01));
   duck[field] = Math.round(real * 10) / 10;
-  const el = document.getElementById(`duck-v-${name}-${field}`);
+  const el = document.getElementById(`duck-v:${name}-${field}`);
   if (el) el.textContent = def[4](duck[field]);
   _duckSave(name);
 };
@@ -784,7 +784,7 @@ function _wireKnobGraph(name) {
   const m = macros[name], step = m && _knobStepOf(m);
   if (!step) return;
   const param = (step.target && step.target.param) || 'volume';
-  const gEl = document.getElementById(`mgraph-${name}`);
+  const gEl = document.getElementById(`mgraph:${name}`);
   if (gEl && window.ModulGraph && window.uPlot) {
     // phones: a taller plot = a real finger lane for the cutoff drag;
     // the RACK layout gives the graph hero height on desktop too
@@ -876,7 +876,7 @@ function _wireKnobReorder() {
   row.querySelectorAll('.mgrip').forEach(grip => {
     const card = grip.closest('.mmodule');
     grip.addEventListener('dragstart', ev => {
-      dragName = card.id.replace('card-', '');
+      dragName = card.id.replace('card:', '');
       ev.dataTransfer.effectAllowed = 'move';
       ev.dataTransfer.setData('text/plain', dragName);
       card.classList.add('mdragging');
@@ -900,9 +900,9 @@ function _wireKnobReorder() {
       const src = dragName; dragName = null;
       row.querySelectorAll('.mdragging, .mdrop').forEach(el =>
         el.classList.remove('mdragging', 'mdrop'));
-      const dst = card.id.replace('card-', '');
+      const dst = card.id.replace('card:', '');
       if (!src || src === dst) return;
-      const knobs = [...row.querySelectorAll('.mmodule')].map(c => c.id.replace('card-', ''));
+      const knobs = [...row.querySelectorAll('.mmodule')].map(c => c.id.replace('card:', ''));
       knobs.splice(knobs.indexOf(src), 1);
       knobs.splice(knobs.indexOf(dst) + (ev.offsetY > card.offsetHeight / 2 ? 1 : 0), 0, src);
       await _persistKnobOrder(knobs);
@@ -940,7 +940,7 @@ function _wireKnobResize() {
   if (!row) return;
   row.querySelectorAll('.mresize').forEach(h => {
     const card = h.closest('.mmodule');
-    const name = card.id.replace('card-', '');
+    const name = card.id.replace('card:', '');
     let startX = 0, startSpan = 0, colW = 0, preview = null;
     h.addEventListener('pointerdown', ev => {
       const hp = _unitHP(macros[name] || {});
@@ -1012,7 +1012,7 @@ function _updateKnobGraph(name, m, step, instant) {
 // followed server echoes, through the 170ms morph).
 window.refreshKnobGraph = function (name) {
   const m = macros[name], step = m && _knobStepOf(m);
-  if (!step || !document.getElementById(`mgraph-${name}`)) return;
+  if (!step || !document.getElementById(`mgraph:${name}`)) return;
   _updateKnobGraph(name, m, step, true);
 };
 
@@ -1020,7 +1020,7 @@ window.refreshKnobGraph = function (name) {
 window._syncKnobGraph = function (name) {
   if (window._knobDrag === name) return;   // drag frames own the curve
   const m = macros[name], step = m && _knobStepOf(m);
-  if (!step || !document.getElementById(`mgraph-${name}`)) return;
+  if (!step || !document.getElementById(`mgraph:${name}`)) return;
   _updateKnobGraph(name, m, step, false);
 };
 
@@ -1029,7 +1029,7 @@ window._syncKnobGraph = function (name) {
 // companion plates and readouts.
 window._modulSync = function (name) {
   const m = macros[name], step = m && _knobStepOf(m);
-  if (!step || !document.getElementById(`mknob-${name}`)) return;
+  if (!step || !document.getElementById(`mknob:${name}`)) return;
   const param = (step.target && step.target.param) || 'volume';
   const draggingThis = window._knobDrag === name;
   if (!draggingThis) ModulKnob.set(name, _knobNormOf(m, step.operation));
@@ -1038,21 +1038,21 @@ window._modulSync = function (name) {
     const cv = parseFloat((m.companions || {})[cp]);
     if (!Number.isFinite(cv)) return;
     if (ENUM_LABELS[cp]) {
-      const plate = document.getElementById(`knob-cp-${name}-${cp}`);
+      const plate = document.getElementById(`knob-cp:${name}-${cp}`);
       if (plate && plate.classList.contains('mplate') && document.activeElement !== plate) {
         const labels = ENUM_LABELS[cp];
         plate.selectedIndex = 1 + Math.round(cv * (labels.length - 1));
       }
     } else {
       if (window._knobDrag !== `${name}:${cp}`) ModulKnob.set(name, cv, cp);
-      const lbl = document.getElementById(`knob-cpv-${name}-${cp}`);
+      const lbl = document.getElementById(`knob-cpv:${name}-${cp}`);
       const def = PARAM_DEFS[cp] || {};
       if (lbl && lbl.classList.contains('mmini-val'))
         lbl.textContent = def.fmt ? def.fmt(cv) : Math.round(cv * 100) + '%';
     }
   });
   if (!draggingThis) _updateKnobGraph(name, m, step, false);
-  const pw = document.getElementById(`knob-en-${name}`);
+  const pw = document.getElementById(`knob-en:${name}`);
   if (pw && pw.classList.contains('mpower')) {
     pw.classList.toggle('on', m.enable_value === true);
     pw.classList.toggle('off', m.enable_value === false);
@@ -1078,12 +1078,12 @@ function _slugKey(text) {
 
 function _nameHTML(name) {
   const shown = _displayName(name, macros[name]);
-  return `<h3 id="name-${name}" ondblclick="startRename('${name}')" title="Double-click to rename${shown !== name ? ' (key: ' + _esc(name) + ')' : ''}"
+  return `<h3 id="name:${name}" ondblclick="startRename('${name}')" title="Double-click to rename${shown !== name ? ' (key: ' + _esc(name) + ')' : ''}"
       class="text-sm font-bold text-white truncate flex-1 font-mono tracking-tight cursor-text">${_esc(shown)}</h3>`;
 }
 
 window.startRename = function (name) {
-  const h = document.getElementById(`name-${name}`);
+  const h = document.getElementById(`name:${name}`);
   if (!h || h.dataset.editing) return;
   h.dataset.editing = '1';
   const input = document.createElement('input');
@@ -1163,7 +1163,7 @@ function _modulWireWaves() {
   const mobile = window.matchMedia && matchMedia('(max-width: 480px)').matches;
   Object.keys(macros).forEach(name => {
     _modulWaveStepsOf(macros[name], _knobStepOf(macros[name])).forEach(({ s, i }) => {
-      const el = document.getElementById(`mwave-${name}-${i}`);
+      const el = document.getElementById(`mwave:${name}-${i}`);
       if (el) ModulGraph.waveformInit(`w:${name}:${i}`, el, s.operation,
                                       { height: mobile ? 56 : 36 });
     });
@@ -1176,10 +1176,10 @@ function createMacroCardHTML(name, m) {
   const routingLabel = m.routing_label || '—';
   const issues = macroTargetIssues(m);
   return `
-<div id="card-${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200">
+<div id="card:${name}" class="card bg-zinc-900 border border-zinc-800 hover:border-zinc-700 p-5 rounded-2xl transition-colors duration-200">
     <!-- Header: LED · name/desc · warn badge · MIDI badge -->
     <div class="flex items-center gap-3 mb-1">
-        <span id="led-dot-${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
+        <span id="led-dot:${name}" class="w-3 h-3 rounded-full bg-zinc-700 transition-all duration-150 shrink-0"></span>
         ${_nameHTML(name)}
         <span class="warn-slot shrink-0">${_warnIconHTML(issues)}</span>
         ${midiLabel ? `<div class="text-[10px] font-mono bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md shrink-0 border border-zinc-700/60">${midiLabel}</div>` : ''}
@@ -1191,10 +1191,10 @@ function createMacroCardHTML(name, m) {
         <div class="health-line-slot">${_healthLineHTML(m.last_fire)}</div>
     </div>
     ${_modulWaveStepsOf(m, knobStep).map(({ s, i }) =>
-      `<div id="mwave-${name}-${i}" class="mwave"><span id="mwaveval-${name}-${i}" class="mwave-val">${_mwaveIdleText(s)}</span></div>`).join('')}
+      `<div id="mwave:${name}-${i}" class="mwave"><span id="mwaveval:${name}-${i}" class="mwave-val">${_mwaveIdleText(s)}</span></div>`).join('')}
     <!-- Progress bar -->
     <div class="h-1 bg-zinc-800 rounded-full overflow-hidden mb-3">
-      <div id="progress-bar-${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
+      <div id="progress-bar:${name}" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-none" style="width:0%;"></div>
     </div>
     <!-- Action buttons -->
     <!-- (the grid wrapper stays: the skins style .grid-cols-3 > button as the
@@ -1208,9 +1208,9 @@ function createMacroCardHTML(name, m) {
     <!-- Details toggle -->
     <button onclick="toggleDetail('${name}')"
         class="mt-3 w-full text-zinc-700 hover:text-zinc-400 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors tracking-widest">
-        DETAILS <i id="detail-arrow-${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
+        DETAILS <i id="detail-arrow:${name}" class="fas fa-chevron-down text-[9px] transition-transform duration-150"></i>
     </button>
-    <div id="detail-${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
+    <div id="detail:${name}" class="hidden mt-3 p-3 bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs"></div>
 </div>`;
 }
 
@@ -1316,7 +1316,7 @@ window.addEventListener('resize', equalizeCardHeights);
 function animateProgress(name, durationMs) {
   _modulWaveKeys(name).forEach(({ key, i }) => {
     const step = ((macros[name] || {}).steps || [])[i];
-    const lbl = document.getElementById(`mwaveval-${name}-${i}`);
+    const lbl = document.getElementById(`mwaveval:${name}-${i}`);
     const fmt = _mwaveFmt(step);
     ModulGraph.waveformRun(key, durationMs, (t, v) => {
       if (!lbl) return;
@@ -1329,7 +1329,7 @@ function animateProgress(name, durationMs) {
       }
     });
   });
-  const bar = document.getElementById(`progress-bar-${name}`);
+  const bar = document.getElementById(`progress-bar:${name}`);
   if (!bar) return;
   bar.style.transition = 'none';
   bar.style.width = '0%';
@@ -1340,7 +1340,7 @@ function animateProgress(name, durationMs) {
 
 function snapProgressToZero(name) {
   _modulWaveKeys(name).forEach(({ key }) => ModulGraph.waveformStop(key));
-  const bar = document.getElementById(`progress-bar-${name}`);
+  const bar = document.getElementById(`progress-bar:${name}`);
   if (!bar) return;
   bar.style.transition = 'none';
   bar.style.width = '0%';
@@ -1349,9 +1349,9 @@ function snapProgressToZero(name) {
 // The wave plots on a card: engine key + step index (empty outside MODUL)
 function _modulWaveKeys(name) {
   if (!window.ModulGraph) return [];
-  return [...document.querySelectorAll(`div[id^="mwave-${name}-"]`)]
+  return [...document.querySelectorAll(`div[id^="mwave:${name}-"]`)]
     .map(el => {
-      const i = el.id.slice(`mwave-${name}-`.length);
+      const i = el.id.slice(`mwave:${name}-`.length);
       return { key: `w:${name}:${i}`, i: parseInt(i, 10) };
     });
 }
@@ -1559,7 +1559,7 @@ function _buildSnapshotOptions(workspace, current) {
 
 // Called when workspace dropdown changes — refreshes snapshot options for that workspace
 window.updateSnapshotOptions = function(name, workspace) {
-  const sel = document.getElementById(`snapshot-select-${name}`);
+  const sel = document.getElementById(`snapshot-select:${name}`);
   if (!sel) return;
   const current = sel.value;
   sel.innerHTML = _buildSnapshotOptions(workspace, current);
@@ -1608,7 +1608,7 @@ function _buildSubmixPickerOptions(selected) {
 }
 
 window.updateSendPickerOptions = function (name, selectedChannel) {
-  const sendSel = document.getElementById(`routing-send-${name}`);
+  const sendSel = document.getElementById(`routing-send:${name}`);
   if (!sendSel) return;
   // A rebuild with no explicit choice keeps the current one — the submix
   // onchange callers pass nothing, and losing the selection re-targeted the
@@ -1617,7 +1617,7 @@ window.updateSendPickerOptions = function (name, selectedChannel) {
   const picker = window._picker || {};
   const inputs = picker.inputs || [];
   const outs   = picker.outputs || [];
-  const paramSel = document.getElementById(`routing-param-${name}`);
+  const paramSel = document.getElementById(`routing-param:${name}`);
   const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
   // Alias groups from the physical table (#user bug: the live snapshot
   // only shows one name-shape - offer every known form, stereo first).
@@ -1818,14 +1818,14 @@ window.resetKnobToDefault = function (name) {
   const v = _knobDefaultNorm(name);
   if (v == null) return;
   knobInput(name, v);
-  const sl = document.getElementById(`knob-${name}`);
+  const sl = document.getElementById(`knob:${name}`);
   if (sl) sl.value = v;
   if (window.ModulKnob) ModulKnob.set(name, v);
 };
 window.resetCompToDefault = function (name, cp) {
   const v = _compDefault(cp);
   companionInput(name, cp, v);
-  const sl = document.getElementById(`knob-cps-${name}-${cp}`);
+  const sl = document.getElementById(`knob-cps:${name}-${cp}`);
   if (sl) sl.value = v;
   if (window.ModulKnob) ModulKnob.set(name, v, cp);
 };
@@ -1855,7 +1855,7 @@ function _valEditSwap(span, initial, commit) {
 window.startKnobValEdit = function (name) {
   if (window._valEdit) return;
   const m = macros[name], step = m && _knobStepOf(m);
-  const span = document.getElementById(`knob-val-${name}`);
+  const span = document.getElementById(`knob-val:${name}`);
   if (!span || !step) return;
   const param = (step.target && step.target.param) || 'volume';
   window._valEdit = name;
@@ -1866,7 +1866,7 @@ window.startKnobValEdit = function (name) {
       if (p != null) {
         const kn = _knobNormOf({ device_value: p }, step.operation);
         knobInput(name, kn);
-        const sl = document.getElementById(`knob-${name}`);
+        const sl = document.getElementById(`knob:${name}`);
         if (sl) sl.value = kn;
         if (window.ModulKnob) ModulKnob.set(name, kn);
         span.textContent = fmtParamValue(param, _shapeKnob(kn, step.operation));
@@ -1883,8 +1883,8 @@ window.startKnobValEdit = function (name) {
 window.startModValEdit = function (name, i, which, param) {
   const key = `${name}:mod:${i}:${which}`;
   if (window._valEdit) return;
-  const span = document.getElementById(`mod-${which}-${name}-${i}`);
-  const slider = document.getElementById(`mod-${which}-sl-${name}-${i}`);
+  const span = document.getElementById(`mod-${which}:${name}-${i}`);
+  const slider = document.getElementById(`mod-${which}-sl:${name}-${i}`);
   if (!span || !slider) return;
   const def = PARAM_DEFS[param] || {};
   const fmt = which === 'thr' ? (v => Math.round(v * 100) + '%')
@@ -1906,7 +1906,7 @@ window.startModValEdit = function (name, i, which, param) {
 
 window.startCompValEdit = function (name, cp) {
   if (window._valEdit) return;
-  const span = document.getElementById(`knob-cpv-${name}-${cp}`);
+  const span = document.getElementById(`knob-cpv:${name}-${cp}`);
   if (!span) return;
   const def = PARAM_DEFS[cp] || {};
   window._valEdit = `${name}:${cp}`;
@@ -1916,7 +1916,7 @@ window.startCompValEdit = function (name, cp) {
       const p = _parseParamText(cp, text);
       if (p != null) {
         companionInput(name, cp, p);
-        const sl = document.getElementById(`knob-cps-${name}-${cp}`);
+        const sl = document.getElementById(`knob-cps:${name}-${cp}`);
         if (sl) sl.value = p;
         if (window.ModulKnob) ModulKnob.set(name, p, cp);
         span.textContent = def.fmt ? def.fmt(p) : Math.round(p * 100) + '%';
@@ -2231,11 +2231,11 @@ function _modControls(name, i, step) {
     const t = Number.isFinite(parseFloat(op.threshold)) ? parseFloat(op.threshold) : 0.5;
     html += `<div class="flex gap-2 items-center">
       <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0" title="where the wave trips on/off">gate</span>
-      <input id="mod-thr-sl-${name}-${i}" data-field="steps.${i}.operation.threshold" type="range" min="0" max="1" step="any" value="${t}"
+      <input id="mod-thr-sl:${name}-${i}" data-field="steps.${i}.operation.threshold" type="range" min="0" max="1" step="any" value="${t}"
           class="flex-1 accent-orange-500" title="double-click resets to 50%"
-          oninput="document.getElementById('mod-thr-${name}-${i}').textContent = Math.round(this.value*100)+'%'"
-          ondblclick="this.value=0.5; document.getElementById('mod-thr-${name}-${i}').textContent='50%'">
-      <span id="mod-thr-${name}-${i}" onclick="startModValEdit('${name}',${i},'thr','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${Math.round(t * 100)}%</span>
+          oninput="document.getElementById('mod-thr:${name}-${i}').textContent = Math.round(this.value*100)+'%'"
+          ondblclick="this.value=0.5; document.getElementById('mod-thr:${name}-${i}').textContent='50%'">
+      <span id="mod-thr:${name}-${i}" onclick="startModValEdit('${name}',${i},'thr','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${Math.round(t * 100)}%</span>
     </div>`;
   }
   if (def.mod.range) {
@@ -2249,19 +2249,19 @@ function _modControls(name, i, step) {
     html += `<div class="space-y-2">
       <div class="flex gap-2 items-center">
         <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${loLbl}</span>
-        <input id="mod-lo-sl-${name}-${i}" data-field="steps.${i}.operation.range.0" type="range" min="${def.min}" max="${def.max}" step="any" value="${lo}"
+        <input id="mod-lo-sl:${name}-${i}" data-field="steps.${i}.operation.range.0" type="range" min="${def.min}" max="${def.max}" step="any" value="${lo}"
             class="flex-1 accent-orange-500" title="sweep start — double-click resets to ${def.fmt(def.min)}"
-            oninput="document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
-            ondblclick="this.value=${def.min}; document.getElementById('mod-lo-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
-        <span id="mod-lo-${name}-${i}" onclick="startModValEdit('${name}',${i},'lo','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${def.fmt(lo)}</span>
+            oninput="document.getElementById('mod-lo:${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
+            ondblclick="this.value=${def.min}; document.getElementById('mod-lo:${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+        <span id="mod-lo:${name}-${i}" onclick="startModValEdit('${name}',${i},'lo','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${def.fmt(lo)}</span>
       </div>
       <div class="flex gap-2 items-center">
         <span class="text-[10px] text-zinc-500 uppercase tracking-widest w-10 shrink-0">${hiLbl}</span>
-        <input id="mod-hi-sl-${name}-${i}" data-field="steps.${i}.operation.range.1" type="range" min="${def.min}" max="${def.max}" step="any" value="${hi}"
+        <input id="mod-hi-sl:${name}-${i}" data-field="steps.${i}.operation.range.1" type="range" min="${def.min}" max="${def.max}" step="any" value="${hi}"
             class="flex-1 accent-orange-500" title="sweep end — double-click resets to ${def.fmt(def.max)}"
-            oninput="document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
-            ondblclick="this.value=${def.max}; document.getElementById('mod-hi-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
-        <span id="mod-hi-${name}-${i}" onclick="startModValEdit('${name}',${i},'hi','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${def.fmt(hi)}</span>
+            oninput="document.getElementById('mod-hi:${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
+            ondblclick="this.value=${def.max}; document.getElementById('mod-hi:${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+        <span id="mod-hi:${name}-${i}" onclick="startModValEdit('${name}',${i},'hi','${param}')" title="tap to type a value" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0 cursor-text">${def.fmt(hi)}</span>
       </div>
     </div>`;
   }
@@ -2368,18 +2368,18 @@ function _valueControl(name, i, step, nc, sc) {
     <input data-field="steps.${i}.value" type="range"
         min="${def.min}" max="${def.max}" step="${def.step}" value="${val}"
         class="flex-1 accent-orange-500" title="double-click resets to ${def.fmt(def.default)}"
-        oninput="document.getElementById('val-label-${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
-        ondblclick="this.value=${def.default}; document.getElementById('val-label-${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
-    <span id="val-label-${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(val)}</span>
+        oninput="document.getElementById('val-label:${name}-${i}').textContent = fmtParamValue('${param}', this.value)"
+        ondblclick="this.value=${def.default}; document.getElementById('val-label:${name}-${i}').textContent = fmtParamValue('${param}', this.value)">
+    <span id="val-label:${name}-${i}" class="text-xs text-zinc-300 font-mono w-10 text-center shrink-0">${def.fmt(val)}</span>
     ${followBox}
   </div>`;
 }
 
 // Mute is global-per-channel — the submix dropdown is meaningless for it
 window.updateParamScope = function (name) {
-  const paramSel  = document.getElementById(`routing-param-${name}`);
-  const submixSel = document.getElementById(`routing-submix-${name}`);
-  const sendSel   = document.getElementById(`routing-send-${name}`);
+  const paramSel  = document.getElementById(`routing-param:${name}`);
+  const submixSel = document.getElementById(`routing-submix:${name}`);
+  const sendSel   = document.getElementById(`routing-send:${name}`);
   if (!paramSel || !submixSel) return;
   const def = PARAM_DEFS[paramSel.value] || {};
   const isMute = paramSel.value === 'mute';
@@ -2398,9 +2398,9 @@ window.updateParamScope = function (name) {
 };
 
 window.applyRouting = function (name) {
-  const submixSel = document.getElementById(`routing-submix-${name}`);
-  const sendSel   = document.getElementById(`routing-send-${name}`);
-  const paramSel0 = document.getElementById(`routing-param-${name}`);
+  const submixSel = document.getElementById(`routing-submix:${name}`);
+  const sendSel   = document.getElementById(`routing-send:${name}`);
+  const paramSel0 = document.getElementById(`routing-param:${name}`);
   const def0 = PARAM_DEFS[paramSel0 ? paramSel0.value : ''] || {};
   if (def0.global) {
     // Global FX parameter — no channel/submix, fixed address fallback
@@ -2444,7 +2444,7 @@ window.applyRouting = function (name) {
   const paramStep = _routableStep(m, name);
   const target = { submix: submixSel.value, channel: channelName };
   if (isPb) target.row = 2;
-  const paramSel = document.getElementById(`routing-param-${name}`);
+  const paramSel = document.getElementById(`routing-param:${name}`);
   const param = paramSel ? paramSel.value : 'volume';
   if (param !== 'volume') target.param = param;
   const paramDef = PARAM_DEFS[param] || {};
@@ -2483,9 +2483,9 @@ window.addEditorStep = function (name, kind) {
   }
   // New steps are born ROUTED (#14): mapping addresses is the bridge's job.
   // The step takes the routing picker's CURRENT selections (#24: name-only).
-  const submixSel = document.getElementById(`routing-submix-${name}`);
-  const sendSel   = document.getElementById(`routing-send-${name}`);
-  const paramSel  = document.getElementById(`routing-param-${name}`);
+  const submixSel = document.getElementById(`routing-submix:${name}`);
+  const sendSel   = document.getElementById(`routing-send:${name}`);
+  const paramSel  = document.getElementById(`routing-param:${name}`);
   const raw = sendSel ? sendSel.value : '';
   const param = paramSel ? paramSel.value : 'volume';
   const def = PARAM_DEFS[param] || {};
@@ -2525,7 +2525,7 @@ window.removeEditorStep = function (name, i) {
 // MIDI-learn (#7): arm a one-shot capture — the next CC or note from any
 // connected device (or MIDIEmu) fills this trigger's type/number/channel
 window.learnTrigger = function (name, i) {
-  const btn = document.getElementById(`learn-btn-${name}-${i}`);
+  const btn = document.getElementById(`learn-btn:${name}-${i}`);
   if (window._midiLearn) {          // second click cancels
     window._midiLearn = null;
     if (btn) btn.textContent = 'learn';
@@ -2560,7 +2560,7 @@ window.learnTrigger = function (name, i) {
 window._wiggleLearn = null;
 
 window.learnChannel = async function (name) {
-  const btn = document.getElementById(`wiggle-btn-${name}`);
+  const btn = document.getElementById(`wiggle-btn:${name}`);
   if (window._wiggleLearn) {              // second click cancels
     clearInterval(window._wiggleLearn.timer);
     window._wiggleLearn = null;
@@ -2580,7 +2580,7 @@ window.learnChannel = async function (name) {
   state.timer = setInterval(async () => {
     if (Date.now() > state.deadline) {
       clearInterval(state.timer); window._wiggleLearn = null;
-      const b = document.getElementById(`wiggle-btn-${name}`);
+      const b = document.getElementById(`wiggle-btn:${name}`);
       if (b) b.textContent = 'wiggle';
       return;
     }
@@ -2596,9 +2596,9 @@ window.learnChannel = async function (name) {
 };
 
 function _applyWiggle(name, hit) {
-  const sendSel   = document.getElementById(`routing-send-${name}`);
-  const submixSel = document.getElementById(`routing-submix-${name}`);
-  const paramSel  = document.getElementById(`routing-param-${name}`);
+  const sendSel   = document.getElementById(`routing-send:${name}`);
+  const submixSel = document.getElementById(`routing-submix:${name}`);
+  const paramSel  = document.getElementById(`routing-param:${name}`);
   if (!sendSel) return;
   const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
   if (hit.row_key === 'outputs') {
@@ -2621,10 +2621,10 @@ function _applyWiggle(name, hit) {
 // physical channel the picker is pointing at. The bridge restores the exact
 // prior level; it refuses when the current level is unknowable.
 window.pulseRouting = async function (name) {
-  const btn = document.getElementById(`pulse-btn-${name}`);
-  const sendSel   = document.getElementById(`routing-send-${name}`);
-  const submixSel = document.getElementById(`routing-submix-${name}`);
-  const paramSel  = document.getElementById(`routing-param-${name}`);
+  const btn = document.getElementById(`pulse-btn:${name}`);
+  const sendSel   = document.getElementById(`routing-send:${name}`);
+  const submixSel = document.getElementById(`routing-submix:${name}`);
+  const paramSel  = document.getElementById(`routing-param:${name}`);
   if (!sendSel || !sendSel.value) return;
   const def = PARAM_DEFS[paramSel ? paramSel.value : ''] || {};
   if (def.global) return;      // global FX — nothing channel-shaped to blip
@@ -2640,7 +2640,7 @@ window.pulseRouting = async function (name) {
   } catch (e) {
     if (btn) { btn.textContent = '!'; btn.title = String(e.message || e); }
   }
-  setTimeout(() => { const b = document.getElementById(`pulse-btn-${name}`);
+  setTimeout(() => { const b = document.getElementById(`pulse-btn:${name}`);
                      if (b) b.textContent = 'pulse'; }, 1500);
 };
 
@@ -2699,10 +2699,10 @@ function _descriptionRow(name, m, ic) {
 // The two identify buttons, shared by both editors' picker rows
 function _identifyButtons(name) {
   const cls = 'shrink-0 text-xs px-2 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-cyan-400 hover:text-white transition-all';
-  return `<button id="wiggle-btn-${name}" onclick="learnChannel('${name}')"
+  return `<button id="wiggle-btn:${name}" onclick="learnChannel('${name}')"
       title="Learn from the device: arm, then wiggle a fader (or click any control) in TotalMix — the moved channel fills this picker"
       class="${cls}">wiggle</button>
-    <button id="pulse-btn-${name}" onclick="pulseRouting('${name}')"
+    <button id="pulse-btn:${name}" onclick="pulseRouting('${name}')"
       title="Blip the selected send briefly so you can hear/see which physical channel it is (level is restored exactly)"
       class="${cls}">pulse</button>`;
 }
@@ -2779,13 +2779,13 @@ function _timingControls(name, i, op) {
   return `<div class="flex gap-2 items-center">
     <input data-field="steps.${i}.operation.bars" type="number" min="1" value="${_esc(op.bars??2)}" class="${nc}">
     <span class="text-zinc-500 text-xs shrink-0">bars @</span>
-    <input data-field="steps.${i}.operation.bpm" id="bpm-input-${name}-${i}"
+    <input data-field="steps.${i}.operation.bpm" id="bpm-input:${name}-${i}"
         type="${op.bpm==='clock'?'text':'number'}" min="20" max="400"
         value="${op.bpm==='clock'?'clock':_esc(op.bpm??140)}"
         class="${nc}" ${op.bpm==='clock'?'disabled':''}>
     <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none shrink-0"
         title="Sync to live MIDI clock tempo">
-      <input type="checkbox" id="bpm-clock-cb-${name}-${i}" class="w-3 h-3 accent-orange-500"
+      <input type="checkbox" id="bpm-clock-cb:${name}-${i}" class="w-3 h-3 accent-orange-500"
           ${op.bpm==='clock'?'checked':''}
           onchange="toggleBPMClock('${name}',${i})">
       clock
@@ -2828,7 +2828,7 @@ function _triggerRow(name, t, i) {
           class="w-3 h-3 accent-orange-500"${t.use_value_as_param ? ' checked' : ''}>
       use value
     </label>
-    <button id="learn-btn-${name}-${i}" onclick="learnTrigger('${name}',${i})"
+    <button id="learn-btn:${name}-${i}" onclick="learnTrigger('${name}',${i})"
         title="Capture the next CC or note from any device (or the MIDI emulator)"
         class="shrink-0 text-xs px-2 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-cyan-400 hover:text-white transition-all">learn</button>
     <button onclick="removeEditorTrigger('${name}',${i})" title="Remove trigger"
@@ -2839,7 +2839,7 @@ function _triggerRow(name, t, i) {
 // Save / Cancel / Delete footer — shared by both editors
 function _editorFooter(name) {
   return `<div class="flex gap-2 pt-2 border-t border-zinc-800">
-    <button id="edit-save-${name}" onclick="saveInlineEdit('${name}')"
+    <button id="edit-save:${name}" onclick="saveInlineEdit('${name}')"
         class="flex-1 bg-orange-500 hover:bg-orange-400 active:scale-95 text-black font-bold py-2 rounded-xl text-sm transition-all">
       Save
     </button>
@@ -2858,8 +2858,8 @@ function editDetail(name) {
   // #31: the editor lives in the drawer. A refused switch (another macro's
   // unsaved edits kept open) must abort, not render into the card's own node.
   if (window._drawerOpenFor !== name && macros[name] && !_openDetailFor(name)) return;
-  const panel = document.getElementById(`detail-${name}`);
-  const arrow = document.getElementById(`detail-arrow-${name}`);
+  const panel = document.getElementById(`detail:${name}`);
+  const arrow = document.getElementById(`detail-arrow:${name}`);
   if (!panel || !macros[name]) return;
   if (!window._editBuffers[name]) {
     window._editBuffers[name] = JSON.parse(JSON.stringify(macros[name]));
@@ -2966,18 +2966,18 @@ function _renderAdvancedEditor(name, m, panel) {
     <div class="flex gap-2 items-center flex-wrap">
       <div class="flex-1 min-w-[120px]">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Input channel</div>
-        <select id="routing-send-${name}" class="${sc} w-full"></select>
+        <select id="routing-send:${name}" class="${sc} w-full"></select>
       </div>
       <span class="text-zinc-500 text-xs shrink-0">→</span>
       <div class="flex-1 min-w-[160px]">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Output submix</div>
-        <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}')" class="${sc} w-full">
+        <select id="routing-submix:${name}" onchange="updateSendPickerOptions('${name}')" class="${sc} w-full">
           ${_buildSubmixPickerOptions(routing.submix)}
         </select>
       </div>
       <div class="shrink-0">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Parameter</div>
-        <select id="routing-param-${name}" onchange="updateParamScope('${name}')" class="${sc}">
+        <select id="routing-param:${name}" onchange="updateParamScope('${name}')" class="${sc}">
           ${_buildParamOptions(routing.param)}
         </select>
       </div>
@@ -3017,7 +3017,7 @@ function _renderAdvancedEditor(name, m, panel) {
       </div>
       <div class="flex-1">
         <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Snapshot</div>
-        <select id="snapshot-select-${name}" data-field="snapshot" class="${ic}">
+        <select id="snapshot-select:${name}" data-field="snapshot" class="${ic}">
           ${_buildSnapshotOptions(m.workspace, m.snapshot)}
         </select>
       </div>
@@ -3088,18 +3088,18 @@ function _renderSimpleEditor(name, m, panel) {
   const whatHtml = hasChannelMap ? `<div class="flex gap-2 items-center flex-wrap">
       <div class="flex-1 min-w-[120px]">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Input channel</div>
-        <select id="routing-send-${name}" onchange="applyRouting('${name}')" class="${sc} w-full"></select>
+        <select id="routing-send:${name}" onchange="applyRouting('${name}')" class="${sc} w-full"></select>
       </div>
       <span class="text-zinc-500 text-xs shrink-0">→</span>
       <div class="flex-1 min-w-[160px]">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Output submix</div>
-        <select id="routing-submix-${name}" onchange="updateSendPickerOptions('${name}');applyRouting('${name}')" class="${sc} w-full">
+        <select id="routing-submix:${name}" onchange="updateSendPickerOptions('${name}');applyRouting('${name}')" class="${sc} w-full">
           ${_buildSubmixPickerOptions(routing.submix)}
         </select>
       </div>
       <div class="shrink-0">
         <div class="text-[10px] text-zinc-600 mb-1 uppercase tracking-widest">Parameter</div>
-        <select id="routing-param-${name}" onchange="updateParamScope('${name}');applyRouting('${name}')" class="${sc}">
+        <select id="routing-param:${name}" onchange="updateParamScope('${name}');applyRouting('${name}')" class="${sc}">
           ${_buildParamOptions(routing.param)}
         </select>
       </div>
@@ -3152,7 +3152,7 @@ function _renderSimpleEditor(name, m, panel) {
       </div>
       <div class="flex-1">
         <div class="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Snapshot</div>
-        <select id="snapshot-select-${name}" data-field="snapshot" class="${ic}">
+        <select id="snapshot-select:${name}" data-field="snapshot" class="${ic}">
           ${_buildSnapshotOptions(m.workspace, m.snapshot)}
         </select>
       </div>
@@ -3190,7 +3190,7 @@ function _renderSimpleEditor(name, m, panel) {
 // Returns the buffer. Skip elements with no editor open (routing picker
 // selects carry no data-field, so they never pollute the macro).
 function _harvestEditor(name) {
-  const panel = document.getElementById(`detail-${name}`);
+  const panel = document.getElementById(`detail:${name}`);
   const m = window._editBuffers[name];
   if (!panel || !m) return m;
 
@@ -3233,7 +3233,7 @@ function _harvestEditor(name) {
 }
 
 async function saveInlineEdit(name) {
-  const btn = document.getElementById(`edit-save-${name}`);
+  const btn = document.getElementById(`edit-save:${name}`);
   const m = _harvestEditor(name);
   if (!m) return;
 
@@ -3257,8 +3257,8 @@ function cancelInlineEdit(name) {
   delete window._editBuffers[name];
   delete window._descStale[name];   // stale hint is per-edit-session
   _disarmMidiLearn();
-  const panel = document.getElementById(`detail-${name}`);
-  const arrow = document.getElementById(`detail-arrow-${name}`);
+  const panel = document.getElementById(`detail:${name}`);
+  const arrow = document.getElementById(`detail-arrow:${name}`);
   if (!panel) return;
   if (window._drawerOpenFor === name && macros[name]) {
     panel.innerHTML = _detailHTML(name, macros[name]);   // #31: back to read-only, drawer stays
@@ -3392,7 +3392,7 @@ async function createNewMacro() {
     renderCards();
     // Scroll to the new card and open it straight in edit mode
     requestAnimationFrame(() => {
-      const card = document.getElementById(`card-${name}`);
+      const card = document.getElementById(`card:${name}`);
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
       // New patches open simple (#9); duplicates of advanced macros open advanced
       window._editorModes[name] = simpleModeShape(body) ? 'simple' : 'advanced';
@@ -3413,8 +3413,8 @@ document.addEventListener('keydown', (e) => {
 
 // ── BPM clock toggle in step editor ──────────────────────────────────────────
 window.toggleBPMClock = function(macroName, stepIndex) {
-  const cb  = document.getElementById(`bpm-clock-cb-${macroName}-${stepIndex}`);
-  const inp = document.getElementById(`bpm-input-${macroName}-${stepIndex}`);
+  const cb  = document.getElementById(`bpm-clock-cb:${macroName}-${stepIndex}`);
+  const inp = document.getElementById(`bpm-input:${macroName}-${stepIndex}`);
   if (!cb || !inp) return;
   if (cb.checked) {
     inp.dataset.prevBpm = inp.value;   // stash the last numeric BPM
@@ -4002,12 +4002,12 @@ window._mmCreate = async function () {
 window._drawerOpenFor = null;
 
 function _detailSlot(name) {
-  const id = CSS.escape(`detail-${name}`);
-  return document.querySelector(`#macro-grid #${id}, #knob-row #${id}`);
+  const id = CSS.escape(`detail:${name}`);
+  return document.querySelector(`#macro-grid #${CSS.escape(id)}, #knob-row #${CSS.escape(id)}`);
 }
 
 function _syncDetailArrow(name, open) {
-  const a = document.getElementById(`detail-arrow-${name}`);
+  const a = document.getElementById(`detail-arrow:${name}`);
   if (a) a.style.transform = open ? 'rotate(180deg)' : '';
 }
 
@@ -4020,8 +4020,8 @@ function _openDetailFor(name) {
     closeDetailDrawer();
     if (window._drawerOpenFor) return null;          // kept unsaved edits open
   }
-  const panel = document.querySelector(`#drawer-body #${CSS.escape(`detail-${name}`)}`)
-    || _detailSlot(name) || document.getElementById(`detail-${name}`);
+  const panel = document.querySelector(`#drawer-body #${CSS.escape(`detail:${name}`)}`)
+    || _detailSlot(name) || document.getElementById(`detail:${name}`);
   if (!panel) return null;
   if (panel.parentElement !== body) body.appendChild(panel);
   panel.classList.remove('hidden');
@@ -4035,7 +4035,7 @@ function _openDetailFor(name) {
   requestAnimationFrame(() => drawer.classList.add('open'));
   window._drawerOpenFor = name;
   _syncDetailArrow(name, true);
-  document.getElementById(`card-${name}`)?.classList.add('drawer-target');
+  document.getElementById(`card:${name}`)?.classList.add('drawer-target');
   return panel;
 }
 
@@ -4072,17 +4072,17 @@ function closeDetailDrawer(force) {
   }
   _disarmMidiLearn();
   const drawer = document.getElementById('detail-drawer');
-  const panel = document.querySelector(`#drawer-body #${CSS.escape(`detail-${name}`)}`);
+  const panel = document.querySelector(`#drawer-body #${CSS.escape(`detail:${name}`)}`);
   window._drawerOpenFor = null;
   _syncDetailArrow(name, false);
-  document.getElementById(`card-${name}`)?.classList.remove('drawer-target');
+  document.getElementById(`card:${name}`)?.classList.remove('drawer-target');
   if (panel) {
     panel.classList.add('hidden');
     panel.innerHTML = '';
     const slot = _detailSlot(name);
     if (slot && slot !== panel) slot.replaceWith(panel);
     else if (!slot) {
-      const card = document.getElementById(`card-${name}`);
+      const card = document.getElementById(`card:${name}`);
       if (card) card.appendChild(panel); else panel.remove();
     }
   }
@@ -4102,8 +4102,8 @@ function _syncDetailDrawer() {
   if (!name) return;
   if (!macros[name]) { closeDetailDrawer(true); return; }
   _syncDetailArrow(name, true);
-  document.getElementById(`card-${name}`)?.classList.add('drawer-target');
-  const panel = document.querySelector(`#drawer-body #${CSS.escape(`detail-${name}`)}`);
+  document.getElementById(`card:${name}`)?.classList.add('drawer-target');
+  const panel = document.querySelector(`#drawer-body #${CSS.escape(`detail:${name}`)}`);
   if (panel && !window._editBuffers[name]) panel.innerHTML = _detailHTML(name, macros[name]);
 }
 {

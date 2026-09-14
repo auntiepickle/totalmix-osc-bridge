@@ -27,20 +27,20 @@
     // quote ends the attribute and the rest lands in the markup
     const label = String(opts.label || name)
       .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    return `<svg id="mknob-${name}${suffix}" class="${cls}" width="${size}" height="${size}" viewBox="0 0 36 36"
+    return `<svg id="mknob:${name}${suffix}" class="${cls}" width="${size}" height="${size}" viewBox="0 0 36 36"
         tabindex="0" role="slider" aria-label="${label}">
       <path class="mk-track" d="${arcPath(A0, A1)}"/>
-      <path id="mknob-arc-${name}${suffix}" class="mk-arc" d=""/>
+      <path id="mknob-arc:${name}${suffix}" class="mk-arc" d=""/>
       <circle class="mk-cap" cx="${CX}" cy="${CY}" r="10.5"/>
-      <line id="mknob-ptr-${name}${suffix}" class="mk-ptr" x1="${CX}" y1="${CY - 4}" x2="${CX}" y2="${CY - 9.5}"/>
+      <line id="mknob-ptr:${name}${suffix}" class="mk-ptr" x1="${CX}" y1="${CY - 4}" x2="${CX}" y2="${CY - 9.5}"/>
     </svg>`;
   }
 
   function set(name, value, suffix) {
     const sfx = suffix ? `-${suffix}` : '';
     const v = Math.max(0, Math.min(1, +value || 0));
-    const arc = document.getElementById(`mknob-arc-${name}${sfx}`);
-    const ptr = document.getElementById(`mknob-ptr-${name}${sfx}`);
+    const arc = document.getElementById(`mknob-arc:${name}${sfx}`);
+    const ptr = document.getElementById(`mknob-ptr:${name}${sfx}`);
     if (!arc || !ptr) return;
     const deg = A0 + v * (A1 - A0);
     arc.setAttribute('d', v <= 0.004 ? '' : arcPath(A0, deg));
@@ -50,7 +50,7 @@
   // opts: { get: () -> 0..1, send: (v) -> void, reset: () -> 0..1 | null }
   function wire(name, opts, suffix) {
     const sfx = suffix ? `-${suffix}` : '';
-    const el = document.getElementById(`mknob-${name}${sfx}`);
+    const el = document.getElementById(`mknob:${name}${sfx}`);
     if (!el || el._mkWired) return;
     el._mkWired = true;
     let dragging = false, y0 = 0, v0 = 0, moved = false, t0 = 0, lastTap = 0;

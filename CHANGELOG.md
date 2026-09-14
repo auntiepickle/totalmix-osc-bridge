@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Per-macro DOM ids can no longer collide (#43)**: the web UI now joins
+  an element's prefix and the macro key with `:` (`card:locut`,
+  `knob-en:locut`) instead of `-`. Keys may contain `-`, so a macro named
+  `nav` used to hijack the header's `snapshot-select-nav` dropdown and a
+  knob named `en-x` had its slider replaced by another knob's enable
+  chip. `querySelector` sites escape the id; `getElementById` sites are
+  unchanged.
 - **Per-client WebSocket send queues (#32)**: a broadcast now only
   enqueues a frame per connection; one sender task per client drains its
   queue in order, and a client that has fallen 64 frames behind loses its
