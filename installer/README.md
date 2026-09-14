@@ -11,9 +11,12 @@ published on every `v*` tag as `tmosc-setup-<version>.exe`.
 - **Client page** writes `%APPDATA%\tmosc-agent\config.txt`: bridge host
   (auto-discovered on the LAN, or `127.0.0.1` when the server is installed
   too), port, MIDI input (listed by `tmosc-agent --list`), optional HTTPS URL.
-- Existing values are read back into the wizard on upgrade. Per-user install
-  by default; an elevated install also adds a Windows Firewall rule for the
-  bridge. Uninstall keeps the `%APPDATA%` state.
+- Existing values are read back into the wizard on upgrade, and keys the
+  wizard does not manage (`API_TOKEN`, `LOG_LEVEL`, ... in `config.env`;
+  `token=` in `config.txt`) are carried over under a "kept from the previous
+  install" comment. Per-user install by default; an elevated install also
+  adds a Windows Firewall rule for the bridge. Uninstall keeps the
+  `%APPDATA%` state.
 
 Inputs are staged by CI (`.github/workflows/release.yml`): the signed agent
 exes in `agent/windows/` and the signed PyInstaller folder in

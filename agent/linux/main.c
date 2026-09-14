@@ -4,15 +4,17 @@
  * hands off to the shared runner (agent/runner.c). All matching/dispatch is
  * platform-agnostic there.
  *
- * Config (env or argv):  TMOSC_BRIDGE_HOST TMOSC_BRIDGE_PORT TMOSC_MIDI
+ * Config (env or argv):  TMOSC_BRIDGE_HOST TMOSC_BRIDGE_PORT TMOSC_MIDI TMOSC_TOKEN
  *   argv:  tmosc-agent [host] [port] [midi]  |  --list  |  --dry-run [host] [port]
  * TMOSC_MIDI: ALSA id ("hw:1,0"), a case-insensitive name substring, or unset
  * for the first input.  TMOSC_VERBOSE=1 logs each dispatched action.
+ * TMOSC_TOKEN: the bridge's API_TOKEN when its opt-in auth gate is on.
  */
 #define _POSIX_C_SOURCE 200809L
 #include "tmosc_midi.h"
 #include "runner.h"
 #include "midi_alsa.h"
+#include "net.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +61,8 @@ int main(int argc, char **argv)
     char resolved[64];
     alsa_ctx ctx;
     tm_midi_src src;
+
+    tm_net_set_token(getenv("TMOSC_TOKEN"));   /* bridge API_TOKEN, if the gate is on */
 
     if (argc > 1 && strcmp(argv[1], "--list") == 0) {
         tm_midi_port pl[32];

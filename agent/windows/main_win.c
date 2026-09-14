@@ -55,6 +55,8 @@ int main(int argc, char **argv)
     tm_midi_win *m;
     tm_midi_src src;
 
+    tm_net_set_token(getenv("TMOSC_TOKEN"));   /* bridge API_TOKEN, if the gate is on */
+
     if (argc > 1 && strcmp(argv[1], "--list") == 0) {
         tm_midi_port pl[64];
         int c = tm_midi_win_list(pl, 64), i;

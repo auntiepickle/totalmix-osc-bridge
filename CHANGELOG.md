@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Agent sends the bridge's API token (#35)**: `token=` in the tray's
+  `config.txt` (or `TMOSC_TOKEN` in the environment for the tray, console
+  and Linux daemon) puts `X-Api-Token` on every request, so an
+  `API_TOKEN` lockdown no longer disconnects the agent. A 401/403 now
+  logs whether the token is missing or wrong (once, never the value).
+  The installer carries a hand-added `token=` across upgrades, like the
+  server's `config.env`.
 - **Frozen bridge WebSocket stack (#44)**: the exe now runs uvicorn with
   `ws="websockets-sansio"` (the implementation on the current websockets
   API) instead of `ws="websockets"`, which imports the deprecated

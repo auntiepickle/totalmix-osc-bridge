@@ -127,20 +127,21 @@ begin
   Result := '"' + S + '"';
 end;
 
-// Keys the wizard owns; every other key in an existing config.env is carried
-// over on upgrade (API_TOKEN, LOG_LEVEL, ENABLE_OSC_MONITOR, ... are documented
-// as hand-edited in that file - rewriting it from the wizard alone dropped
-// them, and a dropped API_TOKEN silently turns the auth gate off).
-function IsManagedKey(const K: String): Boolean;
+// Keys the wizard owns, per file; every other key in an existing config is
+// carried over on upgrade. config.env: API_TOKEN, LOG_LEVEL, ENABLE_OSC_MONITOR,
+// ... are documented as hand-edited - rewriting the file from the wizard alone
+// dropped them, and a dropped API_TOKEN silently turns the auth gate off.
+// config.txt: the same for the agent's token= (no wizard field, on purpose).
+const
+  ServerManagedKeys = ';OSC_IP;OSC_PORT;OSC_LISTEN_PORT;WEB_PORT;OSC_TRANSPORT;GLOBAL_OSC_IP;GLOBAL_OSC_PORT;GLOBAL_OSC_LISTEN_PORT;ENABLE_MQTT;MQTT_BROKER;MQTT_PORT;MQTT_USER;MQTT_PASS;';
+  ClientManagedKeys = ';host;port;midi;https_url;';
+
+function IsManagedKey(const K, Managed: String): Boolean;
 begin
-  Result := (K = 'OSC_IP') or (K = 'OSC_PORT') or (K = 'OSC_LISTEN_PORT') or
-            (K = 'WEB_PORT') or (K = 'OSC_TRANSPORT') or (K = 'GLOBAL_OSC_IP') or
-            (K = 'GLOBAL_OSC_PORT') or (K = 'GLOBAL_OSC_LISTEN_PORT') or
-            (K = 'ENABLE_MQTT') or (K = 'MQTT_BROKER') or (K = 'MQTT_PORT') or
-            (K = 'MQTT_USER') or (K = 'MQTT_PASS');
+  Result := Pos(';' + K + ';', Managed) > 0;
 end;
 
-procedure AppendUnmanagedKeys(const FileName: String; var Lines: TArrayOfString);
+procedure AppendUnmanagedKeys(const FileName, Managed: String; var Lines: TArrayOfString);
 var
   Old: TArrayOfString;
   i, p, n: Integer;
@@ -155,11 +156,23 @@ begin
     p := Pos('=', s);
     if p = 0 then continue;
     k := Trim(Copy(s, 1, p - 1));
-    if IsManagedKey(k) then continue;
+    if IsManagedKey(k, Managed) then continue;
     if n = 0 then AddLine(Lines, '# kept from the previous install');
     AddLine(Lines, s);
     n := n + 1;
   end;
+end;
+
+// config.txt is read by the C agent with a plain byte parser: no BOM, CRLF
+// lines - so it is joined and written as one ANSI string, not via the UTF-8
+// writer the server file uses.
+function JoinLines(const Lines: TArrayOfString): String;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 0 to GetArrayLength(Lines) - 1 do
+    Result := Result + Lines[i] + #13#10;
 end;
 
 function IsPort(const S: String): Boolean;
@@ -401,7 +414,7 @@ begin
   end
   else
     AddLine(Lines, 'ENABLE_MQTT=False');
-  AppendUnmanagedKeys(Cfg, Lines);
+  AppendUnmanagedKeys(Cfg, ServerManagedKeys, Lines);
   // UTF-8 (with BOM, which the bridge's utf-8-sig loader expects): the ANSI
   // SaveStringToFile turned a non-ASCII password into bytes the loader
   // could not decode
@@ -411,17 +424,21 @@ end;
 procedure WriteClientConfig;
 var
   Dir, Cfg, Host: String;
+  Lines: TArrayOfString;
 begin
   Dir := ExpandConstant('{userappdata}\tmosc-agent');
   ForceDirectories(Dir);
+  Cfg := Dir + '\config.txt';
   Host := Trim(EHost.Text);
   if Host = '' then Host := 'auto';
-  Cfg := 'host=' + Host + #13#10 +
-         'port=' + Trim(EPort.Text) + #13#10 +
-         'midi=' + MidiValue + #13#10;
+  SetArrayLength(Lines, 0);
+  AddLine(Lines, 'host=' + Host);
+  AddLine(Lines, 'port=' + Trim(EPort.Text));
+  AddLine(Lines, 'midi=' + MidiValue);
   if Trim(EHttps.Text) <> '' then
-    Cfg := Cfg + 'https_url=' + Trim(EHttps.Text) + #13#10;
-  SaveStringToFile(Dir + '\config.txt', Cfg, False);
+    AddLine(Lines, 'https_url=' + Trim(EHttps.Text));
+  AppendUnmanagedKeys(Cfg, ClientManagedKeys, Lines);   // token= survives an upgrade
+  SaveStringToFile(Cfg, JoinLines(Lines), False);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

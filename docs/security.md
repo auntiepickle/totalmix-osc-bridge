@@ -58,10 +58,18 @@ curl -H "X-Api-Token: choose-a-long-random-string" \
 
 ### Tray agent
 
-The native tray agent cannot send the token yet: its heartbeat, knob, trigger and
-MIDI-relay requests are all state-changing POSTs, so with `API_TOKEN` set the tray
-gets 401s and shows as disconnected. Until that lands (tracked on GitHub), run the
-agent only against a bridge without a token, or keep Option A.
+The native agent's heartbeat, knob, trigger and MIDI-relay requests are all
+state-changing POSTs, so with `API_TOKEN` set it needs the token too. Give it
+the same value:
+
+- tray: add `token=choose-a-long-random-string` to
+  `%APPDATA%\tmosc-agent\config.txt` (the installer keeps that line across
+  upgrades; there is no wizard field for it on purpose);
+- console / Linux daemon: `TMOSC_TOKEN=choose-a-long-random-string` in the
+  environment (the tray honours it as well; `config.txt` wins).
+
+It goes out as `X-Api-Token` on every request. Without it the agent logs
+`bridge answered 401 ... requires an API token` once and shows as disconnected.
 
 ## What this does and doesn't cover
 

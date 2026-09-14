@@ -154,7 +154,16 @@ midi=U6MIDI
 # Defaults to the Caddy/nip.io URL for an IPv4 host (https://<ip>.nip.io);
 # set explicitly if your HTTPS front differs (e.g. a custom port/path).
 #https_url=https://192.168.1.41.nip.io:9445/static/index.html
+# only if the bridge runs with API_TOKEN set (docs/security.md, Option B):
+# the same value, sent as X-Api-Token on every request. Max 127 characters.
+#token=choose-a-long-random-string
 ```
+
+The console daemon and the Linux daemon take the same settings from the
+environment (`TMOSC_BRIDGE_HOST`, `TMOSC_BRIDGE_PORT`, `TMOSC_MIDI`,
+`TMOSC_TOKEN`); the tray reads the environment too, and `config.txt` wins.
+The token value is never logged - the log says `API token: set` or `unset`,
+and a 401 from the bridge names the fix (`token=` missing or wrong).
 
 The tray menu offers **Open Web UI** (plain HTTP) and **Open Web UI - HTTPS**.
 Use HTTPS when you want the browser itself to do Web MIDI (it needs a secure

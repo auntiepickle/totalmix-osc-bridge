@@ -109,7 +109,9 @@ static void note_status(const char *what, int status)
     last = status;
     fprintf(stderr, "[agent] bridge answered %d to %s%s\n", status, what,
             (status == 401 || status == 403)
-                ? " - it requires an API token, which this agent cannot send yet"
+                ? (tm_net_has_token()
+                    ? " - the API token is wrong (config.txt token= / TMOSC_TOKEN must match the bridge's API_TOKEN)"
+                    : " - the bridge requires an API token: set token= in config.txt (or TMOSC_TOKEN)")
                 : "");
 }
 
@@ -238,6 +240,8 @@ int tm_runner(const char *host, int port, const tm_midi_src *src, void *ctx, int
     g_verbose = verbose;
     g_stop = 0;
     init_agent_id();
+    fprintf(stderr, "[agent] bridge http://%s:%d, API token: %s\n", host, port,
+            tm_net_has_token() ? "set" : "unset");   /* never the value */
     tm_clock_init(&clock);
     tm_match_state_init(&g_mstate);
     memset(g_dirty, 0, sizeof(g_dirty));

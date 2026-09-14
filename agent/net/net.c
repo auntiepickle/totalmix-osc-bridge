@@ -158,12 +158,24 @@ static int read_byte(sock_t fd, char *c)
     }
 }
 
+static char g_token[TM_NET_TOKEN_MAX];
+
+void tm_net_set_token(const char *token)
+{
+    if (!token) { g_token[0] = '\0'; return; }
+    strncpy(g_token, token, sizeof(g_token) - 1);
+    g_token[sizeof(g_token) - 1] = '\0';
+}
+
+int tm_net_has_token(void) { return g_token[0] != '\0'; }
+
 int tm_net_request(tm_net *n, const char *method, const char *path,
                    const char *body, char *resp, int resp_cap,
                    int *resp_len, int *status)
 {
     sock_t fd;
-    char req[1024];
+    char req[1024 + TM_NET_TOKEN_MAX];
+    char auth[TM_NET_TOKEN_MAX + 24];
     int blen = body ? (int)strlen(body) : 0;
     int rn, content_length = -1, i;
     char line[512];
@@ -171,10 +183,14 @@ int tm_net_request(tm_net *n, const char *method, const char *path,
     if (n->fd == (intptr_t)SOCK_BAD) return -1;
     fd = as_sock(n->fd);
 
+    /* the bridge's opt-in token gate reads this header on every write */
+    auth[0] = '\0';
+    if (g_token[0]) snprintf(auth, sizeof(auth), "X-Api-Token: %s\r\n", g_token);
+
     rn = snprintf(req, sizeof(req),
         "%s %s HTTP/1.1\r\nHost: %s:%d\r\nConnection: keep-alive\r\n"
-        "%sContent-Length: %d\r\n\r\n",
-        method, path, n->host, n->port,
+        "%s%sContent-Length: %d\r\n\r\n",
+        method, path, n->host, n->port, auth,
         body ? "Content-Type: application/json\r\n" : "", blen);
     if (rn < 0 || rn >= (int)sizeof(req)) return -1;
     if (write_all(fd, req, rn) != 0) return -1;

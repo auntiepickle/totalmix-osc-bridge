@@ -12,6 +12,15 @@ typedef struct {
     int port;
 } tm_net;
 
+/* Optional shared API token (the bridge's API_TOKEN, docs/security.md): once
+ * set, every request carries "X-Api-Token: <token>". Process-wide, because
+ * the runner opens several short-lived connections (dry-run, announce, the
+ * shutdown release) that must all authenticate the same way. NULL or ""
+ * clears it. Longer values are truncated to TM_NET_TOKEN_MAX-1 chars. */
+#define TM_NET_TOKEN_MAX 128
+void tm_net_set_token(const char *token);
+int  tm_net_has_token(void);
+
 /* Connect (or reconnect). Returns 0 ok, -1 on failure. */
 int tm_net_connect(tm_net *n, const char *host, int port);
 void tm_net_close(tm_net *n);

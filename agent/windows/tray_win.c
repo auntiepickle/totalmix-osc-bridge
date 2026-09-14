@@ -70,6 +70,7 @@ static int    g_port = 8088;
 static char   g_midi[80] = "";
 static char   g_url[192];
 static char   g_https_url[192];     /* secure client (Web MIDI): Caddy/nip.io or explicit https_url */
+static char   g_token[TM_NET_TOKEN_MAX];   /* bridge API_TOKEN (config.txt token= / TMOSC_TOKEN); never logged */
 static volatile int g_quit = 0;     /* tray shutting down: stop the worker retry loop */
 static HICON  g_ico_ok, g_ico_err;  /* preloaded small icons for the two states */
 
@@ -101,11 +102,13 @@ static void load_config(void)
     const char *p = getenv("TMOSC_BRIDGE_PORT");
     const char *m = getenv("TMOSC_MIDI");
     const char *s = getenv("TMOSC_HTTPS_URL");
+    const char *t = getenv("TMOSC_TOKEN");
     const char *ad;
     if (h) set_str(g_host, sizeof(g_host), h);
     if (p) g_port = atoi(p);
     if (m) set_str(g_midi, sizeof(g_midi), m);
     if (s) set_str(g_https_url, sizeof(g_https_url), s);
+    if (t) set_str(g_token, sizeof(g_token), t);
 
     ad = getenv("APPDATA");
     if (ad) {
@@ -126,10 +129,12 @@ static void load_config(void)
                 else if (!strcmp(k, "port")) g_port = atoi(v);
                 else if (!strcmp(k, "midi")) set_str(g_midi, sizeof(g_midi), v);
                 else if (!strcmp(k, "https_url")) set_str(g_https_url, sizeof(g_https_url), v);
+                else if (!strcmp(k, "token")) set_str(g_token, sizeof(g_token), v);
             }
             fclose(f);
         }
     }
+    tm_net_set_token(g_token);   /* "" = none; the bridge's gate is opt-in */
     /* host=auto (or blank) -> discover the bridge on the LAN at runtime */
     if (strcmp(g_host, "auto") == 0) g_host[0] = '\0';
     snprintf(g_url, sizeof(g_url), "http://%s:%d", g_host, g_port);
