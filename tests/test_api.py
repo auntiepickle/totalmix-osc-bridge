@@ -1,7 +1,7 @@
 """API tests via FastAPI's TestClient.
 
-TestClient is used without a context manager on purpose: startup events
-(bridge.start_mqtt) never run, so no broker or network is needed.
+TestClient is used without a context manager on purpose: the app lifespan
+(bridge.start_mqtt, listeners) never runs, so no broker or network is needed.
 Only read-only and validation-failure paths are exercised — success paths of
 the config-save endpoints write real files into the repo.
 """
