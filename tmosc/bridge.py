@@ -26,6 +26,7 @@ from tmosc.osc_monitor import osc_monitor
 from tmosc.operations import OperationRegistry, shape_value, unshape_value
 import tmosc.physical_table as pt
 import tmosc.global_units as gu
+from tmosc.core.broadcast import BroadcastMixin
 ROW_KEYS_BY_WORD = {"input": "inputs", "playback": "playbacks", "output": "outputs"}
 
 # === CENTRAL LOGGING ===
@@ -174,7 +175,16 @@ def ws_enqueue_all(payload):
     for q in list(_ws_queues.values()):
         _ws_enqueue(q, payload)
 
-class TotalMixOSCBridge:
+class TotalMixOSCBridge(BroadcastMixin):
+    """Facade: one object, one namespace. The mixins in tmosc/core/ hold the
+    behaviour by responsibility; this class owns __init__ (ALL instance
+    state), process lifecycle (start_*/stop_*), and everything that reads
+    env config (tests monkeypatch those constants on THIS module)."""
+
+    # The broadcast mixin fans frames out through the WS registry that lives
+    # in this module (it is shared with tmosc/api/app.py).
+    _ws_enqueue_all = staticmethod(ws_enqueue_all)
+
     def __init__(self, osc_client, mappings, snapshot_map):
         self._suppress_count = 0    # >0 while any macro runs (see property)
         self._last_macro_end_time = 0.0
@@ -252,96 +262,6 @@ class TotalMixOSCBridge:
         so this is a counter now."""
         return self._suppress_count > 0
 
-    # ─────────────────────────────────────────────────────────────
-    # SAFE WEBSOCKET BROADCAST (FINAL VERSION — MQTT thread safe)
-    # ─────────────────────────────────────────────────────────────
-    def _safe_broadcast_state(self, macro_update=None, macro_event=None):
-        """Thread-safe broadcast that works from ANY thread (MQTT callbacks OR FastAPI)."""
-        try:
-            asyncio.get_running_loop()
-            asyncio.create_task(self._do_broadcast(macro_update, macro_event))
-        except RuntimeError:
-            try:
-                if hasattr(self, 'main_loop') and self.main_loop is not None:
-                    asyncio.run_coroutine_threadsafe(self._do_broadcast(macro_update, macro_event), self.main_loop)
-                else:
-                    logger.debug("Broadcast skipped (no main_loop yet)")
-            except Exception as e:
-                logger.debug(f"Broadcast failed safely: {e}")
-
-    async def _do_broadcast(self, macro_update=None, macro_event=None):
-        """Actual broadcast logic (always runs inside asyncio): build the
-        state frame once and enqueue it per client (#32)."""
-        ws_enqueue_all({
-            "current_snapshot": getattr(self, "current_snapshot", "unknown"),
-            "current_workspace": getattr(self, "current_workspace", "unknown"),
-            "state_confirmed": getattr(self, "state_confirmed", None),
-            "device_snapshot_slot": getattr(self, "device_snapshot_slot", None),
-            "snapshot_modified": getattr(self, "snapshot_modified", None),
-            "macro_update": macro_update,
-            "macro_event": macro_event,
-        })
-
-    # ─────────────────────────────────────────────────────────────
-    # MIDI OWNERSHIP (coexistence): a tray/agent announces it holds the
-    # physical MIDI port via a heartbeat. The browser yields Web MIDI
-    # while an agent owns it (WinMM inputs are exclusive) and reclaims
-    # when the agent leaves. Presence is advisory and TTL-expired.
-    # ─────────────────────────────────────────────────────────────
-    MIDI_OWNER_TTL_S = 6.0
-
-    def midi_owner_state(self):
-        """Current MIDI owner, or None if no heartbeat within the TTL."""
-        with self._midi_owner_lock:
-            o = self._midi_owner
-            if not o:
-                return None
-            age = time.time() - o["last_seen"]
-            if age > self.MIDI_OWNER_TTL_S:
-                return None
-            return {"id": o["id"], "host": o.get("host"), "age_s": round(age, 2)}
-
-    def midi_owner_heartbeat(self, owner_id, host=None):
-        """An agent announces it is handling MIDI. Refreshes presence; on a
-        NEW claim (none/expired -> owned, or a different owner) broadcasts a
-        midi_owner event so browsers yield promptly."""
-        now = time.time()
-        with self._midi_owner_lock:
-            prev = self._midi_owner
-            was_active = bool(prev) and (now - prev["last_seen"] <= self.MIDI_OWNER_TTL_S)
-            new_claim = (not was_active) or (prev is not None and prev["id"] != owner_id)
-            self._midi_owner = {"id": owner_id, "host": host, "last_seen": now}
-        if new_claim:
-            self.broadcast_midi_owner(self.midi_owner_state())
-        return self.midi_owner_state()
-
-    def midi_owner_release(self, owner_id):
-        """An agent cleanly releases the port (shutdown). Clears presence and
-        broadcasts so browsers reclaim MIDI immediately."""
-        with self._midi_owner_lock:
-            released = bool(self._midi_owner) and self._midi_owner["id"] == owner_id
-            if released:
-                self._midi_owner = None
-        if released:
-            self.broadcast_midi_owner(None)
-        return released
-
-    def broadcast_midi_owner(self, owner):
-        """Push a typed midi_owner event to all WS clients (thread-safe)."""
-        event = {"type": "midi_owner", "owner": owner}
-        try:
-            asyncio.get_running_loop()
-            asyncio.create_task(self._do_broadcast_event(event))
-        except RuntimeError:
-            if getattr(self, "main_loop", None) is not None:
-                try:
-                    asyncio.run_coroutine_threadsafe(self._do_broadcast_event(event), self.main_loop)
-                except Exception as e:
-                    logger.debug(f"midi_owner broadcast skipped: {e}")
-
-    async def _do_broadcast_event(self, event):
-        """Broadcast an arbitrary typed event dict (has a top-level 'type')."""
-        ws_enqueue_all(event)
 
    
     def _load_channel_map(self):
