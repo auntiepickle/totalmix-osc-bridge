@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Client-only installer retired (#27 phase 5)**: `agent/windows/installer.iss`
+  and the `agent-v*` release workflow are gone; `tmosc-setup-<version>.exe`
+  (Client / Server / Both) is the one installer. CI is three workflows with
+  one job each: `ci.yml` (pytest + Docker), `agent.yml` (C, gcc + MSVC),
+  `release.yml` (freeze + sign + installer, Release on `v*` tags).
 - **Tray agent robustness (#37)**: the tray icon survives an Explorer
   restart (hidden top-level window + `TaskbarCreated`); a bridge that
   cannot be found or drops shows its own "bridge not found" state instead
