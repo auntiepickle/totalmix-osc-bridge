@@ -4,7 +4,7 @@ name: release
 # the frozen bridge (server), or both. See installer/tmosc-setup.iss.
 #   tag  v1.2.3      -> build + sign + smoke, GitHub Release with tmosc-setup-1.2.3.exe (+ bridge zip)
 #   manual dispatch  -> same build, artifacts only (no Release)
-#   push to main     -> only when the freeze/installer inputs change (CI for the frozen build).
+#   push to main     -> only when the freeze/installer/agent inputs change (CI for the frozen build).
 #                       The freeze bundles the whole tmosc package + web/static + examples
 #                       against requirements-frozen.txt (no uvicorn[standard] extras), so a
 #                       new import that Docker gets transitively can fail only here.
@@ -21,6 +21,7 @@ on:
       - 'requirements-frozen.txt'
       - 'tools/smoke_frozen.ps1'
       - 'installer/**'
+      - 'agent/**'
       - '.github/workflows/release.yml'
   workflow_dispatch:
     inputs:
