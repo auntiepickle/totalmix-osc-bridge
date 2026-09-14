@@ -70,18 +70,26 @@ still accurate for those remaining paths.
 
 ### Frontend
 
-Load order: vendored uPlot, `modul/knob.js`, `modul/graph.js` (in `<head>`), then `api.js` -> `app.js` -> `ui.js` -> `midi.js`.
+Load order: vendored uPlot, `modul/knob.js`, `modul/graph.js` (in `<head>`), then `api.js` -> `app.js` -> `ui/*.js` (nine files, in the order index.html lists them) -> `midi.js`. All classic scripts in one global scope: a `ui/` file may call anything declared in an earlier one.
 
 | File | Owns |
 |---|---|
 | `api.js` | `window.API.*`: the fetch layer for `/api/...` |
 | `app.js` | Global state, WebSocket handler, knob stream, health polling, skins |
-| `ui.js` | Card / rack / MODUL rendering, macro editor, routing picker, MIDI matrix, knob curves |
+| `ui/cards.js` | Classic card HTML, collapse state, group LED, validity chips |
+| `ui/modul.js` | MODUL instrument layout, sidechain duck, send groups, drag-to-reorder, step waveforms |
+| `ui/rack.js` | Card grid render (workspace -> snapshot groups), equal heights, progress bar, fire |
+| `ui/editor.js` | Detail panel, inline editor state (`RUNTIME_FIELDS`), routing picker, parameter descriptors, fader law |
+| `ui/editor-controls.js` | Typed value entry, `PARAM_DEFS`, per-operation step controls |
+| `ui/editor-render.js` | Step/trigger management, channel identify, editor render + save, New Macro flow (`MACRO_NAME_RE`) |
+| `ui/settings.js` | Settings menu, server reload, upload, live config editor |
+| `ui/midi-matrix.js` | MIDI binding matrix overlay |
+| `ui/drawer.js` | Detail drawer (#31) |
 | `midi.js` | Web MIDI, learn, BPM clock, emulator, tray coexistence (yield and relay) |
 
 Server/client mirrors that must change together: `RUNTIME_FIELDS` and
-`MACRO_NAME_RE` (`tmosc/api/persistence.py` and `ui.js`), the fader law
-(`global_units.py` and `ui.js`), and the trigger matcher in the native agent
+`MACRO_NAME_RE` (`tmosc/api/persistence.py`, `ui/editor.js` and `ui/editor-render.js`), the fader law
+(`global_units.py` and `ui/editor.js`), and the trigger matcher in the native agent
 (a port of `midi.js`).
 
 ---

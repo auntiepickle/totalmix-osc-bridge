@@ -101,7 +101,7 @@ listener drops /level today).
   the `knobInput` coalescer; waveform plots for operation shapes.
 - `web/static/modul/knob.js` — `ModulKnob` rotary component (html/set/wire):
   270° arc, vertical drag + shift-fine, wheel, dblclick = device value.
-- `ui.js` — `_knobModuleHTML` + `_modulWire` + `_modulSync`, used by
+- `ui/modul.js` — `_knobModuleHTML` + `_modulWire` + `_modulSync`, used by
   `_renderKnobSection` when `data-skin="modul"`; `updateKnobCard` calls
   `_modulSync` so every knob_update feeds knob, curve, LED, plates.
 - `app.js` — `applySkin` re-renders cards when entering/leaving MODUL.

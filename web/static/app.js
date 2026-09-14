@@ -19,7 +19,7 @@
 })();
 /* app.js — global state, WebSocket, macro loading, status updates */
 
-// ── Global state (shared by ui.js and midi.js) ───────────────────────────────
+// ── Global state (shared by ui/*.js and midi.js) ───────────────────────────────
 let macros = {};
 let currentWorkspace = '—';
 let currentSnapshot = '—';

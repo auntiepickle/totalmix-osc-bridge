@@ -1,6 +1,6 @@
 /* api.js — centralized fetch layer
  * All HTTP calls go through window.API.*
- * Loaded before app.js and ui.js so both can use it immediately.
+ * Loaded before app.js and ui/*.js so all of them can use it immediately.
  *
  * Convention:
  *   - Every method returns the parsed JSON (or throws on non-2xx).

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **ui.js split by panel (#27 phase 4, frontend half)**: the 4,100-line
+  `web/static/ui.js` is now nine files under `web/static/ui/` (cards,
+  modul, rack, editor, editor-controls, editor-render, settings,
+  midi-matrix, drawer), cut at the existing section banners and
+  byte-identical in content; `index.html` loads them in the same order
+  between `app.js` and `midi.js`. No behaviour change. The design pass
+  (#22) can now touch one panel at a time.
+
 ## v0.5.0 — 2026-09-14 · Server package split (#27 phases 3-5), tray robustness, WS send queues
 
 - **api/app.py split into routers + app factory (#27 phase 4, server half)**:

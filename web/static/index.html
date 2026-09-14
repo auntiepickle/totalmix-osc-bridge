@@ -29,7 +29,7 @@
 
         <!-- Detail drawer (#31): a card's DETAILS / editor opens here: a right-side
              panel on desktop, a bottom sheet on phones. The card's own
-             #detail-<name> node is moved in while open (see ui.js). -->
+             #detail-<name> node is moved in while open (see ui/drawer.js). -->
         <aside id="detail-drawer" class="hidden" aria-hidden="true">
             <div class="drawer-scrim" onclick="closeDetailDrawer()"></div>
             <section class="drawer-panel" role="dialog" aria-labelledby="drawer-title" tabindex="-1">
@@ -446,7 +446,15 @@
 
     <script src="api.js"></script>
     <script src="app.js"></script>
-    <script src="ui.js"></script>
+    <script src="ui/cards.js"></script>
+    <script src="ui/modul.js"></script>
+    <script src="ui/rack.js"></script>
+    <script src="ui/editor.js"></script>
+    <script src="ui/editor-controls.js"></script>
+    <script src="ui/editor-render.js"></script>
+    <script src="ui/settings.js"></script>
+    <script src="ui/midi-matrix.js"></script>
+    <script src="ui/drawer.js"></script>
     <script src="midi.js"></script>
 </body>
 </html>

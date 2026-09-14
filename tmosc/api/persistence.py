@@ -41,7 +41,7 @@ MACRO_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 # run_macro merges these into live state; the browser's macros{} object carries
 # them, so editor saves used to round-trip them into mappings.json. Strip on
-# every save path — must mirror RUNTIME_FIELDS in web/static/ui.js.
+# every save path — must mirror RUNTIME_FIELDS in web/static/ui/editor.js.
 RUNTIME_FIELDS = (
     "name", "value", "progress", "lfo_active",
     "last_trigger", "osc_preview", "midi_trigger", "routing_label",
