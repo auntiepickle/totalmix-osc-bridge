@@ -52,9 +52,13 @@ def main(argv=None) -> int:
     print(f"tmosc-bridge {version()} | data: {data} | http://{host}:{WEB_PORT}", flush=True)
     # In-process app object (no import-string / reload / worker machinery -
     # none of that works frozen). Pure-Python HTTP + websockets stacks only.
+    # "websockets-sansio" is uvicorn's implementation on the current
+    # websockets API; plain "websockets" rides websockets.legacy, which is
+    # deprecated and would break the first release after its removal (#44).
     uvicorn.run(app, host=host, port=WEB_PORT,
                 log_level=os.getenv("LOG_LEVEL", "info").lower(),
-                reload=False, workers=1, loop="asyncio", http="h11", ws="websockets")
+                reload=False, workers=1, loop="asyncio", http="h11",
+                ws="websockets-sansio")
     return 0
 
 

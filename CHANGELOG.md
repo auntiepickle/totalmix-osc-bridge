@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Frozen bridge WebSocket stack (#44)**: the exe now runs uvicorn with
+  `ws="websockets-sansio"` (the implementation on the current websockets
+  API) instead of `ws="websockets"`, which imports the deprecated
+  `websockets.legacy` and would have broken the first release built after
+  its removal. Verified with a local freeze + `tools/smoke_frozen.ps1`.
+
 ## v0.4.0 — 2026-09-13 · Repo restructure (#27), unified installer, five audit passes
 
 - **LICENSE**: MIT (#33).
