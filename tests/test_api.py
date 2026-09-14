@@ -83,9 +83,9 @@ def test_device_state_503_without_listener():
 @pytest.fixture
 def macro_crud(monkeypatch):
     """Isolate macro CRUD tests: no disk writes, mappings restored after."""
-    import tmosc.api.app as wc
+    import tmosc.api.persistence as wp   # patched where the routers look it up
     persisted = []
-    monkeypatch.setattr(wc, "_persist_mappings", lambda: persisted.append(True))
+    monkeypatch.setattr(wp, "_persist_mappings", lambda: persisted.append(True))
     saved = {k: dict(v) for k, v in bridge_module.bridge.mappings.get("macros", {}).items()}
     yield persisted
     bridge_module.bridge.mappings["macros"] = saved
@@ -168,10 +168,10 @@ def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
     _strip_runtime only hit the incoming macro. _persist_mappings must
     sanitize the WHOLE in-memory mappings on every write."""
     import json as _json
-    import tmosc.api.app as wc
-    monkeypatch.setattr(wc, "backup_json_files", lambda *a, **k: None)
+    import tmosc.api.persistence as wp
+    monkeypatch.setattr(wp, "backup_json_files", lambda *a, **k: None)
     out = tmp_path / "mappings.json"
-    monkeypatch.setattr(wc, "_atomic_write_json",
+    monkeypatch.setattr(wp, "_atomic_write_json",
                         lambda path, data: out.write_text(_json.dumps(data, indent=2)))
     saved = bridge_module.bridge.mappings
     try:
@@ -180,7 +180,7 @@ def test_persist_sanitizes_preexisting_dirty_macros(monkeypatch, tmp_path):
                              "routing_label": "stale → label"},
             "clean_one": {"steps": []},
         }}
-        wc._persist_mappings()
+        wp._persist_mappings()
         # in-memory cleaned...
         assert bridge_module.bridge.mappings["macros"]["legacy_dirty"] == {"steps": []}
         # ...and the file on disk too
@@ -240,8 +240,8 @@ def test_map_strip_count_counts_input_row_only(monkeypatch):
 def test_reorder_macros_in_place(monkeypatch):
     """Drag-to-reorder: new order persists, dict identity survives (held
     references stay valid), and a partial/wrong list is rejected."""
-    import tmosc.api.app as wc
-    monkeypatch.setattr(wc, "_persist_mappings", lambda: None)
+    import tmosc.api.persistence as wp
+    monkeypatch.setattr(wp, "_persist_mappings", lambda: None)
     b = bridge_module.bridge
     macros = b.mappings.setdefault("macros", {})
     saved = dict(macros)
